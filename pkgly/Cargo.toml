@@ -1,0 +1,157 @@
+[package]
+name = "pkgly"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+build = "build.rs"
+
+[dev-dependencies]
+mockall = "0.14"
+pretty_assertions = "1.1"
+rsa = { version = "0.9" }
+criterion = "0.5"
+testcontainers = "0.14"
+[dependencies]
+# Web
+axum = { version = "0.8", features = ["macros", "tokio", "ws"] }
+axum-extra = { version = "0.10", features = [
+    "multipart",
+    "cookie",
+    "typed-header",
+] }
+tower = { version = "0.5", features = ["limit", "timeout"] }
+tower-http = { version = "0.6", features = ["full"] }
+tower-service = "0.3.2"
+hyper.workspace = true
+hyper-util.workspace = true
+http.workspace = true
+mime.workspace = true
+mime_guess.workspace = true
+http-body = "1"
+
+http-body-util.workspace = true
+utoipa = { workspace = true, features = ["axum_extras"] }
+utoipa-scalar = { version = "0.3", features = ["axum"], optional = true }
+async-trait = "0.1"
+# TLS
+tokio-rustls = "0.26"
+rustls = { version = "0.23" }
+rustls-pemfile = { version = "2" }
+# Partly Web
+handlebars = { version = "6", features = ["rust-embed"] }
+# Database
+sqlx.workspace = true
+# Serde
+serde.workspace = true
+serde_json.workspace = true
+serde-env = "0.2"
+serde_yaml = "0.9"
+serde_urlencoded = "0.7"
+
+toml.workspace = true
+# utils
+futures.workspace = true
+rand.workspace = true
+rust-embed = { version = "8", features = ["interpolate-folder-path"] }
+argon2 = { version = "0.5.3", features = ["std"] }
+chrono.workspace = true
+regex = "1"
+futures-util.workspace = true
+base64.workspace = true
+tokio.workspace = true
+tokio-util = { version = "0.7", features = ["io"] }
+multer = "3.1"
+uuid.workspace = true
+flume = "0.11"
+sha2.workspace = true
+sha2_0_11 = { package = "sha2", version = "0.11" }
+sha1.workspace = true
+sha3.workspace = true
+md-5.workspace = true
+schemars.workspace = true
+reqwest.workspace = true
+bytes.workspace = true
+ahash.workspace = true
+dashmap.workspace = true
+parking_lot.workspace = true
+once_cell.workspace = true
+oauth2 = { version = "5", features = ["reqwest"] }
+flate2 = "1"
+cron = "0.15"
+tar = "0.4"
+thurgood = { version = "0.2.1", default-features = false }
+jsonwebtoken = { version = "10", features = ["aws_lc_rs"] }
+casbin = { version = "2.15", default-features = false, features = ["runtime-tokio"] }
+# Caching
+moka = { version = "0.12", features = ["future"] }
+lru = "0.16"
+# Rust Internal
+strum.workspace = true
+thiserror.workspace = true
+anyhow.workspace = true
+derive_more.workspace = true
+num_cpus.workspace = true
+# Badge Stuff
+
+pin-project = "1"
+clap.workspace = true
+semver = { version = "1", features = ["std", "serde"] }
+
+# Staging
+tempfile = "3"
+# Maven Stuff
+maven-rs = { git = "https://github.com/kshcherban/maven-rs.git" }
+zip = { version = "5" }
+current_semver = "0.1"
+nr-core.workspace = true
+nr-macros.workspace = true
+nr-storage.workspace = true
+ar = "0.9"
+bzip2 = "0.4"
+xz2 = "0.1"
+zstd = "0.13"
+redb = { version = "3" }
+tuxs-config-types = { git = "https://github.com/kshcherban/tuxs-config-types.git", features = [
+    "chrono",
+] }
+auto_impl.workspace = true
+digestible.workspace = true
+digest.workspace = true
+
+# Tracing
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+tracing-appender = { workspace = true }
+
+# OpenTelemetry - Tracing framework
+tracing-opentelemetry = { workspace = true }
+opentelemetry = { workspace = true }
+opentelemetry_sdk = { workspace = true }
+opentelemetry-otlp = { workspace = true }
+opentelemetry-appender-tracing = { workspace = true }
+opentelemetry-semantic-conventions = { workspace = true }
+lettre = { version = "0.11", features = [
+    "builder",
+    "tokio1",
+    "smtp-transport",
+    "tokio1-rustls-tls",
+], default-features = false }
+url = "2"
+inquire = "0.7"
+serde_path_to_error = "0.1"
+[features]
+default = ["utoipa-scalar"]
+frontend = []
+
+[lints]
+workspace = true
+
+
+[build-dependencies]
+zip = { version = "5" }
+
+walkdir = "2"
+anyhow = "1.0"
+camino = "1.1"

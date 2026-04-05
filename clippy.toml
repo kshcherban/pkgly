@@ -1,0 +1,13 @@
+disallowed-types = [
+    { path = "std::collections::HashMap", reason = "use ahash::HashMap" },
+    { path = "std::collections::HashSet", reason = "use ahash::HashSet" },
+    { path = "std::sync::Mutex", reason = "use parking_lot::Mutex" },
+    { path = "std::sync::RwLock", reason = "use parking_lot::RwLock" },
+    { path = "std::sync::Condvar", reason = "Use async channels or Notify instead" }
+]
+
+disallowed-methods = [
+  # Force everything through Tokio’s runtime
+  { path = "std::thread::spawn", reason = "Use tokio::spawn to integrate with the runtime" },
+  { path = "std::thread::sleep", reason = "Use tokio::time::sleep in async code" },
+]

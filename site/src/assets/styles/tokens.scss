@@ -1,0 +1,163 @@
+/**
+ * Design Tokens - Material Design Light Theme
+ *
+ * These tokens align with Vuetify's theme configuration
+ * and provide CSS custom properties for use throughout the app.
+ */
+
+:root {
+  /* Primary Colors - Material Blue 600 */
+  --nr-primary: #1E88E5;
+  --nr-primary-light: #42A5F5;
+  --nr-primary-dark: #1565C0;
+  --nr-on-primary: #FFFFFF;
+
+  /* Secondary Colors - Blue Grey 700 */
+  --nr-secondary: #455A64;
+  --nr-secondary-light: #607D8B;
+  --nr-secondary-dark: #263238;
+  --nr-on-secondary: #FFFFFF;
+
+  /* Accent Colors - Light Blue 500 */
+  --nr-accent: #03A9F4;
+  --nr-accent-light: #4FC3F7;
+  --nr-accent-dark: #0277BD;
+
+  /* Background & Surface */
+  --nr-background: #FFFFFF;
+  --nr-surface: #FAFAFA;
+  --nr-surface-variant: #F5F5F5;
+  --nr-on-background: #212121;
+  --nr-on-surface: #212121;
+
+  /* Text Colors */
+  --nr-text-primary: rgba(0, 0, 0, 0.87);
+  --nr-text-secondary: rgba(0, 0, 0, 0.60);
+  --nr-text-disabled: rgba(0, 0, 0, 0.38);
+  --nr-text-hint: rgba(0, 0, 0, 0.38);
+
+  /* Semantic Colors */
+  --nr-error: #E53935;
+  --nr-error-light: #EF5350;
+  --nr-error-dark: #C62828;
+  --nr-on-error: #FFFFFF;
+
+  --nr-success: #43A047;
+  --nr-success-light: #66BB6A;
+  --nr-success-dark: #2E7D32;
+  --nr-on-success: #FFFFFF;
+
+  --nr-warning: #FB8C00;
+  --nr-warning-light: #FFA726;
+  --nr-warning-dark: #E65100;
+  --nr-on-warning: #FFFFFF;
+
+  --nr-info: #2196F3;
+  --nr-info-light: #42A5F5;
+  --nr-info-dark: #1565C0;
+  --nr-on-info: #FFFFFF;
+
+  /* Borders */
+  --nr-border-color: rgba(0, 0, 0, 0.12);
+  --nr-border-color-strong: rgba(0, 0, 0, 0.24);
+  --nr-divider: rgba(0, 0, 0, 0.12);
+
+  /* Elevation Shadows */
+  --nr-shadow-1: 0px 2px 1px -1px rgba(0,0,0,0.2),
+                 0px 1px 1px 0px rgba(0,0,0,0.14),
+                 0px 1px 3px 0px rgba(0,0,0,0.12);
+  --nr-shadow-2: 0px 3px 1px -2px rgba(0,0,0,0.2),
+                 0px 2px 2px 0px rgba(0,0,0,0.14),
+                 0px 1px 5px 0px rgba(0,0,0,0.12);
+  --nr-shadow-4: 0px 2px 4px -1px rgba(0,0,0,0.2),
+                 0px 4px 5px 0px rgba(0,0,0,0.14),
+                 0px 1px 10px 0px rgba(0,0,0,0.12);
+  --nr-shadow-8: 0px 5px 5px -3px rgba(0,0,0,0.2),
+                 0px 8px 10px 1px rgba(0,0,0,0.14),
+                 0px 3px 14px 2px rgba(0,0,0,0.12);
+
+  /* Spacing Scale (4px base) */
+  --nr-spacing-xs: 4px;
+  --nr-spacing-sm: 8px;
+  --nr-spacing-md: 16px;
+  --nr-spacing-lg: 24px;
+  --nr-spacing-xl: 32px;
+  --nr-spacing-2xl: 48px;
+  --nr-spacing-3xl: 64px;
+
+  /* Border Radius */
+  --nr-radius-sm: 2px;
+  --nr-radius-md: 4px;
+  --nr-radius-lg: 8px;
+  --nr-radius-xl: 12px;
+  --nr-radius-round: 50%;
+
+  /* Typography */
+  --nr-font-family: "Roboto", sans-serif;
+  --nr-font-family-mono: "Roboto Mono", "Consolas", "Monaco", monospace;
+
+  --nr-font-size-xs: 0.625rem;   /* 10px */
+  --nr-font-size-sm: 0.75rem;    /* 12px */
+  --nr-font-size-base: 0.875rem; /* 14px */
+  --nr-font-size-md: 1rem;       /* 16px */
+  --nr-font-size-lg: 1.25rem;    /* 20px */
+  --nr-font-size-xl: 1.5rem;     /* 24px */
+  --nr-font-size-2xl: 2rem;      /* 32px */
+  --nr-font-size-3xl: 3rem;      /* 48px */
+
+  --nr-font-weight-light: 300;
+  --nr-font-weight-regular: 400;
+  --nr-font-weight-medium: 500;
+  --nr-font-weight-bold: 700;
+
+  --nr-line-height-tight: 1.25;
+  --nr-line-height-normal: 1.5;
+  --nr-line-height-relaxed: 1.75;
+
+  /* Z-Index Scale */
+  --nr-z-dropdown: 1000;
+  --nr-z-sticky: 1020;
+  --nr-z-fixed: 1030;
+  --nr-z-modal-backdrop: 1040;
+  --nr-z-modal: 1050;
+  --nr-z-popover: 1060;
+  --nr-z-tooltip: 1070;
+
+  /* Transitions */
+  --nr-transition-fast: 150ms cubic-bezier(0.4, 0, 0.2, 1);
+  --nr-transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
+  --nr-transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
+
+  /* Component-specific tokens */
+  --nr-input-background: #FFFFFF;
+  --nr-input-border: rgba(0, 0, 0, 0.38);
+  --nr-input-border-hover: rgba(0, 0, 0, 0.87);
+  --nr-input-border-focus: var(--nr-primary);
+  --nr-input-placeholder: rgba(0, 0, 0, 0.38);
+
+  --nr-table-header-background: #FAFAFA;
+  --nr-table-row-hover: rgba(30, 136, 229, 0.08);
+  --nr-table-border: rgba(0, 0, 0, 0.12);
+
+  --nr-card-background: #FFFFFF;
+  --nr-card-border: rgba(0, 0, 0, 0.12);
+
+  /* Focus Ring */
+  --nr-focus-ring: 0 0 0 3px rgba(30, 136, 229, 0.25);
+}
+
+/* Legacy compatibility - map old variables to new ones */
+:root {
+  --brand-color: var(--nr-primary);
+  --nr-text-color: var(--nr-text-primary);
+  --nr-background-primary: var(--nr-background);
+  --nr-background-secondary: var(--nr-surface);
+  --nr-background-tertiary: var(--nr-surface-variant);
+  --nr-primary-color: var(--nr-primary);
+  --nr-primary-color-strong: var(--nr-primary-dark);
+  --nr-primary-color-soft: var(--nr-primary-light);
+  --nr-accent-color: var(--nr-accent);
+  --nr-accent-color-soft: var(--nr-accent-light);
+  --nr-success-color: var(--nr-success);
+  --error-color: var(--nr-error);
+}

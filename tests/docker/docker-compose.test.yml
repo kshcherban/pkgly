@@ -1,0 +1,101 @@
+services:
+  postgres:
+    image: postgres:17
+    environment:
+      POSTGRES_DB: pkgly_test
+      POSTGRES_USER: pkgly
+      POSTGRES_PASSWORD: pkgly
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pkgly"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - ./init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    networks:
+      - integration
+
+  pkgly:
+    image: pkgly:test
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      - RUST_LOG=debug
+      - DATABASE_URL=postgresql://pkgly:pkgly@postgres:5432/pkgly_test
+      - PKGLY_CONFIG=/config/pkgly.test.toml
+    command: ["start", "--config", "/config/pkgly.test.toml"]
+    volumes:
+      - ./config/pkgly.test.toml:/config/pkgly.test.toml:ro
+      - test-storage:/storage
+    networks:
+      - integration
+
+  db-seeder:
+    image: postgres:17
+    depends_on:
+      - pkgly
+    environment:
+      - PGPASSWORD=pkgly
+    volumes:
+      - ./seed-data.sql:/seed-data.sql:ro
+      - ./seed-database.sh:/seed-database.sh:ro
+    command: /bin/bash /seed-database.sh
+    restart: "on-failure"
+    networks:
+      - integration
+
+  docker:
+    image: docker:24-dind
+    privileged: true
+    environment:
+      - DOCKER_TLS_CERTDIR=
+    command: ["--host=tcp://0.0.0.0:2375", "--insecure-registry=pkgly:8888"]
+    volumes:
+      - docker-graph:/var/lib/docker
+    tmpfs:
+      - /run
+      - /var/run
+    healthcheck:
+      test: ["CMD-SHELL", "docker info > /dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - integration
+
+  test-runner:
+    build:
+      context: .
+      dockerfile: Dockerfile.test-runner
+    depends_on:
+      db-seeder:
+        condition: service_completed_successfully
+      docker:
+        condition: service_healthy
+    environment:
+      - PKGLY_URL=http://pkgly:8888
+      - TEST_TOKEN=NPDxeLFM8ehXKteIHW7DFy1chf2QaYdf
+      - DOCKER_HOST=tcp://docker:2375
+      - DOCKER_TLS_CERTDIR=
+      - DOCKER_API_VERSION=1.43
+      - PKGLY_DOCKER_HOST=pkgly:8888
+    volumes:
+      - ../integration:/tests:ro
+      - ../performance:/perf-tests:ro
+      - ../fixtures:/fixtures:ro
+      - test-results:/results
+    command: /bin/bash -c "sleep infinity"
+    networks:
+      - integration
+
+volumes:
+  test-storage:
+  test-results:
+  docker-graph:
+
+networks:
+  integration: {}

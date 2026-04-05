@@ -1,0 +1,39 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+  <title id="title">Pkgly logo</title>
+  <desc id="desc">An open orange box sitting above a teal package base.</desc>
+  <defs>
+    <linearGradient id="top-left" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ff9f1a" />
+      <stop offset="100%" stop-color="#ff8a00" />
+    </linearGradient>
+    <linearGradient id="top-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#ffbe2f" />
+      <stop offset="100%" stop-color="#f99a07" />
+    </linearGradient>
+    <linearGradient id="base-left" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0a7181" />
+      <stop offset="100%" stop-color="#0b5664" />
+    </linearGradient>
+    <linearGradient id="base-right" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#1292a3" />
+      <stop offset="100%" stop-color="#107483" />
+    </linearGradient>
+    <linearGradient id="shadow" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" stop-color="#0b3f49" stop-opacity="0.9" />
+      <stop offset="100%" stop-color="#082a31" stop-opacity="0.55" />
+    </linearGradient>
+  </defs>
+
+  <g transform="translate(0 6)">
+    <polygon points="52,80 160,28 160,148 52,96" fill="url(#top-left)" />
+    <polygon points="160,28 268,80 268,96 160,148" fill="url(#top-right)" />
+    <polygon points="106,106 160,132 214,106 214,142 160,168 106,142" fill="#eb7f00" fill-opacity="0.72" />
+
+    <polygon points="44,90 90,112 90,174 160,208 160,292 44,232" fill="url(#base-left)" />
+    <polygon points="276,90 230,112 230,174 160,208 160,292 276,232" fill="url(#base-right)" />
+    <polygon points="90,112 90,174 160,208 230,174 230,112 214,120 214,166 160,192 106,166 106,120" fill="#ffffff" />
+
+    <polygon points="44,232 160,292 160,274 44,214" fill="url(#shadow)" opacity="0.45" />
+    <polygon points="160,292 276,232 276,214 160,274" fill="url(#shadow)" opacity="0.28" />
+  </g>
+</svg>

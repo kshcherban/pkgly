@@ -1,0 +1,277 @@
+# Default values for pkgly-chart.
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Pkgly deployment settings
+replicaCount: 1
+
+# Pkgly container image
+image:
+  repository: ghcr.io/pkgly/pkgly
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+# Image pull secrets for private registries
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# Service account configuration
+serviceAccount:
+  create: true
+  automount: true
+  annotations: {}
+  name: ""
+
+# Pod annotations and labels
+podAnnotations: {}
+podLabels: {}
+
+# Security contexts
+podSecurityContext:
+  fsGroup: 1000
+
+securityContext:
+  allowPrivilegeEscalation: false
+  capabilities:
+    drop:
+    - ALL
+  readOnlyRootFilesystem: false
+  runAsNonRoot: true
+  runAsUser: 1000
+
+# Service configuration
+service:
+  type: ClusterIP
+  port: 6742
+
+# Ingress configuration
+ingress:
+  enabled: false
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "0"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "600"
+  hosts:
+    - host: pkgly.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+
+# Persistent storage configuration
+persistence:
+  enabled: true
+  storageClass: ""
+  accessModes:
+    - ReadWriteOnce
+  size: 10Gi
+
+# Resource limits and requests
+resources:
+  limits:
+    cpu: 1000m
+    memory: 1Gi
+  requests:
+    cpu: 500m
+    memory: 512Mi
+
+# Health check probes
+livenessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 30
+  periodSeconds: 10
+  timeoutSeconds: 5
+  failureThreshold: 3
+
+readinessProbe:
+  httpGet:
+    path: /health
+    port: http
+  initialDelaySeconds: 5
+  periodSeconds: 5
+  timeoutSeconds: 3
+  failureThreshold: 3
+
+# =============================================================================
+# Pkgly Application Configuration
+# =============================================================================
+
+# Site configuration
+site:
+  appUrl: ""  # Public URL, e.g., https://repo.example.com
+  name: "Pkgly"
+  description: "An Open Source artifact manager"
+  isHttps: true
+
+# Web server configuration
+webServer:
+  openApiRoutes: true
+  maxUpload: "100MB"
+
+# Session configuration
+sessions:
+  lifespan: 86400  # Session lifetime in seconds (24 hours)
+  cleanupInterval: 3600  # Cleanup interval in seconds (1 hour)
+  databaseLocation: "/data/sessions.redb"
+
+# Security configuration
+security:
+  allowBasicWithoutTokens: true
+  passwordRules:
+    minLength: 12
+    requireUppercase: false
+    requireLowercase: true
+    requireNumber: false
+    requireSymbol: false
+
+# SSO configuration (minimal - extend via env vars for complex setups)
+# Use env array below for provider-specific config: PKGLY_SECURITY__SSO__*
+sso:
+  enabled: false
+
+# OAuth2 configuration (minimal - extend via env vars for complex setups)
+# Use env array below for provider-specific config: PKGLY_SECURITY__OAUTH2__*
+oauth2:
+  enabled: false
+
+# Staging configuration
+staging:
+  enabled: true
+  maxSize: "1GB"
+  cleanupInterval: 3600  # seconds
+  staleTimeout: 86400    # seconds (24 hours)
+
+# OpenTelemetry configuration
+opentelemetry:
+  enabled: false
+  protocol: "GRPC"  # Options: GRPC, HttpBinary, HttpJson
+  endpoint: "http://localhost:4317"
+  traces: true
+  logs: false
+  config:
+    serviceName: "pkgly"
+    serviceVersion: "3.0.0"
+    serviceEnvironment: "production"
+    serviceNamespace: "pkgly"
+
+# Logging configuration
+logging:
+  defaultLevel: "Info"
+  levels:
+    pkgly: "Info"
+    nr_core: "Info"
+    nr_storage: "Info"
+    sqlx: "Info"
+  console:
+    pretty: false
+    includeTime: true
+    includeLevel: true
+    ansiColor: false
+
+# S3 Storage backend (optional, for stateless K8s deployments)
+s3Storage:
+  enabled: false
+  bucket: ""
+  region: "us-east-1"
+  endpoint: ""  # For S3-compatible storage (MinIO, etc.)
+  # Authentication options:
+  # Option 1: Static credentials (less secure)
+  accessKeyId: ""
+  secretAccessKey: ""
+  # Option 2: IAM Role (EKS - more secure)
+  useIamRole: false
+  roleArn: ""
+  # Option 3: Reference K8s secret for credentials
+  secretRef:
+    enabled: false
+    name: "s3-credentials"
+  # Local cache settings
+  cache:
+    enabled: true
+    maxBytes: "1GB"
+    maxEntries: 10000
+
+# Custom environment variables (supports secret references)
+env: []
+  # Example usage:
+  # - name: CUSTOM_SETTING
+  #   value: "some-value"
+  # - name: PASSWORD
+  #   valueFrom:
+  #     secretKeyRef:
+  #       name: mysecret
+  #       key: password
+  #       optional: false
+
+# PostgreSQL dependency configuration
+postgresql:
+  enabled: true
+  auth:
+    username: pkgly
+    password: "pkgly"  # Only used when creating the database, not stored in config files
+    database: pkgly
+    existingSecret: ""
+  primary:
+    persistence:
+      enabled: true
+      size: 8Gi
+    resources:
+      limits:
+        cpu: 500m
+        memory: 512Mi
+      requests:
+        cpu: 250m
+        memory: 256Mi
+
+# External database configuration (when postgresql.enabled = false)
+externalDatabase:
+  # Option 1: Individual fields (recommended)
+  host: ""
+  port: 5432
+  user: ""
+  password: ""
+  database: ""
+  # Option 2: Reference K8s secret for password (more secure)
+  secretRef:
+    enabled: false
+    name: "database-secret"
+    passwordKey: "password"
+
+# Jaeger dependency configuration
+jaeger:
+  enabled: false
+  provisionDataStore:
+    cassandra: false
+    elasticsearch: false
+    kafka: false
+  allInOne:
+    enabled: true
+    image:
+      repository: jaegertracing/all-in-one
+      tag: latest
+    options:
+      log-level: info
+  storage:
+    type: badger
+
+
+# Node selection
+nodeSelector: {}
+
+# Tolerations
+tolerations: []
+
+# Affinity rules
+affinity: {}
+
+# Autoscaling configuration
+autoscaling:
+  enabled: false
+  minReplicas: 1
+  maxReplicas: 5
+  targetCPUUtilizationPercentage: 70
+  targetMemoryUtilizationPercentage: 80

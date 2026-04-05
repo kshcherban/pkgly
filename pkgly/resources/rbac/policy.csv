@@ -1,0 +1,10 @@
+p, readonly, /api/data, read
+p, read/write, /api/data, read
+p, read/write, /api/data, write
+p, admin, /api/data, read
+p, admin, /api/data, write
+p, admin, /api/users, manage
+
+g, user@example.com, readonly
+g, editor@example.com, read/write
+g, admin@example.com, admin

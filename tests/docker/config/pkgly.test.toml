@@ -1,0 +1,72 @@
+mode = "Debug"
+suggested_local_storage_path = "/storage"
+
+[database]
+user = "pkgly"
+password = "pkgly"
+database = "pkgly_test"
+host = "postgres"
+port = 5432
+
+[sessions]
+lifespan = 86400
+cleanup_interval = 3600
+database_location = "/storage/sessions.redb"
+
+# [site]
+# app_url = "http://pkgly:8888"
+
+[web_server]
+bind_address = "0.0.0.0:8888"
+
+[security]
+allow_basic_without_tokens = false
+
+[log.levels]
+default = "Debug"
+
+[log.loggers.console]
+type = "Console"
+
+[log.loggers.console.config]
+pretty = false
+include_time = true
+include_level = true
+include_line_numbers = false
+include_file = false
+include_target = true
+ansi_color = true
+include_thread_ids = false
+include_thread_names = false
+
+[log.loggers.console.config.levels]
+default = "Debug"
+
+[log.loggers.console.config.levels.others]
+
+[log.loggers.file]
+type = "RollingFile"
+
+[log.loggers.file.config]
+path = "/storage"
+file_prefix = "pkgly.log"
+interval = "Daily"
+include_time = true
+include_level = true
+include_line_numbers = false
+include_file = false
+include_target = true
+ansi_color = false
+include_thread_ids = false
+include_thread_names = false
+
+[log.loggers.file.config.levels]
+default = "Debug"
+
+[log.loggers.file.config.levels.others]
+
+[log.levels.others]
+pkgly = "Debug"
+nr_core = "Debug"
+nr_storage = "Debug"
+sqlx = "Debug"

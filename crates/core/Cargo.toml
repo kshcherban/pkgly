@@ -1,0 +1,56 @@
+[package]
+name = "nr-core"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+sqlx.workspace = true
+serde.workspace = true
+tracing.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+chrono.workspace = true
+base64.workspace = true
+sha2.workspace = true
+uuid.workspace = true
+strum.workspace = true
+schemars.workspace = true
+
+utoipa.workspace = true
+once_cell.workspace = true
+regex.workspace = true
+rand.workspace = true
+http.workspace = true
+derive_more.workspace = true
+digestible.workspace = true
+url.workspace = true
+nr-macros.workspace = true
+ahash.workspace = true
+mime.workspace = true
+pg-extended-sqlx-queries.workspace = true
+# Testing
+anyhow = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true }
+tracing-subscriber = { version = "0.3", features = [
+    "env-filter",
+    "json",
+], optional = true }
+tracing-appender = { version = "0.2", optional = true }
+clap.workspace = true
+[dev-dependencies]
+pretty_assertions = "1"
+[features]
+default = ["migrations", "testing"]
+migrations = []
+testing = [
+    "migrations",
+    "anyhow",
+    "tokio",
+    "tracing-subscriber",
+    "tracing-appender",
+]
+[lints]
+workspace = true

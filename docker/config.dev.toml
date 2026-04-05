@@ -1,0 +1,59 @@
+mode = "Debug"
+suggested_local_storage_path = "/data/storages"
+
+[database]
+user = "pkgly"
+password = "pkgly"
+database = "pkgly"
+host = "postgres"
+port = 5432
+
+[sessions]
+lifespan = 86400
+cleanup_interval = 3600
+database_location = "/data/sessions.redb"
+
+[security]
+allow_basic_without_tokens = true
+
+[security.password_rules]
+min_length = 12
+require_uppercase = false
+require_lowercase = true
+require_number = false
+require_symbol = false
+
+[log.metrics]
+enabled = true
+protocol = "GRPC"
+endpoint = "http://otel-collector:4317"
+
+[log.metrics.config]
+"service.name" = "pkgly"
+"service.version" = "3.0.0-BETA"
+"service.environment" = "development"
+
+[log.levels]
+default = "Info"
+
+[log.levels.others]
+"pkgly" = "Info"
+"nr_core" = "Info"
+"nr_storage" = "Info"
+"sqlx" = "Info"
+"pg_extended_sqlx_queries" = "Info"
+"h2" = "Info"
+"tower" = "Info"
+"tonic" = "Info"
+"hyper_util" = "Info"
+
+[log.loggers.console]
+type = "Console"
+
+[log.loggers.console.config]
+format = "compact"
+ansi_color = true
+include_span_context = false
+
+[site]
+is_https = true

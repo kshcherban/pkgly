@@ -1,0 +1,214 @@
+# Repository Configuration Example
+# This is a comprehensive example showing all available configuration options
+# Copy this file to config.toml and modify as needed
+
+# Application mode (Debug or Release)
+mode = "Debug"
+
+# Suggested local storage path for repositories
+suggested_local_storage_path = "/data/storages"
+
+# ============================================================================
+# Database Configuration
+# ============================================================================
+[database]
+user = "pkgly"
+password = "pkgly"
+database = "pkgly"
+host = "postgres"
+port = 5432
+# Optional: SSL mode for database connection
+# ssl_mode = "prefer"
+# Optional: Connection pool size
+# max_connections = 10
+
+# ============================================================================
+# Web Server Configuration
+# ============================================================================
+[web_server]
+bind_address = "0.0.0.0:6742"
+open_api_routes = true
+# Worker threads for the HTTP runtime (default: number of CPU cores). Set to a positive integer to override.
+# worker_threads = 8
+
+# Maximum upload size configuration
+[web_server.max_upload]
+# You can specify sizes in various formats:
+# - "100MB" for 100 megabytes
+# - "1GB" for 1 gigabyte
+# - "unlimited" for no limit
+max_size = "100MB"
+
+# Optional: TLS configuration
+# [web_server.tls]
+# cert_path = "/path/to/cert.pem"
+# key_path = "/path/to/key.pem"
+
+# ============================================================================
+# Session Management
+# ============================================================================
+[sessions]
+lifespan = 86400  # Session lifetime in seconds (24 hours)
+cleanup_interval = 3600  # Cleanup interval in seconds (1 hour)
+database_location = "/data/sessions.redb"
+
+# ============================================================================
+# Site Configuration
+# ============================================================================
+[site]
+app_url = "https://repo.pkgly.dev"
+name = "Pkgly"
+description = "An Open Source artifact manager"
+is_https = true
+
+# Optional: Frontend path (when using built-in frontend)
+# frontend_path = "/path/to/frontend/dist"
+
+# ============================================================================
+# Security Configuration
+# ============================================================================
+[security]
+allow_basic_without_tokens = true
+
+# Optional: Single Sign-On (SSO) Configuration
+# [security.sso]
+# enabled = true
+# login_path = "/api/user/sso/login"
+# login_button_text = "Sign in with Cloudflare"
+# provider_login_url = "https://repo.pkgly.dev/cdn-cgi/access/login"
+# provider_redirect_param = "redirect_url"
+# username_header = "CF-Access-Authenticated-User-Email"
+# email_header = "CF-Access-Authenticated-User-Email"
+# display_name_header = "CF-Access-Authenticated-User-Name"
+# auto_create_users = true
+
+# ============================================================================
+# OpenTelemetry Configuration (Tracing & Metrics)
+# ============================================================================
+[opentelemetry]
+# Enable/disable OpenTelemetry tracing
+# Can also be controlled via PKGLY_TRACING_ENABLED environment variable
+# Config file setting takes precedence over environment variable
+enabled = false
+
+# Protocol for connecting to OpenTelemetry collector
+# Options: "GRPC", "HttpBinary", "HttpJson"
+protocol = "GRPC"
+
+# OpenTelemetry collector endpoint
+endpoint = "http://localhost:4317"
+
+# Enable/disable trace collection
+traces = true
+
+# Enable/disable log collection to OpenTelemetry
+logs = false
+
+# Service resource attributes
+[opentelemetry.config]
+"service.name" = "pkgly"
+"service.version" = "3.0.0-BETA"
+"service.environment" = "development"
+"service.namespace" = "pkgly"
+
+# Custom resource attributes (optional)
+# [opentelemetry.config.custom]
+# "deployment.environment" = "staging"
+# "team.name" = "platform"
+
+# ============================================================================
+# Logging Configuration
+# ============================================================================
+[log.levels]
+# Default log level for all crates
+default = "Debug"
+
+# Per-crate log levels
+[log.levels.others]
+"pkgly" = "Debug"
+"nr_core" = "Debug"
+"nr_storage" = "Debug"
+"sqlx" = "Debug"
+"pg_extended_sqlx_queries" = "Debug"
+"h2" = "Warn"
+"tower" = "Warn"
+"tonic" = "Warn"
+"hyper_util" = "Warn"
+
+# Console logger configuration
+[log.loggers.console]
+type = "Console"
+
+[log.loggers.console.config]
+# Options: "compact" | "pretty" | "json" | "full"
+format = "compact"
+# Legacy alias (prefer `format`); kept for backwards-compat.
+# pretty = true
+include_time = true
+include_level = true
+include_line_numbers = false
+include_file = false
+include_target = true
+include_span_context = false
+ansi_color = true
+include_thread_ids = false
+include_thread_names = false
+
+# Optional: Rolling file logger
+# [log.loggers.file]
+# type = "RollingFile"
+# 
+# [log.loggers.file.config]
+# path = "/logs"
+# file_prefix = "pkgly"
+# interval = "Daily"  # Options: "Minutely", "Hourly", "Daily", "Never"
+# include_time = true
+# include_level = true
+# include_line_numbers = true
+# include_file = true
+# include_target = true
+# include_span_context = true
+# ansi_color = false
+# include_thread_ids = false
+# include_thread_names = false
+
+# ============================================================================
+# Staging Configuration
+# ============================================================================
+[staging]
+# Staging is a temporary area for uploaded files before they are processed
+enabled = true
+max_size = "1GB"
+cleanup_interval = 3600  # seconds
+stale_timeout = 86400   # seconds (24 hours)
+
+# ============================================================================
+# Email Configuration (Optional)
+# ============================================================================
+# Email configuration for notifications, password resets, etc.
+# [email]
+# smtp_server = "smtp.gmail.com"
+# smtp_port = 587
+# username = "your-email@gmail.com"
+# password = "your-app-password"
+# from_address = "noreply@yourdomain.com"
+# use_tls = true
+
+# ============================================================================
+# Environment Variables
+# ============================================================================
+# Additional configuration can be provided via environment variables:
+#
+# Example:
+#   env \
+#     PKGLY_DATABASE__HOST=postgres \
+#     PKGLY_DATABASE__PORT=5432 \
+#     PKGLY_DATABASE__USER=pkgly \
+#     PKGLY_DATABASE__PASSWORD=pkgly \
+#     PKGLY_DATABASE__DATABASE=pkgly \
+#     PKGLY_WEB_SERVER__BIND_ADDRESS=0.0.0.0:6742 \
+#     PKGLY_TRACING_ENABLED=1 \
+#     pkgly --config /etc/pkgly/config.toml
+#
+# Note: Environment variables take precedence over config file values,
+# except for `opentelemetry.enabled`, where the config file overrides the env.

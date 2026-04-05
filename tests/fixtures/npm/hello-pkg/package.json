@@ -1,0 +1,12 @@
+{
+  "name": "@pkgly-test/hello-pkg",
+  "version": "1.0.0",
+  "description": "A minimal NPM package for integration testing",
+  "main": "index.js",
+  "scripts": {
+    "test": "echo \"No tests\" && exit 0"
+  },
+  "keywords": ["test", "integration"],
+  "author": "Pkgly Test",
+  "license": "MIT"
+}

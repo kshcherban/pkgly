@@ -1,0 +1,103 @@
+@use "@/assets/styles/theme.scss" as *;
+
+.browse__row {
+  cursor: pointer;
+  border-bottom: 1px solid rgba(0, 0, 0, 0.05);
+  background: var(--nr-background-primary, #fff);
+
+  &:hover {
+    background: rgba(76, 110, 245, 0.08);
+  }
+
+  &:focus-visible {
+    outline: 2px solid $primary;
+    outline-offset: -2px;
+  }
+}
+
+.browse__row--directory {
+  font-weight: 500;
+}
+
+.browse__cell {
+  padding: 0.9rem 1rem;
+  vertical-align: middle;
+  color: var(--nr-text-color, $text);
+}
+
+.browse__cell--name {
+  width: 70%;
+}
+
+.browse__cell--meta {
+  text-align: right;
+  color: var(--text-secondary, rgba(0, 0, 0, 0.6));
+  width: 30%;
+}
+
+.browse__cell-content {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.browse__name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+:global(.column-resizer) {
+  background: transparent;
+}
+
+:global(.column-resizer::after) {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(0, 0, 0, 0.15);
+  transform: translateX(-50%);
+}
+
+.browse__skeleton-icon,
+.browse__skeleton-bar {
+  display: inline-block;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 999px;
+  animation: browse-skeleton 1.2s ease-in-out infinite;
+}
+
+.browse__skeleton-icon {
+  width: 24px;
+  height: 24px;
+}
+
+.browse__skeleton-bar {
+  height: 14px;
+  flex: 1;
+}
+
+.browse__skeleton-bar--meta {
+  display: inline-block;
+  width: 60%;
+}
+
+.browse__row--skeleton {
+  pointer-events: none;
+}
+
+@keyframes browse-skeleton {
+  0% {
+    opacity: 0.4;
+  }
+  50% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.4;
+  }
+}

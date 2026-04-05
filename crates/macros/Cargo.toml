@@ -1,0 +1,20 @@
+[package]
+name = "nr-macros"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1"
+proc-macro2 = "1"
+syn = { version = "2", features = ["full", "extra-traits", "parsing"] }
+heck = "0.5"
+
+[dev-dependencies]
+prettyplease = "0.2"
+anyhow = "1"

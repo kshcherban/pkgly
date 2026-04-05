@@ -1,0 +1,20 @@
+services:
+  pkgly-docs:
+    image: nginx:alpine
+    container_name: pkgly-docs
+    restart: unless-stopped
+    volumes:
+      - ./docs/.vitepress/dist:/usr/share/nginx/html:ro
+      - ./nginx.conf:/etc/nginx/conf.d/default.conf:ro
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.pkgly-docs.rule=Host(`docs.pkgly.dev`)"
+      - "traefik.http.services.pkgly-docs.loadbalancer.server.port=80"
+      - "traefik.http.routers.pkgly-docs.entrypoints=https"
+      - "traefik.http.routers.pkgly-docs.tls.certresolver=letsencrypt"
+    network_mode: "bridge"
+
+networks:
+  default:
+    external: true
+    name: bridge

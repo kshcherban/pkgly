@@ -1,0 +1,176 @@
+# ABOUTME: ConfigMap that generates the Pkgly TOML configuration file.
+# ABOUTME: This file is mounted into the container at /data/config.toml.
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "pkgly-chart.fullname" . }}-config
+  labels:
+    {{- include "pkgly-chart.labels" . | nindent 4 }}
+data:
+  config.toml: |
+    mode = "Release"
+    suggested_local_storage_path = "/data/storages"
+
+    # ==========================================================================
+    # Database Configuration
+    # ==========================================================================
+    [database]
+    {{- if .Values.postgresql.enabled }}
+    user = {{ .Values.postgresql.auth.username | quote }}
+    {{- if .Values.postgresql.auth.existingSecret }}
+    password = "${DB_PASSWORD}"
+    {{- else }}
+    password = {{ .Values.postgresql.auth.password | quote }}
+    {{- end }}
+    database = {{ .Values.postgresql.auth.database | quote }}
+    host = "{{ include "pkgly-chart.fullname" . }}-postgresql"
+    port = 5432
+    {{- else }}
+    user = {{ .Values.externalDatabase.user | quote }}
+    {{- if .Values.externalDatabase.secretRef.enabled }}
+    password = "${DB_PASSWORD}"
+    {{- else }}
+    password = {{ .Values.externalDatabase.password | quote }}
+    {{- end }}
+    database = {{ .Values.externalDatabase.database | quote }}
+    host = {{ .Values.externalDatabase.host | quote }}
+    port = {{ .Values.externalDatabase.port }}
+    {{- end }}
+
+    # ==========================================================================
+    # Web Server Configuration
+    # ==========================================================================
+    [web_server]
+    bind_address = "0.0.0.0:{{ .Values.service.port }}"
+    open_api_routes = {{ .Values.webServer.openApiRoutes }}
+
+    [web_server.max_upload]
+    max_size = {{ .Values.webServer.maxUpload | quote }}
+
+    # ==========================================================================
+    # Session Configuration
+    # ==========================================================================
+    [sessions]
+    lifespan = {{ .Values.sessions.lifespan }}
+    cleanup_interval = {{ .Values.sessions.cleanupInterval }}
+    database_location = {{ .Values.sessions.databaseLocation | quote }}
+
+    # ==========================================================================
+    # Site Configuration
+    # ==========================================================================
+    {{- if .Values.site.appUrl }}
+    [site]
+    app_url = {{ .Values.site.appUrl | quote }}
+    name = {{ .Values.site.name | quote }}
+    description = {{ .Values.site.description | quote }}
+    is_https = {{ .Values.site.isHttps }}
+    {{- end }}
+
+    # ==========================================================================
+    # Security Configuration
+    # ==========================================================================
+    [security]
+    allow_basic_without_tokens = {{ .Values.security.allowBasicWithoutTokens }}
+
+    [security.password_rules]
+    min_length = {{ .Values.security.passwordRules.minLength }}
+    require_uppercase = {{ .Values.security.passwordRules.requireUppercase }}
+    require_lowercase = {{ .Values.security.passwordRules.requireLowercase }}
+    require_number = {{ .Values.security.passwordRules.requireNumber }}
+    require_symbol = {{ .Values.security.passwordRules.requireSymbol }}
+
+    {{- if .Values.sso.enabled }}
+    # SSO is enabled - configure via environment variables (PKGLY_SECURITY__SSO__*)
+    [security.sso]
+    enabled = true
+    {{- end }}
+
+    {{- if .Values.oauth2.enabled }}
+    # OAuth2 is enabled - configure via environment variables (PKGLY_SECURITY__OAUTH2__*)
+    [security.oauth2]
+    enabled = true
+    {{- end }}
+
+    # ==========================================================================
+    # Staging Configuration
+    # ==========================================================================
+    [staging]
+    enabled = {{ .Values.staging.enabled }}
+    max_size = {{ .Values.staging.maxSize | quote }}
+    cleanup_interval = {{ .Values.staging.cleanupInterval }}
+    stale_timeout = {{ .Values.staging.staleTimeout }}
+
+    # ==========================================================================
+    # S3 Storage Configuration
+    # ==========================================================================
+    {{- if .Values.s3Storage.enabled }}
+    [storage.s3]
+    bucket = {{ .Values.s3Storage.bucket | quote }}
+    region = {{ .Values.s3Storage.region | quote }}
+    {{- if .Values.s3Storage.endpoint }}
+    endpoint = {{ .Values.s3Storage.endpoint | quote }}
+    {{- end }}
+    {{- if and (not .Values.s3Storage.useIamRole) (not .Values.s3Storage.secretRef.enabled) }}
+    access_key_id = {{ .Values.s3Storage.accessKeyId | quote }}
+    secret_access_key = {{ .Values.s3Storage.secretAccessKey | quote }}
+    {{- else if not .Values.s3Storage.useIamRole }}
+    access_key_id = "${S3_ACCESS_KEY_ID}"
+    secret_access_key = "${S3_SECRET_ACCESS_KEY}"
+    {{- end }}
+    {{- if .Values.s3Storage.roleArn }}
+    role_arn = {{ .Values.s3Storage.roleArn | quote }}
+    {{- end }}
+
+    [storage.s3.cache]
+    enabled = {{ .Values.s3Storage.cache.enabled }}
+    max_bytes = {{ .Values.s3Storage.cache.maxBytes | quote }}
+    max_entries = {{ .Values.s3Storage.cache.maxEntries }}
+    {{- end }}
+
+    # ==========================================================================
+    # OpenTelemetry Configuration
+    # ==========================================================================
+    {{- if .Values.opentelemetry.enabled }}
+    [opentelemetry]
+    enabled = true
+    protocol = {{ .Values.opentelemetry.protocol | quote }}
+    {{- if .Values.jaeger.enabled }}
+    endpoint = "http://{{ include "pkgly-chart.fullname" . }}-jaeger-collector:4317"
+    {{- else }}
+    endpoint = {{ .Values.opentelemetry.endpoint | quote }}
+    {{- end }}
+    traces = {{ .Values.opentelemetry.traces }}
+    logs = {{ .Values.opentelemetry.logs }}
+
+    [opentelemetry.config]
+    "service.name" = {{ .Values.opentelemetry.config.serviceName | quote }}
+    "service.version" = {{ .Values.opentelemetry.config.serviceVersion | quote }}
+    "service.environment" = {{ .Values.opentelemetry.config.serviceEnvironment | quote }}
+    "service.namespace" = {{ .Values.opentelemetry.config.serviceNamespace | quote }}
+    {{- end }}
+
+    # ==========================================================================
+    # Logging Configuration
+    # ==========================================================================
+    [log.levels]
+    default = {{ .Values.logging.defaultLevel | quote }}
+
+    [log.levels.others]
+    {{- range $key, $value := .Values.logging.levels }}
+    {{ $key | quote }} = {{ $value | quote }}
+    {{- end }}
+
+    [log.loggers.console]
+    type = "Console"
+    [log.loggers.console.config]
+    # Options: "compact" | "pretty" | "json" | "full"
+    format = {{ ternary "pretty" "compact" .Values.logging.console.pretty | quote }}
+    include_span_context = false
+    include_time = {{ .Values.logging.console.includeTime }}
+    include_level = {{ .Values.logging.console.includeLevel }}
+    include_line_numbers = false
+    include_file = false
+    include_target = true
+    ansi_color = {{ .Values.logging.console.ansiColor }}
+    include_thread_ids = false
+    include_thread_names = false

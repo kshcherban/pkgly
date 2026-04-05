@@ -1,0 +1,118 @@
+mode = "Debug"
+
+[web_server]
+bind_address = "0.0.0.0:6742"
+open_api_routes = true
+max_upload = "100MiB"
+
+[database]
+user = "postgres"
+password = "password"
+database = "pkgly"
+host = "localhost"
+port = 5432
+
+[log.loggers.file]
+type = "RollingFile"
+
+[log.loggers.file.config]
+path = "logs/app.log"
+file_prefix = "thd-helper.log"
+interval = "Daily"
+include_time = true
+include_level = true
+include_line_numbers = false
+include_file = false
+include_target = true
+ansi_color = true
+include_thread_ids = false
+include_thread_names = false
+
+[log.loggers.file.config.levels]
+default = "Info"
+
+[log.loggers.file.config.levels.others]
+
+[log.loggers.console]
+type = "Console"
+
+[log.loggers.console.config]
+pretty = false
+include_time = true
+include_level = true
+include_line_numbers = false
+include_file = false
+include_target = true
+ansi_color = true
+include_thread_ids = false
+include_thread_names = false
+
+[log.loggers.console.config.levels]
+default = "Info"
+
+[log.loggers.console.config.levels.others]
+
+[log.metrics]
+enabled = false
+protocol = "GRPC"
+endpoint = "http://localhost:4317"
+
+[log.metrics.config]
+"service.name" = "pkgly"
+"service.version" = "3.0.0-BETA"
+"service.environment" = "development"
+
+[log.levels]
+default = "Info"
+
+[log.levels.others]
+pkgly = "Debug"
+pg_extended_sqlx_queries = "Debug"
+sqlx = "Debug"
+hyper_util = "Warn"
+nr_storage = "Debug"
+nr_core = "Debug"
+tower = "Warn"
+tonic = "Warn"
+h2 = "Warn"
+
+[opentelemetry]
+enabled = false
+protocol = "GRPC"
+endpoint = "http://localhost:4317"
+traces = true
+logs = false
+
+[opentelemetry.config]
+"service.name" = "pkgly"
+"service.environment" = "development"
+"service.version" = "3.0.0-BETA"
+
+[opentelemetry.levels]
+default = "Info"
+
+[opentelemetry.levels.others]
+
+[sessions]
+lifespan = 86400
+cleanup_interval = 3600
+database_location = "/home/insider/repos/pkgly/tests/sessions.redb"
+
+[site]
+name = "Pkgly"
+description = "An Open Source artifact manager."
+is_https = false
+
+[security]
+allow_basic_without_tokens = false
+
+[security.password_rules]
+min_length = 8
+require_uppercase = true
+require_lowercase = true
+require_number = true
+require_symbol = true
+
+[staging]
+staging_dir = "/home/insider/repos/pkgly/tests/staging"
+time_till_cleanup = 3600

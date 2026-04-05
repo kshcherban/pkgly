@@ -1,0 +1,49 @@
+mode = "Debug"
+suggested_local_storage_path = "/data/storages"
+
+[database]
+user = "pkgly"
+password = "pkgly"
+database = "pkgly"
+host = "postgres"
+port = 5432
+
+[sessions]
+lifespan = 86400
+cleanup_interval = 3600
+database_location = "/data/sessions.redb"
+
+[security]
+allow_basic_without_tokens = true
+
+[security.password_rules]
+min_length = 12
+require_uppercase = false
+require_lowercase = true
+require_number = false
+require_symbol = false
+
+  # [security.sso]
+  # enabled = true
+  # login_path = "/api/user/sso/login"
+  # login_button_text = "Sign in with Cloudflare"
+  # provider_login_url = "https://app.pkgly.dev/cdn-cgi/access/login"
+  # provider_redirect_param = "redirect_url"
+  # username_header = "CF-Access-Authenticated-User-Email"
+  # email_header = "CF-Access-Authenticated-User-Email"
+  # display_name_header = "CF-Access-Authenticated-User-Name"
+  # auto_create_users = true
+
+
+[log.levels]
+default = "Info"
+[log.levels.others]
+"pkgly" = "Info"
+"nr_core" = "Info"
+"nr_storage" = "Info"
+"sqlx" = "Info"
+"pg_extended_sqlx_queries" = "Info"
+"h2" = "Info"
+"tower" = "Info"
+"tonic" = "Info"
+"hyper_util" = "Info"

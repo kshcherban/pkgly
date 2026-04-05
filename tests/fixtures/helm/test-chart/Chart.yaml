@@ -1,0 +1,12 @@
+apiVersion: v2
+name: test-chart
+description: A minimal Helm chart for integration testing
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - test
+  - integration
+maintainers:
+  - name: Pkgly Test
+    email: test@pkgly.test

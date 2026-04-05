@@ -1,0 +1,59 @@
+/* Import new design tokens */
+@use "tokens" as *;
+
+/* Import Roboto font from Google Fonts */
+@import url('https://fonts.googleapis.com/css2?family=Roboto:wght@300;400;500;700&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Roboto+Mono:wght@400;500&display=swap');
+
+/* Global reset and base styles */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  font-weight: normal;
+}
+
+body {
+  min-height: 100vh;
+  color: var(--nr-text-primary);
+  background: var(--nr-background);
+  transition:
+    color 0.3s,
+    background-color 0.3s;
+  font-family: var(--nr-font-family);
+  font-size: var(--nr-font-size-base);
+  line-height: var(--nr-line-height-normal);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+a {
+  color: var(--nr-primary);
+  text-decoration: none;
+  transition: color var(--nr-transition-fast);
+
+  &:hover {
+    color: var(--nr-primary-dark);
+    text-decoration: underline;
+  }
+}
+
+/* Remove underline from Vuetify components */
+.v-btn,
+.v-btn:visited,
+.v-btn:hover,
+.v-btn:focus-visible {
+  text-decoration: none !important;
+}
+
+.v-btn .v-btn__content {
+  text-decoration: none;
+}
+
+/* Remove underline from menu items and navigation links */
+.v-list-item a:hover,
+.v-menu a:hover,
+.v-app-bar a:hover {
+  text-decoration: none !important;
+}

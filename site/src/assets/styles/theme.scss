@@ -1,0 +1,40 @@
+// Material Design inspired light theme tokens shared by legacy SCSS utilities.
+$text: rgba(0, 0, 0, 0.87);
+$text-50: rgba(0, 0, 0, 0.6);
+$background: #ffffff;
+$background-30: rgba(250, 250, 250, 0.3);
+$background-50: rgba(250, 250, 250, 0.5);
+$background-70: rgba(245, 245, 245, 0.7);
+$background-90: rgba(245, 245, 245, 0.9);
+
+$primary: #1e88e5;
+$primary-30: rgba(30, 136, 229, 0.08);
+$primary-50: rgba(30, 136, 229, 0.16);
+$primary-70: rgba(30, 136, 229, 0.24);
+$primary-90: rgba(30, 136, 229, 0.32);
+
+$secondary: #455a64;
+$secondary-30: rgba(69, 90, 100, 0.12);
+$secondary-50: rgba(69, 90, 100, 0.22);
+$secondary-70: rgba(69, 90, 100, 0.32);
+$secondary-90: rgba(69, 90, 100, 0.42);
+
+$accent: #03a9f4;
+$accent-30: rgba(3, 169, 244, 0.16);
+$accent-50: rgba(3, 169, 244, 0.28);
+$accent-70: rgba(3, 169, 244, 0.36);
+$accent-90: rgba(3, 169, 244, 0.46);
+
+$valid-value: #43a047;
+
+$invalid-form-field: #e53935;
+
+.danger-hover {
+  transition: filter 120ms ease, box-shadow 120ms ease;
+  &:hover {
+    filter: brightness(0.9);
+  }
+  &:focus-visible {
+    box-shadow: 0 0 0 2px rgba(229, 57, 53, 0.35);
+  }
+}

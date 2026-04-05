@@ -1,0 +1,58 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+if ! git rev-parse --show-toplevel >/dev/null 2>&1; then
+  exit 0
+fi
+
+if git rev-parse -q --verify MERGE_HEAD >/dev/null 2>&1; then
+  echo "pre-commit: merge in progress; skipping rustfmt." >&2
+  exit 0
+fi
+
+repo_root="$(git rev-parse --show-toplevel)"
+cd "$repo_root"
+
+if [[ ! -f Cargo.toml ]]; then
+  exit 0
+fi
+
+if ! command -v cargo >/dev/null 2>&1; then
+  echo "pre-commit: cargo not found; skipping rustfmt." >&2
+  exit 0
+fi
+
+mapfile -t staged_files < <(git diff --cached --name-only --diff-filter=ACMR)
+mapfile -t before_unstaged < <(git diff --name-only)
+
+echo "pre-commit: cargo fmt --all" >&2
+cargo fmt --all
+
+if ((${#staged_files[@]})); then
+  git add -- "${staged_files[@]}"
+fi
+
+mapfile -t after_unstaged < <(git diff --name-only)
+
+declare -A before_set=()
+for f in "${before_unstaged[@]}"; do
+  before_set["$f"]=1
+done
+
+new_unstaged=()
+for f in "${after_unstaged[@]}"; do
+  if [[ -z "${before_set["$f"]+set}" ]]; then
+    new_unstaged+=("$f")
+  fi
+done
+
+if ((${#new_unstaged[@]})); then
+  {
+    echo "pre-commit: rustfmt introduced new unstaged changes."
+    echo "pre-commit: review and stage them, then retry commit:"
+    printf '  %s\n' "${new_unstaged[@]}"
+  } >&2
+  exit 1
+fi
+
+exit 0

@@ -1,0 +1,38 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link
+      href="/logo.svg"
+      rel="icon"
+      type="image/svg+xml" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0" />
+    <% if(!isDev){ %>
+    <base
+      href="{{app_url}}"
+      target="_blank" />
+    <meta
+      property="og:url"
+      content="{{app_url}}" />
+    <title>{{name}}</title>
+
+    <% } else { %>
+    <base
+      href="%VITE_BASE_URL%"
+      target="_blank" />
+    <meta
+      property="og:url"
+      content="%VITE_BASE_URL%" />
+    <title>Pkgly</title>
+
+    <% } %>
+  </head>
+  <body>
+    <div id="app"></div>
+    <script
+      type="module"
+      src="/src/main.ts"></script>
+  </body>
+</html>

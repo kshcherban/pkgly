@@ -1,0 +1,10 @@
+# Minimal Docker image for integration testing
+FROM alpine:3.18
+
+LABEL maintainer="test@pkgly.test"
+LABEL description="A minimal Docker image for integration testing"
+LABEL version="1.0.0"
+
+RUN echo "Hello from Pkgly Test Image" > /hello.txt
+
+CMD ["cat", "/hello.txt"]

@@ -1,0 +1,14 @@
+DROP INDEX IF EXISTS idx_user_password_reset_tokens_user;
+DROP INDEX IF EXISTS idx_stage_files_stage;
+DROP INDEX IF EXISTS idx_stages_repository;
+DROP INDEX IF EXISTS idx_user_auth_token_repository_scopes_token_repo;
+DROP INDEX IF EXISTS idx_user_auth_token_scopes_token;
+DROP INDEX IF EXISTS idx_user_auth_tokens_user;
+DROP INDEX IF EXISTS idx_user_auth_tokens_token;
+DROP INDEX IF EXISTS idx_user_events_user;
+DROP INDEX IF EXISTS idx_user_repository_permissions_repository;
+DROP INDEX IF EXISTS idx_repository_hostnames_storage;
+DROP INDEX IF EXISTS idx_repository_hostnames_repository;
+DROP INDEX IF EXISTS idx_project_versions_project_path_lower;
+DROP INDEX IF EXISTS idx_projects_repository_path_lower;
+DROP INDEX IF EXISTS idx_projects_repository_key_lower;

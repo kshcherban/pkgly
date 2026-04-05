@@ -1,0 +1,76 @@
+services:
+  pkgly:
+    command: ["start", "--config", "/data/config.dev.toml"]
+    volumes:
+      - ${PKGLY_BINARY_PATH:-./target/debug/pkgly}:/app/pkgly:ro
+      - ./docker/config.dev.toml:/data/config.dev.toml:ro
+    environment:
+      - OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317
+      - OTEL_SERVICE_NAME=pkgly
+      - PKGLY_TRACING_ENABLED=true
+      - PKGLY_LOG__METRICS__ENABLED=true
+      - PKGLY_LOG__METRICS__ENDPOINT=http://otel-collector:4317
+    ports:
+      - "127.0.0.1:8000:6742"
+    links:
+      - jaeger
+      - otel-collector
+    depends_on:
+      postgres:
+        condition: service_healthy
+      prometheus:
+        condition: service_started
+
+  jaeger:
+    image: jaegertracing/all-in-one:latest
+    network_mode: "bridge"
+    ports:
+      - "127.0.0.1:16686:16686"  # Jaeger UI
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.jaeger.loadbalancer.server.port=16686"
+      - "traefik.http.routers.jaeger.rule=Host(`jaeger.pkgly.dev`)"
+      - "traefik.http.routers.jaeger.entrypoints=https"
+      - "traefik.http.routers.jaeger.tls.certresolver=letsencrypt"
+    environment:
+      - COLLECTOR_OTLP_ENABLED=true
+
+  otel-collector:
+    image: otel/opentelemetry-collector-contrib
+    network_mode: "bridge"
+    command:
+      - --config=/etc/otelcol/config.yaml
+    volumes:
+      - ./docker/otel-collector.yaml:/etc/otelcol/config.yaml:ro
+    expose:
+      - "8889"
+
+  prometheus:
+    image: prom/prometheus:v3.7.3
+    network_mode: "bridge"
+    volumes:
+      - ./docker/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    ports:
+      - "127.0.0.1:9090:9090"
+    depends_on:
+      - otel-collector
+    links:
+      - otel-collector
+      - cadvisor
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.prometheus.loadbalancer.server.port=9090"
+      - "traefik.http.routers.prometheus.rule=Host(`prometheus.pkgly.dev`)"
+      - "traefik.http.routers.prometheus.entrypoints=https"
+      - "traefik.http.routers.prometheus.tls.certresolver=letsencrypt"
+
+  cadvisor:
+    image: gcr.io/cadvisor/cadvisor:v0.52.0
+    network_mode: "bridge"
+    privileged: true
+    volumes:
+      - /:/rootfs:ro
+      - /var/run:/var/run:ro
+      - /sys:/sys:ro
+      - /home/docker:/home/docker:ro
+      - /dev/sda:/dev/sda:ro

@@ -1,0 +1,110 @@
+# Multi-stage test runner with all package management tools
+FROM ubuntu:22.04
+
+# Prevent interactive prompts during installation
+ENV DEBIAN_FRONTEND=noninteractive
+
+# Install base tools
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    curl \
+    wget \
+    git \
+    jq \
+    zip \
+    unzip \
+    ca-certificates \
+    gnupg \
+    lsb-release \
+    software-properties-common \
+    pkg-config \
+    libssl-dev \
+    dpkg-dev \
+    xz-utils \
+    openjdk-11-jdk \
+    && rm -rf /var/lib/apt/lists/*
+
+# Set architecture-aware JAVA_HOME and provide stable default-java symlink
+RUN arch="$(dpkg --print-architecture)" \
+    && JAVA_HOME_CAND="/usr/lib/jvm/java-11-openjdk-${arch}" \
+    && if [ ! -d "${JAVA_HOME_CAND}" ]; then echo "Missing ${JAVA_HOME_CAND}" >&2; exit 1; fi \
+    && ln -sfn "${JAVA_HOME_CAND}" /usr/lib/jvm/default-java \
+    && echo "export JAVA_HOME=${JAVA_HOME_CAND}" >/etc/profile.d/java_home.sh \
+    && echo "JAVA_HOME=${JAVA_HOME_CAND}" >> /etc/environment
+
+ENV JAVA_HOME=/usr/lib/jvm/default-java
+ENV PATH="${JAVA_HOME}/bin:${PATH}"
+
+# Install Maven 3.9.6 (for HTTP headers support needed for Bearer token auth)
+RUN wget https://archive.apache.org/dist/maven/maven-3/3.9.6/binaries/apache-maven-3.9.6-bin.tar.gz \
+    && tar -C /opt -xzf apache-maven-3.9.6-bin.tar.gz \
+    && rm apache-maven-3.9.6-bin.tar.gz \
+    && ln -s /opt/apache-maven-3.9.6/bin/mvn /usr/local/bin/mvn
+
+# Install Node.js and NPM
+RUN curl -fsSL https://deb.nodesource.com/setup_20.x | bash - \
+    && apt-get install -y nodejs \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Docker CLI
+RUN install -m 0755 -d /etc/apt/keyrings \
+    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && chmod a+r /etc/apt/keyrings/docker.gpg \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+    $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
+    && apt-get update \
+    && apt-get install -y docker-ce-cli \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Python and pip
+RUN apt-get update && apt-get install -y \
+    python3 \
+    python3-pip \
+    python3-setuptools \
+    python3-wheel \
+    python3.10-venv \
+    twine \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install Ruby + Bundler
+RUN apt-get update && apt-get install -y \
+    ruby-full \
+    ruby-bundler \
+    && rm -rf /var/lib/apt/lists/*
+
+# Install PHP and Composer
+RUN apt-get update && apt-get install -y \
+    php \
+    php-cli \
+    php-mbstring \
+    php-xml \
+    php-curl \
+    && rm -rf /var/lib/apt/lists/* \
+    && curl -sS https://getcomposer.org/installer | php -- --install-dir=/usr/local/bin --filename=composer
+
+# Install Go
+RUN wget https://go.dev/dl/go1.21.6.linux-amd64.tar.gz \
+    && tar -C /usr/local -xzf go1.21.6.linux-amd64.tar.gz \
+    && rm go1.21.6.linux-amd64.tar.gz
+
+ENV PATH="/usr/local/go/bin:${PATH}"
+ENV GOPATH="/root/go"
+ENV PATH="${GOPATH}/bin:${PATH}"
+
+# Install Helm
+RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
+
+# Install Rust toolchain for Cargo integration tests
+RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain stable --profile minimal \
+    && /root/.cargo/bin/rustup component add rustfmt
+
+ENV PATH="/root/.cargo/bin:${PATH}"
+ENV CARGO_HOME="/root/.cargo"
+
+# Create working directories
+RUN mkdir -p /tests /fixtures /results /workspace
+
+WORKDIR /workspace
+
+# Default command (can be overridden)
+CMD ["/bin/bash"]

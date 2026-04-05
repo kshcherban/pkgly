@@ -1,0 +1,21 @@
+{
+    "name": "pkgly-test/sample-lib",
+    "description": "A minimal PHP library for integration testing",
+    "type": "library",
+    "version": "1.0.0",
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Pkgly Test",
+            "email": "test@pkgly.test"
+        }
+    ],
+    "require": {
+        "php": ">=7.4"
+    },
+    "autoload": {
+        "psr-4": {
+            "PkglyTest\\SampleLib\\": "src/"
+        }
+    }
+}

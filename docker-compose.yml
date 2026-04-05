@@ -1,0 +1,46 @@
+services:
+  postgres:
+    image: postgres:17
+    restart: unless-stopped
+    network_mode: "bridge"
+    environment:
+      POSTGRES_DB: pkgly
+      POSTGRES_USER: pkgly
+      POSTGRES_PASSWORD: pkgly
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U pkgly -d pkgly"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  pkgly:
+    build: .
+    restart: unless-stopped
+    network_mode: "bridge"
+    mem_limit: 2048mb
+    depends_on:
+      postgres:
+        condition: service_healthy
+    links:
+      - postgres
+    command: ["start", "--config", "/data/config.toml"]
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.services.pkgly.loadbalancer.server.port=6742"
+      - "traefik.http.routers.pkgly.rule=Host(`app.pkgly.dev`)"
+      - "traefik.http.routers.pkgly.entrypoints=https"
+      - "traefik.http.routers.pkgly.tls.certresolver=letsencrypt"
+    volumes:
+      - pkgly_data:/data
+      - ./docker/config.toml:/data/config.toml:ro
+
+volumes:
+  pkgly_data:
+  postgres_data:
+
+networks:
+  default:
+    external: true
+    name: bridge

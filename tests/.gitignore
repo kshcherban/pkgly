@@ -1,0 +1,22 @@
+# Test artifacts and temporary files
+*.log
+*.tmp
+.env.local
+
+# Test workspaces
+workspace/
+tmp/
+
+# Docker volumes (if mounted locally)
+storage/
+
+# Test results
+results/
+*.junit.xml
+
+# Package manager caches (if tests run locally)
+.npm/
+.m2/
+.cache/
+.composer/
+go/pkg/

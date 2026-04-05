@@ -1,0 +1,15 @@
+[package]
+name = "pkgly-cargo-test"
+version = "0.1.0"
+edition = "2021"
+authors = ["Pkgly <test@pkgly.test>"]
+description = "Sample crate used by the Pkgly integration suite"
+license = "MIT"
+readme = "README.md"
+repository = "https://pkgly.example.com/repositories/test-storage/cargo-hosted"
+keywords = ["pkgly", "integration", "test"]
+categories = ["development-tools"]
+
+[[bin]]
+name = "pkgly-cargo-test"
+path = "src/main.rs"

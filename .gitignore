@@ -1,0 +1,11 @@
+target/
+.vscode/
+.env
+nr_tests.env
+storage_tests
+.claude/
+charts/pkgly/charts
+*.tgz
+mise.toml
+.DS_Store
+.playwright-mcp/
