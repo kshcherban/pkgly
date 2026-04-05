@@ -1,39 +1,94 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 320 320" role="img" aria-labelledby="title desc">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768" role="img" aria-labelledby="title desc">
   <title id="title">Pkgly logo</title>
-  <desc id="desc">An open orange box sitting above a teal package base.</desc>
+  <desc id="desc">A glowing orange package lid above a teal box on a white background.</desc>
   <defs>
-    <linearGradient id="top-left" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ff9f1a" />
-      <stop offset="100%" stop-color="#ff8a00" />
+    <radialGradient id="orange-aura" cx="50%" cy="30%" r="42%">
+      <stop offset="0%" stop-color="#ff9a00" stop-opacity="0.98" />
+      <stop offset="38%" stop-color="#ff8a00" stop-opacity="0.62" />
+      <stop offset="72%" stop-color="#ff7300" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#ff7300" stop-opacity="0" />
+    </radialGradient>
+    <radialGradient id="teal-aura" cx="50%" cy="68%" r="46%">
+      <stop offset="0%" stop-color="#1596ae" stop-opacity="0.78" />
+      <stop offset="42%" stop-color="#0d6d81" stop-opacity="0.42" />
+      <stop offset="78%" stop-color="#0d6d81" stop-opacity="0.12" />
+      <stop offset="100%" stop-color="#0d6d81" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="lid-left" x1="137" y1="266" x2="398" y2="143" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ff8a00" />
+      <stop offset="100%" stop-color="#ffae1f" />
     </linearGradient>
-    <linearGradient id="top-right" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#ffbe2f" />
-      <stop offset="100%" stop-color="#f99a07" />
+    <linearGradient id="lid-right" x1="398" y1="143" x2="659" y2="266" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#ffb223" />
+      <stop offset="100%" stop-color="#ffd028" />
     </linearGradient>
-    <linearGradient id="base-left" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0a7181" />
-      <stop offset="100%" stop-color="#0b5664" />
+    <linearGradient id="inner-left" x1="245" y1="266" x2="398" y2="429" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#b66600" />
+      <stop offset="100%" stop-color="#f0a100" />
     </linearGradient>
-    <linearGradient id="base-right" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#1292a3" />
-      <stop offset="100%" stop-color="#107483" />
+    <linearGradient id="inner-right" x1="398" y1="196" x2="552" y2="429" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#d88a00" />
+      <stop offset="100%" stop-color="#ffc316" />
     </linearGradient>
-    <linearGradient id="shadow" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" stop-color="#0b3f49" stop-opacity="0.9" />
-      <stop offset="100%" stop-color="#082a31" stop-opacity="0.55" />
+    <linearGradient id="wall-left" x1="137" y1="266" x2="398" y2="676" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b5d72" />
+      <stop offset="100%" stop-color="#083746" />
     </linearGradient>
+    <linearGradient id="wall-right" x1="659" y1="266" x2="398" y2="676" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0c6780" />
+      <stop offset="100%" stop-color="#094354" />
+    </linearGradient>
+    <linearGradient id="front-right" x1="398" y1="502" x2="552" y2="429" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#1b6f84" />
+      <stop offset="100%" stop-color="#2c8ca1" />
+    </linearGradient>
+    <linearGradient id="cavity" x1="245" y1="429" x2="552" y2="429" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#113b48" />
+      <stop offset="50%" stop-color="#2b7f91" />
+      <stop offset="100%" stop-color="#185261" />
+    </linearGradient>
+    <linearGradient id="base-shadow-left" x1="137" y1="540" x2="398" y2="678" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#072c36" stop-opacity="0.86" />
+      <stop offset="100%" stop-color="#0b5060" stop-opacity="0.18" />
+    </linearGradient>
+    <linearGradient id="base-shadow-right" x1="398" y1="678" x2="659" y2="540" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#0b5060" stop-opacity="0.18" />
+      <stop offset="100%" stop-color="#072c36" stop-opacity="0.86" />
+    </linearGradient>
+    <filter id="blur-large" x="-30%" y="-30%" width="160%" height="160%">
+      <feGaussianBlur stdDeviation="42" />
+    </filter>
+    <filter id="logo-shadow" x="-20%" y="-20%" width="140%" height="150%">
+      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.34" />
+    </filter>
   </defs>
 
-  <g transform="translate(0 6)">
-    <polygon points="52,80 160,28 160,148 52,96" fill="url(#top-left)" />
-    <polygon points="160,28 268,80 268,96 160,148" fill="url(#top-right)" />
-    <polygon points="106,106 160,132 214,106 214,142 160,168 106,142" fill="#eb7f00" fill-opacity="0.72" />
+  <rect width="768" height="768" fill="#ffffff" />
+  <ellipse cx="384" cy="286" rx="276" ry="176" fill="url(#orange-aura)" filter="url(#blur-large)" />
+  <ellipse cx="384" cy="518" rx="302" ry="214" fill="url(#teal-aura)" filter="url(#blur-large)" />
 
-    <polygon points="44,90 90,112 90,174 160,208 160,292 44,232" fill="url(#base-left)" />
-    <polygon points="276,90 230,112 230,174 160,208 160,292 276,232" fill="url(#base-right)" />
-    <polygon points="90,112 90,174 160,208 230,174 230,112 214,120 214,166 160,192 106,166 106,120" fill="#ffffff" />
+  <g filter="url(#logo-shadow)">
+    <polygon points="137,266 398,143 398,196 245,266" fill="url(#lid-left)" />
+    <polygon points="398,143 659,266 552,266 398,196" fill="url(#lid-right)" />
 
-    <polygon points="44,232 160,292 160,274 44,214" fill="url(#shadow)" opacity="0.45" />
-    <polygon points="160,292 276,232 276,214 160,274" fill="url(#shadow)" opacity="0.28" />
+    <polygon points="245,266 398,196 398,357 245,429" fill="url(#inner-left)" />
+    <polygon points="398,196 552,266 552,429 398,357" fill="url(#inner-right)" />
+
+    <path d="M137 266 L229 309 Q245 315 245 332 L245 429 L398 502 L398 676 L137 548 Z" fill="url(#wall-left)" />
+    <path d="M659 266 L569 309 Q552 315 552 332 L552 429 L398 502 L398 676 L659 548 Z" fill="url(#wall-right)" />
+    <polygon points="398,502 552,429 552,548 398,676" fill="url(#front-right)" />
+    <polygon points="245,429 398,357 552,429 398,502" fill="url(#cavity)" />
+
+    <polygon points="137,548 398,678 398,668 137,540" fill="url(#base-shadow-left)" />
+    <polygon points="398,678 659,548 659,540 398,668" fill="url(#base-shadow-right)" />
+
+    <polygon points="245,266 398,196 398,200 245,270" fill="#ffd464" opacity="0.28" />
+    <polygon points="398,196 552,266 548,270 398,200" fill="#ffe072" opacity="0.22" />
+    <polygon points="245,429 398,502 552,429 398,357" fill="#000000" opacity="0.12" />
+
+    <line x1="398" y1="143" x2="398" y2="357" stroke="#5f2f00" stroke-opacity="0.34" stroke-width="1.6" />
+    <line x1="398" y1="502" x2="398" y2="676" stroke="#7ed6e6" stroke-opacity="0.18" stroke-width="1.6" />
+    <line x1="137" y1="266" x2="137" y2="548" stroke="#5ad2e4" stroke-opacity="0.08" stroke-width="1.6" />
+    <line x1="659" y1="266" x2="659" y2="548" stroke="#5ad2e4" stroke-opacity="0.08" stroke-width="1.6" />
   </g>
 </svg>
