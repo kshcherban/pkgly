@@ -35,6 +35,8 @@ services:
     volumes:
       - pkgly_data:/data
       - ./docker/config.toml:/data/config.toml:ro
+    ports:
+      - "127.0.0.1:6742:6742"
 
 volumes:
   pkgly_data:
