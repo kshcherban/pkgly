@@ -21,8 +21,7 @@ Use this when you want the quickest local setup on one machine.
 ```bash
 git clone https://github.com/kshcherban/pkgly.git
 cd pkgly
-docker compose build
-docker compose up -d
+docker compose up --detach --build
 ```
 
 What this uses:
@@ -33,7 +32,7 @@ What this uses:
 
 ### Finish installation
 
-Open `http://localhost:6742`.
+Open `http://localhost:8000`.
 
 On first start, Pkgly redirects to `/admin/install`. Use that page to create the first admin account. After that, sign in and create storages and repositories from the UI.
 

@@ -10,8 +10,6 @@ services:
       - PKGLY_TRACING_ENABLED=true
       - PKGLY_LOG__METRICS__ENABLED=true
       - PKGLY_LOG__METRICS__ENDPOINT=http://otel-collector:4317
-    ports:
-      - "127.0.0.1:8000:6742"
     links:
       - jaeger
       - otel-collector
