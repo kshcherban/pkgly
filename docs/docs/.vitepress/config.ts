@@ -273,5 +273,19 @@ function repositoryTypesBar() {
         },
       ],
     },
+    {
+      text: "NuGet",
+      link: "/repositoryTypes/nuget/",
+      items: [
+        {
+          text: "Overview",
+          link: "/repositoryTypes/nuget/",
+        },
+        {
+          text: "Configs",
+          link: "/repositoryTypes/nuget/configs",
+        },
+      ],
+    },
   ];
 }

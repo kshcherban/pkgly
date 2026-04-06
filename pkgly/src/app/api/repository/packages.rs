@@ -486,6 +486,9 @@ enum PackageStrategy {
     NpmProxy,
     NpmHosted,
     NpmVirtual,
+    NugetHosted,
+    NugetProxy,
+    NugetVirtual,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -556,6 +559,11 @@ fn package_strategy(repository: &DynRepository) -> PackageStrategy {
             crate::repository::go::GoRepository::Proxy(_) => PackageStrategy::GoProxy,
         },
         DynRepository::Ruby(_) => PackageStrategy::PackagesDirectory { base: Some("gems") },
+        DynRepository::Nuget(nuget_repo) => match nuget_repo {
+            crate::repository::nuget::NugetRepository::Hosted(_) => PackageStrategy::NugetHosted,
+            crate::repository::nuget::NugetRepository::Proxy(_) => PackageStrategy::NugetProxy,
+            crate::repository::nuget::NugetRepository::Virtual(_) => PackageStrategy::NugetVirtual,
+        },
     }
 }
 
@@ -3709,7 +3717,10 @@ fn is_valid_cache_path(path: &str, strategy: PackageStrategy) -> bool {
         | PackageStrategy::MavenProxy
         | PackageStrategy::PythonHosted
         | PackageStrategy::PythonProxy
-        | PackageStrategy::Cargo => is_valid_repository_path(path),
+        | PackageStrategy::Cargo
+        | PackageStrategy::NugetHosted
+        | PackageStrategy::NugetProxy
+        | PackageStrategy::NugetVirtual => is_valid_repository_path(path),
         PackageStrategy::DockerHosted | PackageStrategy::DockerProxy => {
             is_valid_docker_manifest_path(path)
         }

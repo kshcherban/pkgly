@@ -8,6 +8,7 @@ import CargoConfig from "@/components/nr/repository/types/cargo/CargoConfig.vue"
 import DebConfig from "@/components/nr/repository/types/deb/DebConfig.vue";
 import DockerConfig from "@/components/nr/repository/types/docker/DockerConfig.vue";
 import RubyConfig from "@/components/nr/repository/types/ruby/RubyConfig.vue";
+import NugetConfig from "@/components/nr/repository/types/nuget/NugetConfig.vue";
 
 import type { Component } from "vue";
 import RepositoryAuthConfig from "@/components/admin/repository/configs/RepositoryAuthConfig.vue";
@@ -22,6 +23,7 @@ import { HelmFrontendDefinition } from "@/components/nr/repository/types/helm/he
 import { DockerFrontendDefinition } from "@/components/nr/repository/types/docker/docker";
 import { CargoFrontendDefinition } from "@/components/nr/repository/types/cargo/cargo";
 import { DebFrontendDefinition } from "@/components/nr/repository/types/deb/deb";
+import { NugetFrontendDefinition } from "@/components/nr/repository/types/nuget/nuget";
 import NPMConfig from "@/components/nr/repository/types/npm/NPMConfig.vue";
 import type { RepositoryActionsType } from "./user";
 export { createRepositoryRoute } from "./repositoryRoute";
@@ -121,6 +123,11 @@ export const configTypes: ConfigType[] = [
     title: "Debian Repository Config",
     component: DebConfig,
   },
+  {
+    name: "nuget",
+    title: "NuGet Repository Config",
+    component: NugetConfig,
+  },
 ];
 export interface RepositoryIconDef {
   name: string;
@@ -152,6 +159,7 @@ export const repositoryTypes: FrontendRepositoryType[] = [
   HelmFrontendDefinition,
   DockerFrontendDefinition,
   DebFrontendDefinition,
+  NugetFrontendDefinition,
 ];
 
 const packageViewRepositoryTypeSet = new Set(

@@ -32,6 +32,7 @@ pub mod go;
 pub mod helm;
 pub mod hosted;
 pub mod maven;
+pub mod nuget;
 pub mod npm;
 pub mod php;
 pub mod proxy;
@@ -61,6 +62,7 @@ pub enum DynRepository {
     Helm(helm::HelmRepository),
     Cargo(cargo::CargoRegistry),
     Maven(maven::MavenRepository),
+    Nuget(nuget::NugetRepository),
     NPM(npm::NPMRegistry),
     Python(python::PythonRepository),
     Php(php::PhpRepository),

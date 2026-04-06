@@ -56,6 +56,7 @@ TEST_SUITES:
     debian      Run Debian repository integration tests
     cargo       Run Cargo registry integration tests
     helm        Run Helm integration tests
+    nuget       Run NuGet integration tests
     all         Run all test suites (default)
 
 EXAMPLES:
@@ -113,12 +114,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm)
+        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm)
+            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget)
             shift
             ;;
         *)
@@ -131,7 +132,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm)
+    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget)
 fi
 
 # Enable verbose mode

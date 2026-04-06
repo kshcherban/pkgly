@@ -22,6 +22,8 @@ use tower_service::Service;
 use tracing::{Span, debug, field::Empty, info_span, trace};
 
 use super::header::AuthorizationHeader;
+
+const NUGET_API_KEY_HEADER: &str = "x-nuget-apikey";
 #[derive(Debug, Clone, From)]
 pub struct AuthenticationLayer(pub Pkgly);
 
@@ -53,6 +55,13 @@ impl<S> AuthenticationMiddleware<S> {
             .transpose()?;
         let raw = if let Some(authorization_header) = authorization_header {
             AuthenticationRaw::new_from_header(authorization_header, &self.site)
+        } else if let Some(api_key) = parts
+            .headers
+            .get(NUGET_API_KEY_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .filter(|value| !value.is_empty())
+        {
+            AuthenticationRaw::AuthToken(api_key.to_string())
         } else if let Some(cookie) = cookie_jar.get("session") {
             debug!("Session Cookie Found");
             AuthenticationRaw::new_from_cookie(cookie, &self.site)

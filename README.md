@@ -30,6 +30,7 @@ At the moment it supports virtual, proxied and hosted repositories of:
 - helm (oci and http)
 - go
 - npm
+- nuget (.NET / NuGet V3)
 - rust cargo (hosted only)
 
 ### Technical Design

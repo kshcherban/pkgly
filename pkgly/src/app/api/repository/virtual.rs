@@ -30,6 +30,7 @@ use crate::{
             NPMRegistry, NPMRegistryConfig, NPMRegistryConfigType,
             npm_virtual::{VirtualRepositoryMemberConfig, VirtualResolutionOrder},
         },
+        nuget::{NugetRepository, NugetRepositoryConfig, NugetRepositoryConfigType},
         python::{PythonRepository, PythonRepositoryConfig, PythonRepositoryConfigType},
         r#virtual::config::VirtualRepositoryConfig,
     },
@@ -142,7 +143,21 @@ async fn list_members(
                 _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
             }
         }
-        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM or Python")),
+        "nuget" => {
+            let config = DBRepositoryConfig::<NugetRepositoryConfig>::get_config(
+                repository_id,
+                NugetRepositoryConfigType::get_type_static(),
+                site.as_ref(),
+            )
+            .await?
+            .map(|cfg| cfg.value.0)
+            .unwrap_or_default();
+            match config {
+                NugetRepositoryConfig::Virtual(cfg) => cfg,
+                _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
+            }
+        }
+        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM, Python, or NuGet")),
     };
 
     let members = DBVirtualRepositoryMember::list_for_virtual(repository_id, site.as_ref()).await?;
@@ -210,7 +225,21 @@ async fn update_members(
                 _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
             }
         }
-        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM or Python")),
+        "nuget" => {
+            let config = DBRepositoryConfig::<NugetRepositoryConfig>::get_config(
+                repository_id,
+                NugetRepositoryConfigType::get_type_static(),
+                site.as_ref(),
+            )
+            .await?
+            .map(|cfg| cfg.value.0)
+            .unwrap_or_default();
+            match config {
+                NugetRepositoryConfig::Virtual(cfg) => cfg,
+                _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
+            }
+        }
+        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM, Python, or NuGet")),
     };
 
     if payload.members.is_empty() {
@@ -300,7 +329,21 @@ async fn update_resolution_order(
                 _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
             }
         }
-        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM or Python")),
+        "nuget" => {
+            let config = DBRepositoryConfig::<NugetRepositoryConfig>::get_config(
+                repository_id,
+                NugetRepositoryConfigType::get_type_static(),
+                site.as_ref(),
+            )
+            .await?
+            .map(|cfg| cfg.value.0)
+            .unwrap_or_default();
+            match config {
+                NugetRepositoryConfig::Virtual(cfg) => cfg,
+                _ => return Ok(ResponseBuilder::bad_request().body("Repository is not virtual")),
+            }
+        }
+        _ => return Ok(ResponseBuilder::bad_request().body("Repository is not NPM, Python, or NuGet")),
     };
 
     config.resolution_order = payload.resolution_order;
@@ -365,6 +408,17 @@ async fn persist_virtual_config(
             GenericDBRepositoryConfig::add_or_update(
                 repository_id,
                 PythonRepositoryConfigType::get_type_static().to_string(),
+                value,
+                database,
+            )
+            .await?;
+        }
+        "nuget" => {
+            let value = serde_json::to_value(NugetRepositoryConfig::Virtual(config.clone()))
+                .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
+            GenericDBRepositoryConfig::add_or_update(
+                repository_id,
+                NugetRepositoryConfigType::get_type_static().to_string(),
                 value,
                 database,
             )
@@ -462,6 +516,23 @@ async fn validate_publish_target(
                 );
             }
         }
+        "nuget" => {
+            let target_config = DBRepositoryConfig::<NugetRepositoryConfig>::get_config(
+                target,
+                NugetRepositoryConfigType::get_type_static(),
+                database,
+            )
+            .await
+            .map_err(|err| err.to_string())?
+            .map(|cfg| cfg.value.0)
+            .unwrap_or_default();
+
+            if !matches!(target_config, NugetRepositoryConfig::Hosted) {
+                return Err(
+                    "publish_to must reference an enabled hosted member repository".to_string(),
+                );
+            }
+        }
         _ => return Err("Repository type does not support virtual publishing".to_string()),
     }
 
@@ -478,6 +549,14 @@ async fn reload_runtime_virtual(site: &Pkgly, repository_id: Uuid) {
     }
 
     if let Some(DynRepository::Python(PythonRepository::Virtual(virtual_repo))) =
+        site.get_repository(repository_id)
+    {
+        if let Err(err) = virtual_repo.reload().await {
+            tracing::warn!(repository = %repository_id, error = %err, "Failed to reload virtual repository after config update");
+        }
+    }
+
+    if let Some(DynRepository::Nuget(NugetRepository::Virtual(virtual_repo))) =
         site.get_repository(repository_id)
     {
         if let Err(err) = virtual_repo.reload().await {

@@ -31,6 +31,7 @@ At runtime, Pkgly is a three-part system:
 - Helm (`helm`): hosted chart repository support.
 - Go (`go`): hosted + proxy, including module proxy endpoints.
 - Debian (`deb`): package repository endpoints and catalog integration.
+- NuGet (`nuget`): hosted + proxy + virtual, including V3 service index, flat-container downloads, registration documents, hosted publish, and virtual publish forwarding to a hosted member.
 
 ## HTTP Flow
 - `repository_router` in `repo_http.rs`: resolves storage/repo by path, constructs `RepositoryRequest` (HTTP parts, body, parsed `StoragePath`, authentication).

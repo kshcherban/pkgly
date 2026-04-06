@@ -56,4 +56,4 @@ ansi_color = true
 include_span_context = false
 
 [site]
-is_https = true
+is_https = false

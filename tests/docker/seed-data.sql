@@ -348,6 +348,49 @@ INSERT INTO repository_configs (repository_id, key, value) VALUES
     ('77777777-0000-0000-0000-000000000002'::uuid, 'auth', '{"enabled": false}'::jsonb)
 ON CONFLICT (repository_id, key) DO NOTHING;
 
+-- NuGet Hosted Repository
+INSERT INTO repositories (id, storage_id, name, repository_type, visibility, active)
+VALUES (
+    'aaaaaaaa-0000-0000-0000-000000000001'::uuid,
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    'nuget-hosted',
+    'nuget',
+    'Public',
+    true
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO repository_configs (repository_id, key, value) VALUES
+    ('aaaaaaaa-0000-0000-0000-000000000001'::uuid, 'nuget', '{"type": "Hosted"}'::jsonb),
+    ('aaaaaaaa-0000-0000-0000-000000000001'::uuid, 'auth', '{"enabled": false}'::jsonb)
+ON CONFLICT (repository_id, key) DO NOTHING;
+
+-- NuGet Proxy Repository (proxies the local hosted repo for deterministic tests)
+INSERT INTO repositories (id, storage_id, name, repository_type, visibility, active)
+VALUES (
+    'aaaaaaaa-0000-0000-0000-000000000002'::uuid,
+    '00000000-0000-0000-0000-000000000001'::uuid,
+    'nuget-proxy',
+    'nuget',
+    'Public',
+    true
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO repository_configs (repository_id, key, value) VALUES
+    (
+        'aaaaaaaa-0000-0000-0000-000000000002'::uuid,
+        'nuget',
+        '{
+            "type": "Proxy",
+            "config": {
+                "upstream_url": "http://pkgly:8888/repositories/test-storage/nuget-hosted/v3/index.json"
+            }
+        }'::jsonb
+    ),
+    ('aaaaaaaa-0000-0000-0000-000000000002'::uuid, 'auth', '{"enabled": false}'::jsonb)
+ON CONFLICT (repository_id, key) DO NOTHING;
+
 -- Create test auth token (never expires)
 -- Token: NPDxeLFM8ehXKteIHW7DFy1chf2QaYdf (encrypted binary data in database)
 INSERT INTO user_auth_tokens (id, user_id, name, description, token, active, source, expires_at)

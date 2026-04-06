@@ -94,6 +94,14 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 # Install Helm
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
+# Install .NET SDK for NuGet integration tests
+RUN wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+    && dpkg -i packages-microsoft-prod.deb \
+    && rm packages-microsoft-prod.deb \
+    && apt-get update \
+    && apt-get install -y dotnet-sdk-8.0 \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install Rust toolchain for Cargo integration tests
 RUN curl https://sh.rustup.rs -sSf | bash -s -- -y --default-toolchain stable --profile minimal \
     && /root/.cargo/bin/rustup component add rustfmt

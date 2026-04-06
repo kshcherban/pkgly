@@ -18,7 +18,7 @@ without guesswork.
 | Docker / OCI | Yes | Yes | Private Docker Registry HTTP API v2 implementation plus pull-through caching for upstream registries ([docs](./repositoryTypes/docker/index.md)). |
 | Helm | Yes | No | HTTP chart repository and OCI distribution registry with unified package management ([docs](./repositoryTypes/helm/index.md)). |
 | Debian (APT) | Yes | Yes | Hosted APT repos plus proxy/mirror caching for upstream `dists/`/`pool/` trees ([docs](./repositoryTypes/deb/index.md)). |
-| NuGet | Planned | Planned | Tracked in [issue #191](https://github.com/wherkamp/pkgly/issues/191). |
+| NuGet | Yes | Yes | NuGet V3 hosted and proxy repositories plus virtual aggregation with hosted publish forwarding ([docs](./repositoryTypes/nuget/index.md)). |
 
 ## Platform Capabilities
 
