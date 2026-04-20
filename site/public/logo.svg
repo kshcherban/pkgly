@@ -1,94 +1,63 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 768 768" role="img" aria-labelledby="title desc">
-  <title id="title">Pkgly logo</title>
-  <desc id="desc">A glowing orange package lid above a teal box on a white background.</desc>
-  <defs>
-    <radialGradient id="orange-aura" cx="50%" cy="30%" r="42%">
-      <stop offset="0%" stop-color="#ff9a00" stop-opacity="0.98" />
-      <stop offset="38%" stop-color="#ff8a00" stop-opacity="0.62" />
-      <stop offset="72%" stop-color="#ff7300" stop-opacity="0.18" />
-      <stop offset="100%" stop-color="#ff7300" stop-opacity="0" />
-    </radialGradient>
-    <radialGradient id="teal-aura" cx="50%" cy="68%" r="46%">
-      <stop offset="0%" stop-color="#1596ae" stop-opacity="0.78" />
-      <stop offset="42%" stop-color="#0d6d81" stop-opacity="0.42" />
-      <stop offset="78%" stop-color="#0d6d81" stop-opacity="0.12" />
-      <stop offset="100%" stop-color="#0d6d81" stop-opacity="0" />
-    </radialGradient>
-    <linearGradient id="lid-left" x1="137" y1="266" x2="398" y2="143" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ff8a00" />
-      <stop offset="100%" stop-color="#ffae1f" />
-    </linearGradient>
-    <linearGradient id="lid-right" x1="398" y1="143" x2="659" y2="266" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#ffb223" />
-      <stop offset="100%" stop-color="#ffd028" />
-    </linearGradient>
-    <linearGradient id="inner-left" x1="245" y1="266" x2="398" y2="429" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#b66600" />
-      <stop offset="100%" stop-color="#f0a100" />
-    </linearGradient>
-    <linearGradient id="inner-right" x1="398" y1="196" x2="552" y2="429" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#d88a00" />
-      <stop offset="100%" stop-color="#ffc316" />
-    </linearGradient>
-    <linearGradient id="wall-left" x1="137" y1="266" x2="398" y2="676" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0b5d72" />
-      <stop offset="100%" stop-color="#083746" />
-    </linearGradient>
-    <linearGradient id="wall-right" x1="659" y1="266" x2="398" y2="676" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0c6780" />
-      <stop offset="100%" stop-color="#094354" />
-    </linearGradient>
-    <linearGradient id="front-right" x1="398" y1="502" x2="552" y2="429" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#1b6f84" />
-      <stop offset="100%" stop-color="#2c8ca1" />
-    </linearGradient>
-    <linearGradient id="cavity" x1="245" y1="429" x2="552" y2="429" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#113b48" />
-      <stop offset="50%" stop-color="#2b7f91" />
-      <stop offset="100%" stop-color="#185261" />
-    </linearGradient>
-    <linearGradient id="base-shadow-left" x1="137" y1="540" x2="398" y2="678" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#072c36" stop-opacity="0.86" />
-      <stop offset="100%" stop-color="#0b5060" stop-opacity="0.18" />
-    </linearGradient>
-    <linearGradient id="base-shadow-right" x1="398" y1="678" x2="659" y2="540" gradientUnits="userSpaceOnUse">
-      <stop offset="0%" stop-color="#0b5060" stop-opacity="0.18" />
-      <stop offset="100%" stop-color="#072c36" stop-opacity="0.86" />
-    </linearGradient>
-    <filter id="blur-large" x="-30%" y="-30%" width="160%" height="160%">
-      <feGaussianBlur stdDeviation="42" />
-    </filter>
-    <filter id="logo-shadow" x="-20%" y="-20%" width="140%" height="150%">
-      <feDropShadow dx="0" dy="18" stdDeviation="18" flood-color="#000000" flood-opacity="0.34" />
-    </filter>
-  </defs>
-
-  <rect width="768" height="768" fill="#ffffff" />
-  <ellipse cx="384" cy="286" rx="276" ry="176" fill="url(#orange-aura)" filter="url(#blur-large)" />
-  <ellipse cx="384" cy="518" rx="302" ry="214" fill="url(#teal-aura)" filter="url(#blur-large)" />
-
-  <g filter="url(#logo-shadow)">
-    <polygon points="137,266 398,143 398,196 245,266" fill="url(#lid-left)" />
-    <polygon points="398,143 659,266 552,266 398,196" fill="url(#lid-right)" />
-
-    <polygon points="245,266 398,196 398,357 245,429" fill="url(#inner-left)" />
-    <polygon points="398,196 552,266 552,429 398,357" fill="url(#inner-right)" />
-
-    <path d="M137 266 L229 309 Q245 315 245 332 L245 429 L398 502 L398 676 L137 548 Z" fill="url(#wall-left)" />
-    <path d="M659 266 L569 309 Q552 315 552 332 L552 429 L398 502 L398 676 L659 548 Z" fill="url(#wall-right)" />
-    <polygon points="398,502 552,429 552,548 398,676" fill="url(#front-right)" />
-    <polygon points="245,429 398,357 552,429 398,502" fill="url(#cavity)" />
-
-    <polygon points="137,548 398,678 398,668 137,540" fill="url(#base-shadow-left)" />
-    <polygon points="398,678 659,548 659,540 398,668" fill="url(#base-shadow-right)" />
-
-    <polygon points="245,266 398,196 398,200 245,270" fill="#ffd464" opacity="0.28" />
-    <polygon points="398,196 552,266 548,270 398,200" fill="#ffe072" opacity="0.22" />
-    <polygon points="245,429 398,502 552,429 398,357" fill="#000000" opacity="0.12" />
-
-    <line x1="398" y1="143" x2="398" y2="357" stroke="#5f2f00" stroke-opacity="0.34" stroke-width="1.6" />
-    <line x1="398" y1="502" x2="398" y2="676" stroke="#7ed6e6" stroke-opacity="0.18" stroke-width="1.6" />
-    <line x1="137" y1="266" x2="137" y2="548" stroke="#5ad2e4" stroke-opacity="0.08" stroke-width="1.6" />
-    <line x1="659" y1="266" x2="659" y2="548" stroke="#5ad2e4" stroke-opacity="0.08" stroke-width="1.6" />
-  </g>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 150 150">
+<!-- SVG created with Arrow, by QuiverAI (https://quiver.ai) -->
+  <style type="text/css">.cls-0 {fill:url(#SVGID_1_);}
+.cls-1 {fill:url(#SVGID_2_);}
+.cls-2 {fill:url(#SVGID_3_);}
+.cls-3 {fill:url(#SVGID_4_);}
+.cls-4 {fill:url(#SVGID_5_);}
+.cls-5 {fill:url(#SVGID_6_);}
+.cls-6 {fill:url(#SVGID_7_);}
+.cls-7 {fill:url(#SVGID_8_);}</style>
+  <linearGradient id="SVGID_1_" x1="25.82" x2="77.44" y1="47.32" y2="47.32" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#EF7100" offset="0"/>
+    <stop stop-color="#EC6608" offset="1"/>
+  </linearGradient>
+  <polygon class="cls-0" points="25.8 51.3 47.4 61.1 77.4 48.6 77.4 27"/>
+  <linearGradient id="SVGID_2_" x1="77.44" x2="129.1" y1="42.9" y2="42.9" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#FFA607" offset="0"/>
+    <stop stop-color="#FFB70B" offset="1"/>
+  </linearGradient>
+  <polygon class="cls-1" points="77.4 27 77.4 37.6 117.4 57 129.1 51.2"/>
+  <linearGradient id="SVGID_3_" x1="66.99" x2="55.76" y1="40.13" y2="76.42" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#A1580C" offset="0"/>
+    <stop stop-color="#D18316" offset="1"/>
+  </linearGradient>
+  <polygon class="cls-2" points="77.4 37.6 37.8 57.1 47.4 61.3 47.4 83.8 77.4 69.7"/>
+  <linearGradient id="SVGID_4_" x1="84.93" x2="103.9" y1="40.57" y2="78.93" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#B87314" offset="0"/>
+    <stop stop-color="#E1A21C" offset="1"/>
+  </linearGradient>
+  <path class="cls-3" d="m77.4 37.6v32.2l30 13.7 0.1-19.7 9.9-6.8-40-19.4z"/>
+  <linearGradient id="SVGID_5_" x1="47.42" x2="107.4" y1="82.9" y2="82.9" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#286D77" offset="0"/>
+    <stop stop-color="#145964" offset="1"/>
+  </linearGradient>
+  <polygon class="cls-4" points="47.4 83.8 77.4 97.9 107.4 83.7 77.3 69.6"/>
+  <linearGradient id="SVGID_6_" x1="25.71" x2="77.44" y1="90.15" y2="90.15" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#074859" offset="0"/>
+    <stop stop-color="#054E5F" offset="1"/>
+  </linearGradient>
+  <path class="cls-5" d="m45.7 60.9-19.9-9.6-0.1 56.4 51.7 25.5v-35.4l-30.1-14 0.1-19.7c0-1.4-0.4-2.6-1.7-3.2z"/>
+  <linearGradient id="SVGID_7_" x1="77.44" x2="129.1" y1="91.93" y2="91.93" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#217F8F" offset="0"/>
+    <stop stop-color="#0A5768" offset="1"/>
+  </linearGradient>
+  <path class="cls-6" d="m109.1 61.4c-0.5 0.5-1.6 1.1-1.9 2.5l0.2 19.8-30 14.1v35.4l51.6-25.4 0.1-56.6-20 10.2z"/>
+  <linearGradient id="SVGID_8_" x1="25.82" x2="77.44" y1="117.6" y2="117.6" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#0D4554" offset="0"/>
+    <stop stop-color="#053E4A" offset="1"/>
+  </linearGradient>
+  <polygon class="cls-7" points="25.8 107.2 25.9 107.8 77.4 133.1 77.4 131.9"/>
+  <linearGradient id="SVGID_9_" x1="77.44" x2="129.1" y1="119.7" y2="119.7" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#156675" offset="0"/>
+    <stop stop-color="#105E6C" offset="1"/>
+  </linearGradient>
+  <polygon points="77.4 133.1 129 107.9 129.1 107.1 77.4 131.9" fill="url(#SVGID_9_)"/>
+  <path d="m37.8 56.9 39.6-19.3 40 19.3 0.3-0.1-40.3-19.3-39.8 19.5 0.2 0.1z" fill="#FFA607"/>
+  <path d="m107.3 83.2-29.9-13.7-30 14.1v0.2l30-13.8 29.7 13.5 0.2-0.3z" fill="#FFA607"/>
+  <linearGradient id="SVGID_10_" x1="107.2" x2="129.1" y1="70.32" y2="70.32" gradientUnits="userSpaceOnUse">
+    <stop stop-color="#15515D" offset="0"/>
+    <stop stop-color="#0E5361" offset="1"/>
+  </linearGradient>
+  <path d="m109.3 61.2c-0.7 0.6-2.1 1.2-2 3.4l0.1 19.1h0.4l-0.4-19.8c0.2-1.6 1.1-2.3 2-2.7l19.7-9.7-0.2-0.3-19.6 10z" fill="url(#SVGID_10_)"/>
 </svg>

@@ -6,18 +6,47 @@ import base64
 import concurrent.futures
 import http.client
 import json
+import mimetypes
+import os
 import sys
+import time
 from contextlib import closing
 from dataclasses import dataclass
 from typing import BinaryIO
+from uuid import UUID
 from urllib import error, parse, request
 
 
 CHECKSUM_SUFFIXES = (".sha1", ".sha256", ".sha512", ".md5")
 DEFAULT_TIMEOUT_SECONDS = 60
+DEFAULT_RETRIES = 3
+DEFAULT_RETRY_BACKOFF_SECONDS = 1.0
+DEFAULT_CONTENT_TYPE = "application/octet-stream"
+RETRYABLE_STATUS_CODES = {408, 425, 429, 500, 502, 503, 504}
 USER_AGENT = "pkgly-artifactory-to-pkgly/0.2"
-SUPPORTED_PACKAGE_TYPES = {"maven"}
+SUPPORTED_PACKAGE_TYPES = {"helm", "maven", "pypi"}
 SUPPORTED_REPO_TYPES = {"local"}
+PACKAGE_TYPE_TO_PKGLY_TYPE = {
+    "helm": "helm",
+    "maven": "maven",
+    "pypi": "python",
+}
+CONTENT_TYPE_OVERRIDES = {
+    ".ear": "application/java-archive",
+    ".jar": "application/java-archive",
+    ".pom": "application/xml",
+    ".prov": "application/pgp-signature",
+    ".war": "application/java-archive",
+    ".whl": "application/zip",
+    ".xml": "application/xml",
+}
+
+
+class HttpStatusError(RuntimeError):
+    def __init__(self, status_code: int, body: str) -> None:
+        super().__init__(f"HTTP {status_code}: {body}")
+        self.status_code = status_code
+        self.body = body
 
 
 @dataclass(frozen=True)
@@ -71,10 +100,147 @@ def build_auth_header(token: str | None, username: str | None, password: str | N
     return f"Basic {encoded}"
 
 
+def resolve_argument(value: str | None, env_name: str) -> str | None:
+    if value is not None:
+        return value
+    env_value = os.environ.get(env_name)
+    return env_value or None
+
+
+def validate_uuid(value: str, argument_name: str) -> str:
+    try:
+        UUID(value)
+    except ValueError as exc:
+        raise RuntimeError(f"{argument_name} must be a valid UUID") from exc
+    return value
+
+
+def is_retryable_exception(exc: Exception) -> bool:
+    if isinstance(exc, HttpStatusError):
+        return exc.status_code in RETRYABLE_STATUS_CODES
+    if isinstance(exc, error.HTTPError):
+        return exc.code in RETRYABLE_STATUS_CODES
+    return isinstance(exc, (TimeoutError, error.URLError, http.client.HTTPException, OSError))
+
+
+def retry_operation(
+    description: str,
+    operation,
+    *,
+    retries: int,
+    backoff_seconds: float,
+    sleep=time.sleep,
+):
+    for attempt in range(retries + 1):
+        try:
+            return operation()
+        except Exception as exc:
+            if attempt >= retries or not is_retryable_exception(exc):
+                raise
+            delay = backoff_seconds * (2**attempt)
+            print(
+                f"Retrying {description} after {delay:.1f}s due to: {exc}",
+                file=sys.stderr,
+            )
+            sleep(delay)
+
+
+def guess_content_type(path: str) -> str:
+    lowered = path.lower()
+    for suffix, content_type in CONTENT_TYPE_OVERRIDES.items():
+        if lowered.endswith(suffix):
+            return content_type
+    guessed, _ = mimetypes.guess_type(path)
+    return guessed or DEFAULT_CONTENT_TYPE
+
+
 def should_copy_path(package_type: str, path: str) -> bool:
+    return resolve_target_path(package_type, path) is not None
+
+
+def _normalize_python_package_name(name: str) -> str:
+    return name.lower().replace("_", "-").replace(".", "-")
+
+
+def _parse_python_filename(filename: str) -> tuple[str, str] | None:
+    if filename.endswith(".whl"):
+        stem = filename[:-4]
+        parts = stem.split("-")
+        if len(parts) not in {5, 6}:
+            return None
+        return parts[0], parts[1]
+
+    suffixes = (".tar.gz", ".tar.bz2", ".tgz", ".zip", ".egg", ".tar")
+    for suffix in suffixes:
+        if filename.endswith(suffix):
+            stem = filename[: -len(suffix)]
+            if suffix == ".egg":
+                parts = stem.rsplit("-", 2)
+                if len(parts) != 3:
+                    return None
+                return parts[0], parts[1]
+            parts = stem.rsplit("-", 1)
+            if len(parts) != 2:
+                return None
+            return parts[0], parts[1]
+    return None
+
+
+def _resolve_python_target_path(path: str) -> str | None:
+    normalized = normalize_path(path)
+    if not normalized or normalized.lower().endswith(CHECKSUM_SUFFIXES):
+        return None
+
+    parts = normalized.split("/")
+    filename = parts[-1]
+    parsed_filename = _parse_python_filename(filename)
+    if parsed_filename is None:
+        return None
+    package, version = parsed_filename
+
+    if len(parts) >= 3:
+        path_package = parts[-3]
+        path_version = parts[-2]
+        if _normalize_python_package_name(path_package) == _normalize_python_package_name(
+            package
+        ) and path_version == version:
+            return "/".join([path_package, path_version, filename])
+
+    return "/".join([package, version, filename])
+
+
+def _resolve_helm_target_path(path: str) -> str | None:
+    normalized = normalize_path(path)
+    if not normalized or normalized.lower().endswith(CHECKSUM_SUFFIXES):
+        return None
+    filename = normalized.rsplit("/", 1)[-1]
+    if filename.endswith(".tgz.prov"):
+        stem = filename[: -len(".tgz.prov")]
+        suffix = ".tgz.prov"
+    elif filename.endswith(".tgz"):
+        stem = filename[: -len(".tgz")]
+        suffix = ".tgz"
+    else:
+        return None
+    name, sep, version = stem.rpartition("-")
+    if not sep or not name or not version:
+        return None
+    return f"charts/{name}/{name}-{version}{suffix}"
+
+
+def resolve_target_path(package_type: str, path: str) -> str | None:
+    normalized = normalize_path(path)
+    if not normalized:
+        return None
     if package_type == "maven":
-        return not path.lower().endswith(CHECKSUM_SUFFIXES)
-    return True
+        if normalized.lower().endswith(CHECKSUM_SUFFIXES):
+            return None
+        return normalized
+    if package_type == "helm":
+        return _resolve_helm_target_path(normalized)
+    if package_type == "pypi":
+        return _resolve_python_target_path(normalized)
+    return None
 
 
 def parse_repositories_response(payload: list[dict]) -> list[RepositoryDescriptor]:
@@ -148,6 +314,7 @@ def _stream_put(
     url: str,
     *,
     auth_header: str | None,
+    content_type: str,
     timeout: int,
     stream: BinaryIO,
     size: int,
@@ -161,24 +328,28 @@ def _stream_put(
     if parsed.query:
         request_path = f"{request_path}?{parsed.query}"
 
-    connection.putrequest("PUT", request_path)
-    connection.putheader("User-Agent", USER_AGENT)
-    connection.putheader("Content-Length", str(size))
-    if auth_header:
-        connection.putheader("Authorization", auth_header)
-    connection.endheaders()
+    try:
+        connection.putrequest("PUT", request_path)
+        connection.putheader("User-Agent", USER_AGENT)
+        connection.putheader("Content-Length", str(size))
+        connection.putheader("Content-Type", content_type)
+        if auth_header:
+            connection.putheader("Authorization", auth_header)
+        connection.endheaders()
 
-    while True:
-        chunk = stream.read(64 * 1024)
-        if not chunk:
-            break
-        connection.send(chunk)
+        while True:
+            chunk = stream.read(64 * 1024)
+            if not chunk:
+                break
+            connection.send(chunk)
 
-    response = connection.getresponse()
-    body = response.read().decode("utf-8", errors="replace")
-    connection.close()
+        response = connection.getresponse()
+        body = response.read().decode("utf-8", errors="replace")
+    finally:
+        connection.close()
+
     if response.status < 200 or response.status >= 300:
-        raise RuntimeError(f"Pkgly upload failed with HTTP {response.status}: {body}")
+        raise HttpStatusError(response.status, body)
 
 
 def _head_request(url: str, *, auth_header: str | None, timeout: int) -> int:
@@ -260,18 +431,14 @@ class PkglyClient:
             raise RuntimeError(f"Pkgly repository lookup failed with HTTP {exc.code}") from exc
 
     def create_repository(self, storage_id: str, repository_name: str, package_type: str) -> None:
-        if package_type != "maven":
+        if package_type not in PACKAGE_TYPE_TO_PKGLY_TYPE.values():
             raise RuntimeError(f"unsupported package type for target creation: {package_type}")
         payload = {
             "name": repository_name,
             "storage": storage_id,
-            "configs": {
-                "maven": {
-                    "type": "Hosted",
-                }
-            },
+            "configs": {},
         }
-        url = f"{self.base_url}/api/repository/new/maven"
+        url = f"{self.base_url}/api/repository/new/{parse.quote(package_type)}"
         try:
             _json_request(
                 url,
@@ -313,6 +480,7 @@ class PkglyClient:
         _stream_put(
             url,
             auth_header=self.auth_header,
+            content_type=guess_content_type(relative_path),
             timeout=self.timeout,
             stream=stream,
             size=size,
@@ -335,7 +503,11 @@ def prepare_target_repository(
         raise RuntimeError(f"target repository {storage_name}/{repository.key} does not exist")
     if not storage_id:
         raise RuntimeError("--pkgly-storage-id is required when --create-targets is used")
-    pkgly.create_repository(storage_id, repository.key, repository.package_type)
+    pkgly.create_repository(
+        validate_uuid(storage_id, "--pkgly-storage-id"),
+        repository.key,
+        PACKAGE_TYPE_TO_PKGLY_TYPE[repository.package_type],
+    )
 
 
 def migrate_repository(
@@ -348,6 +520,8 @@ def migrate_repository(
     target_storage_id: str | None,
     path_prefix: str,
     dry_run: bool,
+    retries: int = DEFAULT_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
 ) -> RepositoryMigrationResult:
     if repository.repo_type not in SUPPORTED_REPO_TYPES:
         return RepositoryMigrationResult(
@@ -368,26 +542,42 @@ def migrate_repository(
         )
 
     try:
-        prepare_target_repository(
-            pkgly=pkgly,
-            storage_name=target_storage_name,
-            storage_id=target_storage_id,
-            repository=repository,
-            create_targets=create_targets,
+        retry_operation(
+            f"prepare target repository {repository.key}",
+            lambda: prepare_target_repository(
+                pkgly=pkgly,
+                storage_name=target_storage_name,
+                storage_id=target_storage_id,
+                repository=repository,
+                create_targets=create_targets,
+            ),
+            retries=retries,
+            backoff_seconds=retry_backoff_seconds,
         )
 
-        entries = artifactory.list_files(repository.key, path_prefix)
+        entries = retry_operation(
+            f"list files for {repository.key}",
+            lambda: artifactory.list_files(repository.key, path_prefix),
+            retries=retries,
+            backoff_seconds=retry_backoff_seconds,
+        )
         skipped_filtered = 0
         skipped_existing = 0
         transferred = 0
         dry_run_count = 0
 
         for entry in entries:
-            if not should_copy_path(repository.package_type, entry.path):
+            target_path = resolve_target_path(repository.package_type, entry.path)
+            if target_path is None:
                 skipped_filtered += 1
                 continue
 
-            if pkgly.artifact_exists(target_storage_name, repository.key, entry.path):
+            if retry_operation(
+                f"check target artifact {repository.key}/{target_path}",
+                lambda: pkgly.artifact_exists(target_storage_name, repository.key, target_path),
+                retries=retries,
+                backoff_seconds=retry_backoff_seconds,
+            ):
                 skipped_existing += 1
                 continue
 
@@ -395,14 +585,22 @@ def migrate_repository(
                 dry_run_count += 1
                 continue
 
-            with closing(artifactory.open_file(repository.key, entry.path)) as stream:
-                pkgly.upload_file(
-                    target_storage_name,
-                    repository.key,
-                    entry.path,
-                    stream,
-                    entry.size,
-                )
+            def copy_entry() -> None:
+                with closing(artifactory.open_file(repository.key, entry.path)) as stream:
+                    pkgly.upload_file(
+                        target_storage_name,
+                        repository.key,
+                        target_path,
+                        stream,
+                        entry.size,
+                    )
+
+            retry_operation(
+                f"copy artifact {repository.key}/{entry.path}",
+                copy_entry,
+                retries=retries,
+                backoff_seconds=retry_backoff_seconds,
+            )
             transferred += 1
     except RuntimeError as exc:
         return RepositoryMigrationResult(
@@ -447,9 +645,16 @@ def migrate_repositories(
     path_prefix: str,
     dry_run: bool,
     parallelism: int,
+    retries: int = DEFAULT_RETRIES,
+    retry_backoff_seconds: float = DEFAULT_RETRY_BACKOFF_SECONDS,
     executor_class=concurrent.futures.ThreadPoolExecutor,
 ) -> list[RepositoryMigrationResult]:
-    available = artifactory.list_repositories()
+    available = retry_operation(
+        "list Artifactory repositories",
+        artifactory.list_repositories,
+        retries=retries,
+        backoff_seconds=retry_backoff_seconds,
+    )
     selected, missing = select_repositories(available, requested_names, all_repositories)
 
     results = []
@@ -465,6 +670,8 @@ def migrate_repositories(
                 target_storage_id=target_storage_id,
                 path_prefix=path_prefix,
                 dry_run=dry_run,
+                retries=retries,
+                retry_backoff_seconds=retry_backoff_seconds,
             )
             for repository in selected
         ]
@@ -506,6 +713,12 @@ def _build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--path-prefix", default="")
     parser.add_argument("--parallelism", type=int, default=4)
     parser.add_argument("--timeout", type=int, default=DEFAULT_TIMEOUT_SECONDS)
+    parser.add_argument("--retries", type=int, default=DEFAULT_RETRIES)
+    parser.add_argument(
+        "--retry-backoff-seconds",
+        type=float,
+        default=DEFAULT_RETRY_BACKOFF_SECONDS,
+    )
     parser.add_argument("--create-targets", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     return parser
@@ -519,19 +732,28 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("pass --repo at least once or use --all-repos")
     if args.parallelism < 1:
         parser.error("--parallelism must be at least 1")
+    if args.retries < 0:
+        parser.error("--retries must be at least 0")
+    if args.retry_backoff_seconds < 0:
+        parser.error("--retry-backoff-seconds must be at least 0")
 
     try:
         artifactory_auth = build_auth_header(
-            args.artifactory_token,
-            args.artifactory_user,
-            args.artifactory_password,
+            resolve_argument(args.artifactory_token, "ARTIFACTORY_TOKEN"),
+            resolve_argument(args.artifactory_user, "ARTIFACTORY_USER"),
+            resolve_argument(args.artifactory_password, "ARTIFACTORY_PASSWORD"),
         )
         pkgly_auth = build_auth_header(
-            args.pkgly_token,
-            args.pkgly_user,
-            args.pkgly_password,
+            resolve_argument(args.pkgly_token, "PKGLY_TOKEN"),
+            resolve_argument(args.pkgly_user, "PKGLY_USER"),
+            resolve_argument(args.pkgly_password, "PKGLY_PASSWORD"),
         )
     except ValueError as exc:
+        parser.error(str(exc))
+    try:
+        if args.create_targets and args.pkgly_storage_id:
+            validate_uuid(args.pkgly_storage_id, "--pkgly-storage-id")
+    except RuntimeError as exc:
         parser.error(str(exc))
 
     artifactory = ArtifactoryClient(
@@ -556,6 +778,8 @@ def main(argv: list[str] | None = None) -> int:
         path_prefix=args.path_prefix,
         dry_run=args.dry_run,
         parallelism=args.parallelism,
+        retries=args.retries,
+        retry_backoff_seconds=args.retry_backoff_seconds,
     )
 
     for result in results:

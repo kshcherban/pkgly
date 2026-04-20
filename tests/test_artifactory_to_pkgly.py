@@ -2,6 +2,7 @@ import io
 import sys
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
@@ -134,6 +135,86 @@ class SelectionTests(unittest.TestCase):
         )
 
 
+class HelperTests(unittest.TestCase):
+    def test_resolve_argument_prefers_explicit_value(self):
+        with mock.patch.dict("os.environ", {"PKGLY_TOKEN": "env-token"}, clear=True):
+            self.assertEqual(
+                migrator.resolve_argument("cli-token", "PKGLY_TOKEN"),
+                "cli-token",
+            )
+
+    def test_resolve_argument_reads_environment_when_missing(self):
+        with mock.patch.dict("os.environ", {"PKGLY_TOKEN": "env-token"}, clear=True):
+            self.assertEqual(
+                migrator.resolve_argument(None, "PKGLY_TOKEN"),
+                "env-token",
+            )
+
+    def test_retry_operation_retries_transient_failures(self):
+        attempts = []
+
+        def flaky():
+            attempts.append("called")
+            if len(attempts) < 3:
+                raise migrator.error.HTTPError(
+                    "https://example.test",
+                    503,
+                    "service unavailable",
+                    hdrs=None,
+                    fp=io.BytesIO(b"busy"),
+                )
+            return "ok"
+
+        sleep_calls = []
+        result = migrator.retry_operation(
+            "flaky request",
+            flaky,
+            retries=3,
+            backoff_seconds=0.5,
+            sleep=sleep_calls.append,
+        )
+
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(attempts), 3)
+        self.assertEqual(sleep_calls, [0.5, 1.0])
+
+    def test_retry_operation_does_not_retry_non_transient_http_error(self):
+        attempts = []
+
+        def missing():
+            attempts.append("called")
+            raise migrator.error.HTTPError(
+                "https://example.test",
+                404,
+                "not found",
+                hdrs=None,
+                fp=io.BytesIO(b"missing"),
+            )
+
+        with self.assertRaises(migrator.error.HTTPError):
+            migrator.retry_operation(
+                "missing request",
+                missing,
+                retries=3,
+                backoff_seconds=0.5,
+                sleep=lambda _: None,
+            )
+
+        self.assertEqual(len(attempts), 1)
+
+    def test_resolve_target_path_converts_pypi_filename(self):
+        self.assertEqual(
+            migrator.resolve_target_path("pypi", "demo-package-1.2.3.tar.gz"),
+            "demo-package/1.2.3/demo-package-1.2.3.tar.gz",
+        )
+
+    def test_resolve_target_path_canonicalizes_helm_chart(self):
+        self.assertEqual(
+            migrator.resolve_target_path("helm", "nested/my-chart-1.0.0.tgz"),
+            "charts/my-chart/my-chart-1.0.0.tgz",
+        )
+
+
 class RepositoryMigrationTests(unittest.TestCase):
     def test_migrate_repository_skips_existing_and_filtered_files(self):
         artifactory = FakeArtifactoryClient(
@@ -193,8 +274,8 @@ class RepositoryMigrationTests(unittest.TestCase):
         artifactory = FakeArtifactoryClient(repositories=[])
         pkgly = FakePkglyClient()
         repository = migrator.RepositoryDescriptor(
-            key="npm-local",
-            package_type="npm",
+            key="docker-local",
+            package_type="docker",
             repo_type="local",
         )
 
@@ -254,13 +335,76 @@ class RepositoryMigrationTests(unittest.TestCase):
             pkgly=pkgly,
             target_storage_name="target-storage",
             create_targets=True,
-            target_storage_id="storage-uuid",
+            target_storage_id="123e4567-e89b-12d3-a456-426614174000",
             path_prefix="",
             dry_run=False,
+            retries=0,
+            retry_backoff_seconds=0.1,
         )
 
         self.assertEqual(result.status, "success")
-        self.assertEqual(pkgly.create_calls, [("storage-uuid", "maven-local", "maven")])
+        self.assertEqual(
+            pkgly.create_calls,
+            [("123e4567-e89b-12d3-a456-426614174000", "maven-local", "maven")],
+        )
+
+    def test_migrate_repository_retries_upload_and_maps_pypi_paths(self):
+        artifactory = FakeArtifactoryClient(
+            repositories=[],
+            entries_by_repo={
+                "pypi-local": [
+                    migrator.ArtifactEntry("demo-package-1.2.3.tar.gz", 7),
+                ]
+            },
+            contents={
+                ("pypi-local", "demo-package-1.2.3.tar.gz"): b"package",
+            },
+        )
+        pkgly = FakePkglyClient(existing_repositories={("target-storage", "pypi-local")})
+        repository = migrator.RepositoryDescriptor(
+            key="pypi-local",
+            package_type="pypi",
+            repo_type="local",
+        )
+        original_upload = pkgly.upload_file
+        attempts = []
+
+        def flaky_upload(storage_name, repository_name, relative_path, stream, size):
+            attempts.append(relative_path)
+            if len(attempts) == 1:
+                raise migrator.HttpStatusError(503, "busy")
+            return original_upload(storage_name, repository_name, relative_path, stream, size)
+
+        pkgly.upload_file = flaky_upload
+
+        result = migrator.migrate_repository(
+            repository=repository,
+            artifactory=artifactory,
+            pkgly=pkgly,
+            target_storage_name="target-storage",
+            create_targets=False,
+            target_storage_id=None,
+            path_prefix="",
+            dry_run=False,
+            retries=1,
+            retry_backoff_seconds=0.1,
+        )
+
+        self.assertEqual(result.status, "success")
+        self.assertEqual(result.transferred, 1)
+        self.assertEqual(len(attempts), 2)
+        self.assertEqual(
+            pkgly.upload_calls,
+            [
+                (
+                    "target-storage",
+                    "pypi-local",
+                    "demo-package/1.2.3/demo-package-1.2.3.tar.gz",
+                    7,
+                    b"package",
+                )
+            ],
+        )
 
 
 class MultiRepositoryTests(unittest.TestCase):
@@ -302,6 +446,8 @@ class MultiRepositoryTests(unittest.TestCase):
             path_prefix="",
             dry_run=False,
             parallelism=3,
+            retries=0,
+            retry_backoff_seconds=0.1,
             executor_class=FakeExecutor,
         )
 
@@ -335,6 +481,8 @@ class MultiRepositoryTests(unittest.TestCase):
             path_prefix="",
             dry_run=True,
             parallelism=2,
+            retries=0,
+            retry_backoff_seconds=0.1,
             executor_class=FakeExecutor,
         )
 

@@ -1,5 +1,5 @@
 {
-  "name": "pkgly.kingtux.me",
+  "name": "pkgly.dev",
   "version": "1.0.0",
   "description": "Pkgly Home Page",
   "main": "index.js",
@@ -9,7 +9,7 @@
     "docs:build": "vitepress build docs",
     "docs:serve": "vitepress serve docs"
   },
-  "author": "Wyatt Herkamp",
+  "author": "Konstantin Shcherban",
   "license": "ISC",
   "devDependencies": {
     "vitepress": "^1.6.3"
