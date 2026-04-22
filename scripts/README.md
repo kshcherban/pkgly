@@ -1,6 +1,6 @@
 # Artifactory To Pkgly Migration
 
-[`artifactory_to_pkgly.py`](/Users/konstantinshcherban/repos/pkgly/scripts/artifactory_to_pkgly.py) migrates supported Artifactory `local` repositories into Pkgly hosted repositories.
+[`artifactory_to_pkgly.py`](./artifactory_to_pkgly.py) migrates supported Artifactory `local` repositories into Pkgly hosted repositories.
 
 The script has two migration modes:
 
