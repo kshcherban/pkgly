@@ -20,7 +20,7 @@ from contextlib import closing
 from dataclasses import dataclass
 from typing import BinaryIO
 from urllib import error, parse, request
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 try:
     import tomllib  # type: ignore[attr-defined]
@@ -212,14 +212,6 @@ def resolve_argument(value: str | None, env_name: str) -> str | None:
     return env_value or None
 
 
-def validate_uuid(value: str, argument_name: str) -> str:
-    try:
-        UUID(value)
-    except ValueError as exc:
-        raise RuntimeError(f"{argument_name} must be a valid UUID") from exc
-    return value
-
-
 def map_artifactory_package_type(package_type: str) -> str:
     return PACKAGE_TYPE_ALIASES.get(package_type.lower(), package_type.lower())
 
@@ -261,10 +253,6 @@ def guess_content_type(path: str) -> str:
             return content_type
     guessed, _ = mimetypes.guess_type(path)
     return guessed or DEFAULT_CONTENT_TYPE
-
-
-def should_copy_path(package_type: str, path: str) -> bool:
-    return resolve_target_path(package_type, path) is not None
 
 
 def _normalize_python_package_name(name: str) -> str:
@@ -1011,10 +999,6 @@ class PkglyClient:
         )
         if status < 200 or status >= 300:
             raise HttpStatusError(status, body.decode("utf-8", errors="replace"))
-
-
-def _read_all(stream: BinaryIO) -> bytes:
-    return stream.read()
 
 
 def _read_artifactory_file_bytes(
