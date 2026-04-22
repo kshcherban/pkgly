@@ -15,12 +15,12 @@ use super::{
     NugetError,
     utils::{
         ParsedNugetPackage, REPOSITORY_TYPE_ID, base_repository_path, build_registration_index,
-        build_registration_leaf, can_read_with_auth, external_repository_base,
-        find_hosted_version, flatcontainer_index_path, flatcontainer_nuspec_path,
-        flatcontainer_package_path, hosted_leaf, json_response, list_hosted_versions,
-        parse_published_package, push_requires_write, registration_index_path,
-        registration_leaf_path, resolve_project_version, response_from_storage, service_index,
-        upsert_hosted_metadata, xml_response,
+        build_registration_leaf, can_read_with_auth, external_repository_base, find_hosted_version,
+        flatcontainer_index_path, flatcontainer_nuspec_path, flatcontainer_package_path,
+        hosted_leaf, json_response, list_hosted_versions, parse_published_package,
+        push_requires_write, registration_index_path, registration_leaf_path,
+        resolve_project_version, response_from_storage, service_index, upsert_hosted_metadata,
+        xml_response,
     },
 };
 use crate::{
@@ -77,7 +77,12 @@ impl NugetHosted {
     }
 
     fn base_path(&self) -> String {
-        let storage = self.storage().storage_config().storage_config.storage_name.clone();
+        let storage = self
+            .storage()
+            .storage_config()
+            .storage_config
+            .storage_name
+            .clone();
         base_repository_path(&storage, &self.0.name)
     }
 
@@ -103,9 +108,13 @@ impl NugetHosted {
         method: http::Method,
         package_id: &str,
     ) -> Result<RepoResponse, NugetError> {
-        let versions = list_hosted_versions(&self.site(), &self.storage(), self.id(), package_id).await?;
+        let versions =
+            list_hosted_versions(&self.site(), &self.storage(), self.id(), package_id).await?;
         if versions.is_empty() {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
         let body = serde_json::json!({
             "versions": versions.iter().map(|entry| entry.lower_version.clone()).collect::<Vec<_>>()
@@ -119,9 +128,13 @@ impl NugetHosted {
         base_url: String,
         package_id: &str,
     ) -> Result<RepoResponse, NugetError> {
-        let versions = list_hosted_versions(&self.site(), &self.storage(), self.id(), package_id).await?;
+        let versions =
+            list_hosted_versions(&self.site(), &self.storage(), self.id(), package_id).await?;
         if versions.is_empty() {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
         let leaves: Vec<_> = versions
             .iter()
@@ -138,10 +151,19 @@ impl NugetHosted {
         package_id: &str,
         version: &str,
     ) -> Result<RepoResponse, NugetError> {
-        let Some(version) =
-            find_hosted_version(&self.site(), &self.storage(), self.id(), package_id, version).await?
+        let Some(version) = find_hosted_version(
+            &self.site(),
+            &self.storage(),
+            self.id(),
+            package_id,
+            version,
+        )
+        .await?
         else {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         };
         let leaf = hosted_leaf(&base_url, package_id, &version);
         let body = build_registration_leaf(&base_url, package_id, &leaf);
@@ -152,7 +174,9 @@ impl NugetHosted {
         &self,
         request: RepositoryRequest,
     ) -> Result<RepoResponse, NugetError> {
-        let Some(publisher) = push_requires_write(&request.authentication, self.id(), &self.site()).await? else {
+        let Some(publisher) =
+            push_requires_write(&request.authentication, self.id(), &self.site()).await?
+        else {
             return Ok(RepoResponse::unauthorized());
         };
 
@@ -170,7 +194,8 @@ impl NugetHosted {
             ));
         }
 
-        let package_bytes = super::utils::first_multipart_bytes(request.body, &content_type).await?;
+        let package_bytes =
+            super::utils::first_multipart_bytes(request.body, &content_type).await?;
         let package = parse_published_package(package_bytes)?;
         let nupkg_path = flatcontainer_package_path(&package.package_id, &package.version);
         let nuspec_path = flatcontainer_nuspec_path(&package.package_id, &package.version);
@@ -225,7 +250,11 @@ impl NugetHosted {
         let flat_index_path = flatcontainer_index_path(&package.package_id);
         let reg_index_path = registration_index_path(&package.package_id);
         let reg_leaf_path = registration_leaf_path(&package.package_id, &package.version);
-        if let Err(err) = self.storage().delete_file(self.id(), &flat_index_path).await {
+        if let Err(err) = self
+            .storage()
+            .delete_file(self.id(), &flat_index_path)
+            .await
+        {
             debug!(?err, path = %flat_index_path, "Failed to invalidate NuGet flat-container cache");
         }
         if let Err(err) = self.storage().delete_file(self.id(), &reg_index_path).await {
@@ -237,10 +266,7 @@ impl NugetHosted {
         Ok(())
     }
 
-    async fn handle_read(
-        &self,
-        request: RepositoryRequest,
-    ) -> Result<RepoResponse, NugetError> {
+    async fn handle_read(&self, request: RepositoryRequest) -> Result<RepoResponse, NugetError> {
         let authentication = request.authentication.clone();
         let can_read =
             can_read_with_auth(&authentication, self.visibility(), self.id(), &self.site()).await?;
@@ -250,39 +276,77 @@ impl NugetHosted {
 
         let path = request.path.to_string();
         let method = request.parts.method.clone();
-        let base_url = external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
-        if path.is_empty() || path == "v3" || path == "v3/" || path == "v3/index.json" || path == "index.json" {
+        let base_url =
+            external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
+        if path.is_empty()
+            || path == "v3"
+            || path == "v3/"
+            || path == "v3/index.json"
+            || path == "index.json"
+        {
             return Ok(self.handle_service_index(method, base_url, true));
         }
 
         let parts: Vec<_> = path.split('/').collect();
-        if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[3] == "index.json" {
+        if parts.len() >= 4
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[3] == "index.json"
+        {
             return self.handle_flatcontainer_index(method, parts[2]).await;
         }
 
-        if parts.len() == 5 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[4].ends_with(".nuspec") {
+        if parts.len() == 5
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[4].ends_with(".nuspec")
+        {
             let file = response_from_storage(&self.storage(), self.id(), &request.path).await?;
             if matches!(&file, RepoResponse::Other(_)) {
                 return Ok(file);
             }
-            if let Some(bytes) = super::utils::read_storage_bytes(&self.storage(), self.id(), &request.path).await? {
+            if let Some(bytes) =
+                super::utils::read_storage_bytes(&self.storage(), self.id(), &request.path).await?
+            {
                 let xml = String::from_utf8(bytes)?;
-                return Ok(RepoResponse::Other(xml_response(&request.parts.method, xml)));
+                return Ok(RepoResponse::Other(xml_response(
+                    &request.parts.method,
+                    xml,
+                )));
             }
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
 
-        if parts.len() == 5 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[4].ends_with(".nupkg") {
+        if parts.len() == 5
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[4].ends_with(".nupkg")
+        {
             return response_from_storage(&self.storage(), self.id(), &request.path).await;
         }
 
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3] == "index.json" {
-            return self.handle_registration_index(method, base_url, parts[2]).await;
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3] == "index.json"
+        {
+            return self
+                .handle_registration_index(method, base_url, parts[2])
+                .await;
         }
 
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3].ends_with(".json") {
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3].ends_with(".json")
+        {
             let version = parts[3].trim_end_matches(".json");
-            return self.handle_registration_leaf(method, base_url, parts[2], version).await;
+            return self
+                .handle_registration_leaf(method, base_url, parts[2], version)
+                .await;
         }
 
         Ok(RepoResponse::basic_text_response(
@@ -337,7 +401,9 @@ impl Repository for NugetHosted {
     fn resolve_project_and_version_for_path(
         &self,
         path: &StoragePath,
-    ) -> impl std::future::Future<Output = Result<nr_core::repository::project::ProjectResolution, Self::Error>> + Send {
+    ) -> impl std::future::Future<
+        Output = Result<nr_core::repository::project::ProjectResolution, Self::Error>,
+    > + Send {
         let this = self.clone();
         let path = path.clone();
         async move { this.resolve_project(&path).await }

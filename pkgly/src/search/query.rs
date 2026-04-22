@@ -101,9 +101,8 @@ impl<'a> PackageSearchRepository<'a> {
             let normalized = digest.to_lowercase();
             match operator {
                 Operator::Equals => {
-                    builder.push(
-                        " AND LOWER(COALESCE(pf.content_digest, pf.upstream_digest, '')) = ",
-                    );
+                    builder
+                        .push(" AND LOWER(COALESCE(pf.content_digest, pf.upstream_digest, '')) = ");
                     builder.push_bind(normalized);
                 }
                 Operator::Contains => {

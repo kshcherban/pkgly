@@ -82,11 +82,7 @@ pub fn filter_database_rows(
             })
             .and_then(Value::as_str)
             .unwrap_or_default();
-        let extra_terms = row
-            .extra
-            .as_ref()
-            .map(Value::to_string)
-            .unwrap_or_default();
+        let extra_terms = row.extra.as_ref().map(Value::to_string).unwrap_or_default();
         let term_fields: Vec<&str> = vec![
             row.package_name.as_str(),
             row.package_key.as_str(),

@@ -39,6 +39,19 @@ pub trait StorageDBType:
 
         Ok(storage)
     }
+    #[instrument(name = "get_storage_by_name", skip(database, name))]
+    async fn get_by_name(
+        name: impl AsRef<str>,
+        database: &sqlx::PgPool,
+    ) -> Result<Option<Self>, sqlx::Error> {
+        let storage = SelectQueryBuilder::with_columns(DBStorage::table_name(), Self::columns())
+            .filter(DBStorageColumn::Name.equals(name.as_ref().value()))
+            .query_as()
+            .fetch_optional(database)
+            .await?;
+
+        Ok(storage)
+    }
     async fn delete_self(&self, database: &sqlx::PgPool) -> Result<(), sqlx::Error> {
         let query = "DELETE FROM storages WHERE id = $1".to_string();
         sqlx::query(&query)

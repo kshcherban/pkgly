@@ -28,7 +28,7 @@ VERSION_3="1.0.2.post${RUN_ID}"
 ensure_python_repo() {
     local repo_name="$1"
     local existing_id="$2"
-    local storage_id="$3"
+    local storage_name="$3"
 
     if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
         echo "$existing_id"
@@ -39,7 +39,7 @@ ensure_python_repo() {
     payload=$(cat <<JSON
 {
   "name": "${repo_name}",
-  "storage": "${storage_id}",
+  "storage_name": "${storage_name}",
   "configs": {
     "python": { "type": "Hosted" },
     "auth": { "enabled": false }
@@ -54,29 +54,26 @@ JSON
 
 ensure_python_virtual_repo() {
     local virtual_id="$1"
-    local storage_id="$2"
-    local hosted_id="$3"
-    local hosted2_id="$4"
-    local proxy_id="$5"
+    local storage_name="$2"
 
     if [ -z "$virtual_id" ] || [ "$virtual_id" = "null" ]; then
         local payload
         payload=$(cat <<JSON
 {
   "name": "python-virtual",
-  "storage": "${storage_id}",
+  "storage_name": "${storage_name}",
   "configs": {
     "python": {
       "type": "Virtual",
       "config": {
         "member_repositories": [
-          {"repository_id": "${hosted_id}", "repository_name": "python-hosted", "priority": 1, "enabled": true},
-          {"repository_id": "${hosted2_id}", "repository_name": "python-hosted-2", "priority": 2, "enabled": true},
-          {"repository_id": "${proxy_id}", "repository_name": "python-proxy", "priority": 10, "enabled": true}
+          {"repository_name": "python-hosted", "priority": 1, "enabled": true},
+          {"repository_name": "python-hosted-2", "priority": 2, "enabled": true},
+          {"repository_name": "python-proxy", "priority": 10, "enabled": true}
         ],
         "resolution_order": "Priority",
         "cache_ttl_seconds": 60,
-        "publish_to": "${hosted_id}"
+        "publish_to": "python-hosted"
       }
     },
     "auth": { "enabled": false }
@@ -99,13 +96,13 @@ JSON
     update_payload=$(cat <<JSON
 {
   "members": [
-    {"repository_id": "${hosted_id}", "repository_name": "python-hosted", "priority": 1, "enabled": true},
-    {"repository_id": "${hosted2_id}", "repository_name": "python-hosted-2", "priority": 2, "enabled": true},
-    {"repository_id": "${proxy_id}", "repository_name": "python-proxy", "priority": 10, "enabled": true}
+    {"repository_name": "python-hosted", "priority": 1, "enabled": true},
+    {"repository_name": "python-hosted-2", "priority": 2, "enabled": true},
+    {"repository_name": "python-proxy", "priority": 10, "enabled": true}
   ],
   "resolution_order": "Priority",
   "cache_ttl_seconds": 60,
-  "publish_to": "${hosted_id}"
+  "publish_to": "python-hosted"
 }
 JSON
 )
@@ -122,7 +119,7 @@ HOSTED_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-hosted") | .i
 PROXY_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-proxy") | .id')
 HOSTED2_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-hosted-2") | .id')
 VIRTUAL_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-virtual") | .id')
-STORAGE_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-hosted") | .storage_id')
+STORAGE_NAME=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="python-hosted") | .storage_name')
 
 if [ -z "$HOSTED_ID" ] || [ "$HOSTED_ID" = "null" ] || [ -z "$PROXY_ID" ] || [ "$PROXY_ID" = "null" ]; then
     fail "Seeded python-hosted or python-proxy repository missing"
@@ -130,8 +127,8 @@ if [ -z "$HOSTED_ID" ] || [ "$HOSTED_ID" = "null" ] || [ -z "$PROXY_ID" ] || [ "
     exit 1
 fi
 
-HOSTED2_ID=$(ensure_python_repo "python-hosted-2" "$HOSTED2_ID" "$STORAGE_ID")
-VIRTUAL_ID=$(ensure_python_virtual_repo "$VIRTUAL_ID" "$STORAGE_ID" "$HOSTED_ID" "$HOSTED2_ID" "$PROXY_ID")
+HOSTED2_ID=$(ensure_python_repo "python-hosted-2" "$HOSTED2_ID" "$STORAGE_NAME")
+VIRTUAL_ID=$(ensure_python_virtual_repo "$VIRTUAL_ID" "$STORAGE_NAME")
 
 VIRTUAL_CFG=$(api_get "/api/repository/${VIRTUAL_ID}/virtual/members" || echo "{}")
 record_output "$VIRTUAL_CFG"

@@ -1,5 +1,5 @@
-use serde::{Deserialize, Serialize};
 use serde::de::DeserializeOwned;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -12,10 +12,7 @@ use crate::{
     },
 };
 
-use super::project::{
-    DBProject, ProjectDBType,
-    versions::DBProjectVersion,
-};
+use super::project::{DBProject, ProjectDBType, versions::DBProjectVersion};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, FromRow)]
 pub struct DBPackageFile {
@@ -146,8 +143,8 @@ impl DBPackageFile {
         database: &PgPool,
         version: &DBProjectVersion,
     ) -> Result<Option<Self>, sqlx::Error> {
-        let Some(project) = <DBProject as ProjectDBType>::find_by_id(version.project_id, database)
-            .await?
+        let Some(project) =
+            <DBProject as ProjectDBType>::find_by_id(version.project_id, database).await?
         else {
             return Ok(None);
         };
@@ -322,7 +319,10 @@ async fn query_page(
     builder.push(" OFFSET ");
     builder.push_bind(offset);
 
-    builder.build_query_as::<DBPackageFile>().fetch_all(database).await
+    builder
+        .build_query_as::<DBPackageFile>()
+        .fetch_all(database)
+        .await
 }
 
 fn push_search_clause(builder: &mut QueryBuilder<'_, Postgres>, search: Option<&str>) {
@@ -365,7 +365,9 @@ fn sort_expression(sort_by: PackageFileSortBy) -> &'static str {
         PackageFileSortBy::Name => "LOWER(name) COLLATE \"C\"",
         PackageFileSortBy::Size => "size_bytes",
         PackageFileSortBy::Path => "LOWER(path) COLLATE \"C\"",
-        PackageFileSortBy::Digest => "LOWER(COALESCE(content_digest, upstream_digest, '')) COLLATE \"C\"",
+        PackageFileSortBy::Digest => {
+            "LOWER(COALESCE(content_digest, upstream_digest, '')) COLLATE \"C\""
+        }
     }
 }
 

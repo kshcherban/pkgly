@@ -3,8 +3,8 @@ use uuid::Uuid;
 
 use super::{DBProjectVersion, DBProjectVersionColumn};
 use crate::{
-    database::prelude::*,
     database::entities::package_file::DBPackageFile,
+    database::prelude::*,
     repository::project::{ReleaseType, VersionData},
 };
 

@@ -61,7 +61,9 @@ impl RepositoryConfigType for NugetRepositoryConfigType {
     fn get_description(&self) -> ConfigDescription {
         ConfigDescription {
             name: "NuGet Repository Config",
-            description: Some("Controls whether the NuGet repository is hosted, proxy, or virtual."),
+            description: Some(
+                "Controls whether the NuGet repository is hosted, proxy, or virtual.",
+            ),
             documentation_link: Some("https://pkgly.kingtux.dev/repositoryTypes/nuget/configs"),
             ..Default::default()
         }

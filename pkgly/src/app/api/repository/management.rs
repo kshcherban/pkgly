@@ -7,8 +7,12 @@ use axum::{
 };
 use chrono::{DateTime, FixedOffset, Utc};
 use nr_core::{
-    database::entities::repository::{DBRepository, GenericDBRepositoryConfig},
+    database::entities::{
+        repository::{DBRepository, GenericDBRepositoryConfig},
+        storage::{DBStorage, StorageDBType},
+    },
     repository::Visibility,
+    storage::StorageName,
     user::permissions::{HasPermissions, RepositoryActions},
 };
 use serde::Deserialize;
@@ -18,6 +22,7 @@ use tracing::{debug, error, info, instrument};
 use utoipa::ToSchema;
 use uuid::Uuid;
 
+use super::r#virtual::normalize_virtual_repository_request_value;
 use crate::{
     app::{
         Pkgly,
@@ -74,7 +79,11 @@ pub struct NewRepositoryRequest {
     /// The Name of the Repository
     pub name: String,
     /// The Storage ID
-    pub storage: Uuid,
+    #[serde(default)]
+    pub storage: Option<Uuid>,
+    /// The Storage Name
+    #[serde(default)]
+    pub storage_name: Option<StorageName>,
     /// Optional Sub Type of the Repository
     /// A Map of Config Key to Config Value
     pub configs: HashMap<String, Value>,
@@ -92,7 +101,7 @@ pub struct NewRepositoryRequest {
 )]
 #[instrument(
     skip(site, auth, request),
-    fields(user = %auth.id, repository_type = %repository_type, storage_id = %request.storage)
+    fields(user = %auth.id, repository_type = %repository_type)
 )]
 pub async fn new_repository(
     State(site): State<Pkgly>,
@@ -107,15 +116,34 @@ pub async fn new_repository(
         name,
         mut configs,
         storage,
+        storage_name,
     } = request;
     let Some(repository_factory) = site.get_repository_type(&repository_type) else {
         return Ok(InvalidRepositoryConfig::InvalidConfigType(repository_type).into_response());
     };
 
-    let Some(loaded_storage) = site.get_storage(request.storage) else {
+    let storage = match (storage, storage_name) {
+        (Some(storage), None) => DBStorage::get_by_id(storage, &site.database).await?,
+        (None, Some(storage_name)) => {
+            DBStorage::get_by_name(storage_name.as_ref(), &site.database).await?
+        }
+        (Some(_), Some(_)) => {
+            return Ok(ResponseBuilder::bad_request()
+                .body("Provide either storage or storage_name, not both"));
+        }
+        (None, None) => {
+            return Ok(ResponseBuilder::bad_request().body("Missing storage or storage_name"));
+        }
+    };
+    let Some(storage) = storage else {
         return Ok(ResponseBuilder::bad_request().body("Invalid Storage"));
     };
-    if DBRepository::does_name_exist_for_storage(request.storage, &name, &site.database).await? {
+    let storage_id = storage.id;
+
+    let Some(loaded_storage) = site.get_storage(storage_id) else {
+        return Ok(ResponseBuilder::bad_request().body("Invalid Storage"));
+    };
+    if DBRepository::does_name_exist_for_storage(storage_id, &name, &site.database).await? {
         return Ok(ConflictResponse::from("name").into_response());
     }
 
@@ -155,6 +183,20 @@ pub async fn new_repository(
         }
     }
 
+    if matches!(repository_type.as_str(), "npm" | "python" | "nuget") {
+        if let Some(repository_config) = configs.get_mut(repository_type.as_str()) {
+            if let Err(message) = normalize_virtual_repository_request_value(
+                storage_id,
+                repository_config,
+                &site.database,
+            )
+            .await
+            {
+                return Ok(ResponseBuilder::bad_request().body(message));
+            }
+        }
+    }
+
     let repository = repository_factory
         .create_new(name, uuid, configs, loaded_storage.clone())
         .await;
@@ -165,7 +207,7 @@ pub async fn new_repository(
             return Ok(ResponseBuilder::internal_server_error().body("Failed to create repository"));
         }
     };
-    let db_repository = repository.insert(storage, site.as_ref()).await?;
+    let db_repository = repository.insert(storage_id, site.as_ref()).await?;
     match repository_factory
         .load_repo(db_repository.clone(), loaded_storage, site.clone())
         .await

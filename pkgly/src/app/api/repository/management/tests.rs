@@ -5,7 +5,14 @@ use crate::repository::NewRepository;
 use crate::test_support::DB_TEST_LOCK;
 use http::StatusCode;
 use nr_core::{
-    database::{DatabaseConfig, entities::storage::NewDBStorage, migration::run_migrations},
+    database::{
+        DatabaseConfig,
+        entities::{
+            repository::DBRepository,
+            storage::{DBStorage, NewDBStorage},
+        },
+        migration::run_migrations,
+    },
     storage::StorageName,
 };
 use sqlx::{Connection, PgPool, postgres::PgPoolOptions};
@@ -24,6 +31,35 @@ impl TestDb {
     fn pool(&self) -> &PgPool {
         &self.pool
     }
+}
+
+async fn build_site(db: &TestDb, storage_root: &std::path::Path) -> Pkgly {
+    let cfg = DatabaseConfig {
+        user: "postgres".into(),
+        password: "password".into(),
+        database: "postgres".into(),
+        host: "127.0.0.1".into(),
+        port: Some(db.port),
+    };
+
+    Pkgly::new(
+        crate::app::config::Mode::Debug,
+        crate::app::config::SiteSetting::default(),
+        crate::app::config::SecuritySettings::default(),
+        crate::app::authentication::session::SessionManagerConfig {
+            database_location: storage_root.join("sessions.redb"),
+            ..Default::default()
+        },
+        crate::repository::StagingConfig {
+            staging_dir: storage_root.join("staging"),
+            ..Default::default()
+        },
+        None,
+        cfg,
+        Some(storage_root.join("storages")),
+    )
+    .await
+    .expect("create site")
 }
 
 async fn start_postgres() -> TestDb {
@@ -165,32 +201,7 @@ async fn deb_refresh_requires_edit_permission() {
     let storage_id = insert_local_storage(db.pool(), storage_root.path()).await;
     let repo_id = insert_deb_proxy_repo(db.pool(), storage_id).await;
 
-    let cfg = DatabaseConfig {
-        user: "postgres".into(),
-        password: "password".into(),
-        database: "postgres".into(),
-        host: "127.0.0.1".into(),
-        port: Some(db.port),
-    };
-
-    let site = Pkgly::new(
-        crate::app::config::Mode::Debug,
-        crate::app::config::SiteSetting::default(),
-        crate::app::config::SecuritySettings::default(),
-        crate::app::authentication::session::SessionManagerConfig {
-            database_location: storage_root.path().join("sessions.redb"),
-            ..Default::default()
-        },
-        crate::repository::StagingConfig {
-            staging_dir: storage_root.path().join("staging"),
-            ..Default::default()
-        },
-        None,
-        cfg,
-        Some(storage_root.path().join("storages")),
-    )
-    .await
-    .expect("create site");
+    let site = build_site(&db, storage_root.path()).await;
 
     let auth = Authentication::AuthToken(sample_auth_token(1), sample_user(1, false));
     let response = deb_refresh(
@@ -214,32 +225,7 @@ async fn deb_refresh_returns_conflict_when_advisory_lock_is_held() {
     let storage_id = insert_local_storage(db.pool(), storage_root.path()).await;
     let repo_id = insert_deb_proxy_repo(db.pool(), storage_id).await;
 
-    let cfg = DatabaseConfig {
-        user: "postgres".into(),
-        password: "password".into(),
-        database: "postgres".into(),
-        host: "127.0.0.1".into(),
-        port: Some(db.port),
-    };
-
-    let site = Pkgly::new(
-        crate::app::config::Mode::Debug,
-        crate::app::config::SiteSetting::default(),
-        crate::app::config::SecuritySettings::default(),
-        crate::app::authentication::session::SessionManagerConfig {
-            database_location: storage_root.path().join("sessions.redb"),
-            ..Default::default()
-        },
-        crate::repository::StagingConfig {
-            staging_dir: storage_root.path().join("staging"),
-            ..Default::default()
-        },
-        None,
-        cfg,
-        Some(storage_root.path().join("storages")),
-    )
-    .await
-    .expect("create site");
+    let site = build_site(&db, storage_root.path()).await;
 
     let mut conn = sqlx::PgConnection::connect(&db.url).await.expect("connect");
     let key = crate::repository::deb::refresh_status::deb_proxy_refresh_advisory_key(repo_id);
@@ -269,5 +255,74 @@ async fn deb_refresh_returns_conflict_when_advisory_lock_is_held() {
         .expect("unlock");
     assert!(unlocked);
     conn.close().await.expect("close");
+    site.close().await;
+}
+
+#[test]
+fn new_repository_request_deserializes_storage_name() {
+    let request: NewRepositoryRequest = serde_json::from_value(serde_json::json!({
+        "name": "maven-hosted",
+        "storage_name": "primary",
+        "configs": {
+            "maven": {
+                "type": "Hosted"
+            }
+        }
+    }))
+    .expect("request should deserialize");
+
+    assert_eq!(request.storage, None);
+    assert_eq!(
+        request.storage_name,
+        Some(StorageName::new("primary".to_string()).expect("storage name"))
+    );
+}
+
+#[tokio::test]
+async fn new_repository_accepts_storage_name() {
+    let _guard = DB_TEST_LOCK.lock().await;
+    let db = fresh_db().await;
+    let storage_root = tempfile::tempdir().expect("tempdir");
+
+    let storage_id = insert_local_storage(db.pool(), storage_root.path()).await;
+    let site = build_site(&db, storage_root.path()).await;
+
+    let auth = Authentication::AuthToken(sample_auth_token(1), sample_user(1, true));
+    let request = NewRepositoryRequest {
+        name: "maven-hosted".into(),
+        storage: None,
+        storage_name: Some(StorageName::new("primary".to_string()).expect("storage name")),
+        configs: ahash::HashMap::from_iter([(
+            "maven".to_string(),
+            serde_json::json!({
+                "type": "Hosted"
+            }),
+        )]),
+    };
+
+    let response = new_repository(
+        axum::extract::State(site.clone()),
+        auth,
+        axum::extract::Path("maven".to_string()),
+        axum::Json(request),
+    )
+    .await
+    .expect("handler ok");
+
+    assert_eq!(response.status(), StatusCode::CREATED);
+
+    let repository =
+        DBRepository::get_id_from_storage_and_name("primary", "maven-hosted", db.pool())
+            .await
+            .expect("lookup repository")
+            .expect("repository inserted");
+    assert_eq!(repository.storage_id, storage_id);
+
+    let storage = DBStorage::get_by_id(storage_id, db.pool())
+        .await
+        .expect("query storage")
+        .expect("storage exists");
+    assert_eq!(storage.name.as_ref(), "primary");
+
     site.close().await;
 }

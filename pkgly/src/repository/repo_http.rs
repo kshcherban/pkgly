@@ -40,7 +40,9 @@ use http::{
 };
 use http_body_util::BodyExt;
 use nr_core::storage::{InvalidStoragePath, StoragePath};
-use nr_storage::{FileFileType, FileType, Storage, StorageFile, StorageFileMeta, StorageFileReader};
+use nr_storage::{
+    FileFileType, FileType, Storage, StorageFile, StorageFileMeta, StorageFileReader,
+};
 use serde::Deserialize;
 use tracing::{Instrument as _, Level, Span, debug, debug_span, error, event, info, instrument};
 mod header;
@@ -653,7 +655,13 @@ async fn handle_repo_request_core(
         let path = path.unwrap_or_default();
         if let Some(ctx) = &audit_ctx {
             ctx.set_repository_id(repository.id());
-            ctx.set_storage_id(repository.get_storage().storage_config().storage_config.storage_id);
+            ctx.set_storage_id(
+                repository
+                    .get_storage()
+                    .storage_config()
+                    .storage_config
+                    .storage_id,
+            );
             ctx.set_resource_kind("repository");
             ctx.set_resource_id(repository.id().to_string());
             ctx.set_resource_name(repository.name());
@@ -732,8 +740,9 @@ async fn handle_repo_request_core(
                 let response = docker_v2_unauthorized_response(&challenge, &body);
                 return Ok(response);
             } else {
-                return Ok(RepoResponse::www_authenticate("Basic realm=\"Pkgly\"")
-                    .into_response_default());
+                return Ok(
+                    RepoResponse::www_authenticate("Basic realm=\"Pkgly\"").into_response_default()
+                );
             }
         }
 

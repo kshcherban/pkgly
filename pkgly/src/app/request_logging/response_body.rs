@@ -13,8 +13,8 @@ use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use uuid::Uuid;
 
 use super::{layer::ActiveRequestGuard, request_span};
-use crate::audit::{AuditActor, AuditMetadata, emit_http_audit_log};
 use crate::app::AppMetrics;
+use crate::audit::{AuditActor, AuditMetadata, emit_http_audit_log};
 use crate::utils::request_logging::access_log::AccessLogContext;
 use crate::utils::request_logging::request_id::RequestId;
 
@@ -253,5 +253,12 @@ pub(crate) fn emit_audit_log(
         path: snapshot.audit_path,
         query: snapshot.audit_query,
     };
-    emit_http_audit_log(span, http_method, http_route, url_path, status_code, &metadata);
+    emit_http_audit_log(
+        span,
+        http_method,
+        http_route,
+        url_path,
+        status_code,
+        &metadata,
+    );
 }

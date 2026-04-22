@@ -19,17 +19,26 @@ use super::{
     NugetError, NugetRepository, NugetRepositoryConfig, NugetRepositoryConfigType,
     utils::{
         REPOSITORY_TYPE_ID, RegistrationLeaf, base_repository_path, build_registration_index,
-        build_registration_leaf, clone_parts, collect_registration_leaves, external_repository_base,
-        json_response, parse_flatcontainer_index_versions, service_index, warn_nested_virtual,
+        build_registration_leaf, clone_parts, collect_registration_leaves,
+        external_repository_base, json_response, parse_flatcontainer_index_versions, service_index,
+        warn_nested_virtual,
     },
 };
 use crate::{
     app::Pkgly,
     repository::{
         DynRepository, RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
-        RepositoryRequest, repo_http::{RepositoryAuthentication, RepositoryRequestBody, repo_tracing::RepositoryRequestTracing},
-        r#virtual::{config::VirtualRepositoryConfig, resolver::{ResolvedVirtualMember, VirtualMemberClient, VirtualResolutionCache, VirtualResolver}},
+        RepositoryRequest,
+        repo_http::{
+            RepositoryAuthentication, RepositoryRequestBody, repo_tracing::RepositoryRequestTracing,
+        },
         utils::can_read_repository_with_auth,
+        r#virtual::{
+            config::VirtualRepositoryConfig,
+            resolver::{
+                ResolvedVirtualMember, VirtualMemberClient, VirtualResolutionCache, VirtualResolver,
+            },
+        },
     },
 };
 
@@ -104,21 +113,36 @@ impl NugetVirtualRepository {
     }
 
     fn base_path(&self) -> String {
-        let storage = self.storage().storage_config().storage_config.storage_name.clone();
+        let storage = self
+            .storage()
+            .storage_config()
+            .storage_config
+            .storage_name
+            .clone();
         base_repository_path(&storage, &self.0.name)
     }
 
-    async fn sync_members(&self, config: &VirtualRepositoryConfig) -> Result<(), RepositoryFactoryError> {
-        let db_members = DBVirtualRepositoryConfig::load_or_seed(self.id(), config, self.site().as_ref()).await?;
+    async fn sync_members(
+        &self,
+        config: &VirtualRepositoryConfig,
+    ) -> Result<(), RepositoryFactoryError> {
+        let db_members =
+            DBVirtualRepositoryConfig::load_or_seed(self.id(), config, self.site().as_ref())
+                .await?;
         let mut resolved = Vec::with_capacity(db_members.len());
         for member in db_members {
-            let Some(repo) = DBRepository::get_by_id(member.member_repository_id, self.site().as_ref()).await? else {
+            let Some(repo) =
+                DBRepository::get_by_id(member.member_repository_id, self.site().as_ref()).await?
+            else {
                 return Err(RepositoryFactoryError::InvalidConfig(
                     NugetRepositoryConfigType::get_type_static(),
                     format!("Virtual member {} missing", member.member_repository_id),
                 ));
             };
-            if !repo.repository_type.eq_ignore_ascii_case(REPOSITORY_TYPE_ID) {
+            if !repo
+                .repository_type
+                .eq_ignore_ascii_case(REPOSITORY_TYPE_ID)
+            {
                 return Err(RepositoryFactoryError::InvalidConfig(
                     NugetRepositoryConfigType::get_type_static(),
                     format!("Virtual members must be NuGet repositories: {}", repo.name),
@@ -153,7 +177,11 @@ impl NugetVirtualRepository {
             return Ok(Some(target));
         }
         let mut sorted: Vec<_> = members.iter().filter(|member| member.enabled).collect();
-        sorted.sort_by(|a, b| a.priority.cmp(&b.priority).then_with(|| a.repository_name.cmp(&b.repository_name)));
+        sorted.sort_by(|a, b| {
+            a.priority
+                .cmp(&b.priority)
+                .then_with(|| a.repository_name.cmp(&b.repository_name))
+        });
         for member in sorted {
             if is_hosted(member.repository_id, database).await? {
                 return Ok(Some(member.repository_id));
@@ -162,7 +190,9 @@ impl NugetVirtualRepository {
         Ok(None)
     }
 
-    async fn refresh_config_from_db(&self) -> Result<VirtualRepositoryConfig, RepositoryFactoryError> {
+    async fn refresh_config_from_db(
+        &self,
+    ) -> Result<VirtualRepositoryConfig, RepositoryFactoryError> {
         let config = DBRepositoryConfig::<NugetRepositoryConfig>::get_config(
             self.id(),
             NugetRepositoryConfigType::get_type_static(),
@@ -198,10 +228,7 @@ impl NugetVirtualRepository {
         )
     }
 
-    async fn handle_read(
-        &self,
-        request: RepositoryRequest,
-    ) -> Result<RepoResponse, NugetError> {
+    async fn handle_read(&self, request: RepositoryRequest) -> Result<RepoResponse, NugetError> {
         let can_read = can_read_repository_with_auth(
             &request.authentication,
             self.visibility(),
@@ -215,17 +242,30 @@ impl NugetVirtualRepository {
         }
 
         let path = request.path.to_string();
-        if path.is_empty() || path == "v3" || path == "v3/" || path == "v3/index.json" || path == "index.json" {
-            let base = external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
+        if path.is_empty()
+            || path == "v3"
+            || path == "v3/"
+            || path == "v3/index.json"
+            || path == "index.json"
+        {
+            let base =
+                external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
             let body = service_index(&base, self.publish_target().is_some());
-            return Ok(RepoResponse::Other(json_response(&request.parts.method, &body)));
+            return Ok(RepoResponse::Other(json_response(
+                &request.parts.method,
+                &body,
+            )));
         }
 
         let parts: Vec<_> = path.split('/').collect();
         let request_parts = clone_parts(&request.parts);
         let request_auth = request.authentication.clone();
         let trace_parent = request.trace.span.clone();
-        if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[3] == "index.json" {
+        if parts.len() >= 4
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[3] == "index.json"
+        {
             return self
                 .handle_flatcontainer_versions(
                     request.path.clone(),
@@ -236,7 +276,11 @@ impl NugetVirtualRepository {
                 )
                 .await;
         }
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3] == "index.json" {
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3] == "index.json"
+        {
             return self
                 .handle_registration_index(
                     request.path.clone(),
@@ -247,7 +291,11 @@ impl NugetVirtualRepository {
                 )
                 .await;
         }
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3].ends_with(".json") {
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3].ends_with(".json")
+        {
             let version = parts[3].trim_end_matches(".json");
             return self
                 .handle_registration_leaf(
@@ -262,9 +310,15 @@ impl NugetVirtualRepository {
 
         let cache_key = derive_cache_key(&request.path);
         let resolver = self.build_resolver(LiveMemberClient::new(self.clone(), &request));
-        match resolver.resolve(&cache_key, &request.path, request.parts.method.clone()).await? {
+        match resolver
+            .resolve(&cache_key, &request.path, request.parts.method.clone())
+            .await?
+        {
             Some(hit) => Ok(hit.response),
-            None => Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found")),
+            None => Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            )),
         }
     }
 
@@ -277,7 +331,11 @@ impl NugetVirtualRepository {
         package_id: &str,
     ) -> Result<RepoResponse, NugetError> {
         let mut versions = std::collections::BTreeSet::new();
-        for member in self.current_members().into_iter().filter(|member| member.enabled) {
+        for member in self
+            .current_members()
+            .into_iter()
+            .filter(|member| member.enabled)
+        {
             let Some(response) = fetch_member_response(
                 &self.site(),
                 member.repository_id,
@@ -305,7 +363,10 @@ impl NugetVirtualRepository {
             }
         }
         if versions.is_empty() {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, format!("Package {package_id} not found")));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                format!("Package {package_id} not found"),
+            ));
         }
         let body = serde_json::json!({
             "versions": versions.into_iter().collect::<Vec<_>>()
@@ -322,7 +383,11 @@ impl NugetVirtualRepository {
         package_id: &str,
     ) -> Result<RepoResponse, NugetError> {
         let mut leaves = Vec::<RegistrationLeaf>::new();
-        for member in self.current_members().into_iter().filter(|member| member.enabled) {
+        for member in self
+            .current_members()
+            .into_iter()
+            .filter(|member| member.enabled)
+        {
             let Some(response) = fetch_member_response(
                 &self.site(),
                 member.repository_id,
@@ -350,7 +415,10 @@ impl NugetVirtualRepository {
         leaves.sort_by(|a, b| a.lower_version.cmp(&b.lower_version));
         leaves.dedup_by(|a, b| a.lower_version == b.lower_version);
         if leaves.is_empty() {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, format!("Package {package_id} not found")));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                format!("Package {package_id} not found"),
+            ));
         }
         let base = external_repository_base(&self.site(), Some(&parts), &self.base_path());
         let body = build_registration_index(&base, package_id, &leaves);
@@ -370,7 +438,11 @@ impl NugetVirtualRepository {
             package_id.to_ascii_lowercase(),
             version.to_ascii_lowercase()
         ));
-        for member in self.current_members().into_iter().filter(|member| member.enabled) {
+        for member in self
+            .current_members()
+            .into_iter()
+            .filter(|member| member.enabled)
+        {
             let Some(response) = fetch_member_response(
                 &self.site(),
                 member.repository_id,
@@ -397,15 +469,19 @@ impl NugetVirtualRepository {
                 continue;
             }
             let base = external_repository_base(&self.site(), Some(&parts), &self.base_path());
-            let leaf = collect_registration_leaves(&serde_json::json!({ "items": [value.clone()] }))
-                .into_iter()
-                .find(|leaf| leaf.lower_version == version.to_ascii_lowercase());
+            let leaf =
+                collect_registration_leaves(&serde_json::json!({ "items": [value.clone()] }))
+                    .into_iter()
+                    .find(|leaf| leaf.lower_version == version.to_ascii_lowercase());
             if let Some(leaf) = leaf {
                 value = build_registration_leaf(&base, package_id, &leaf);
             }
             return Ok(RepoResponse::Other(json_response(&parts.method, &value)));
         }
-        Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"))
+        Ok(RepoResponse::basic_text_response(
+            StatusCode::NOT_FOUND,
+            "Package not found",
+        ))
     }
 
     async fn forward_publish(
@@ -419,7 +495,10 @@ impl NugetVirtualRepository {
             ));
         };
         let Some(DynRepository::Nuget(member_repo)) = self.site().get_repository(target) else {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Publish target unavailable"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Publish target unavailable",
+            ));
         };
         let has_write = request
             .authentication
@@ -572,7 +651,10 @@ impl VirtualMemberClient for LiveMemberClient {
         let DynRepository::Nuget(repo) = repository else {
             return Ok(None);
         };
-        let auth_config = self.site.get_repository_auth_config(member.repository_id).await?;
+        let auth_config = self
+            .site
+            .get_repository_auth_config(member.repository_id)
+            .await?;
         let trace = RepositoryRequestTracing::new(
             &DynRepository::Nuget(repo.clone()),
             &self.trace_parent,
@@ -623,7 +705,9 @@ impl DBVirtualRepositoryConfig {
                     enabled: member.enabled,
                 })
                 .collect();
-            return Ok(DBVirtualRepositoryMember::replace_all(repository_id, &seed, database).await?);
+            return Ok(
+                DBVirtualRepositoryMember::replace_all(repository_id, &seed, database).await?,
+            );
         }
         Ok(existing)
     }
@@ -670,13 +754,21 @@ async fn is_hosted(target: Uuid, database: &sqlx::PgPool) -> Result<bool, Reposi
 fn derive_cache_key(path: &StoragePath) -> String {
     let path = path.to_string();
     let parts: Vec<_> = path.split('/').collect();
-    if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[3] == "index.json" {
+    if parts.len() >= 4
+        && parts[0] == "v3"
+        && parts[1] == "flatcontainer"
+        && parts[3] == "index.json"
+    {
         return format!("pkg:{}", parts[2]);
     }
     if parts.len() >= 5 && parts[0] == "v3" && parts[1] == "flatcontainer" {
         return format!("pkg:{}@{}", parts[2], parts[3]);
     }
-    if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3] == "index.json" {
+    if parts.len() >= 4
+        && parts[0] == "v3"
+        && parts[1] == "registration"
+        && parts[3] == "index.json"
+    {
         return format!("reg:{}", parts[2]);
     }
     if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "registration" {
@@ -721,7 +813,9 @@ async fn fetch_member_response(
     };
     let response = match (repo, method) {
         (NugetRepository::Hosted(hosted), Method::GET) => hosted.handle_get(member_request).await?,
-        (NugetRepository::Hosted(hosted), Method::HEAD) => hosted.handle_head(member_request).await?,
+        (NugetRepository::Hosted(hosted), Method::HEAD) => {
+            hosted.handle_head(member_request).await?
+        }
         (NugetRepository::Proxy(proxy), Method::GET) => proxy.handle_get(member_request).await?,
         (NugetRepository::Proxy(proxy), Method::HEAD) => proxy.handle_head(member_request).await?,
         (NugetRepository::Virtual(_), _) => {

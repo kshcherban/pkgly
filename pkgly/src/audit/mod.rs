@@ -69,18 +69,14 @@ pub fn classify_api_action(http_method: &str, http_route: &str) -> Option<&'stat
         ("DELETE", "/api/user/token/delete/{id}") => Some("auth.token.delete"),
         ("GET", "/api/user-management/list") => Some("user.list"),
         ("GET", "/api/user-management/get/{user_id}") => Some("user.get"),
-        ("GET", "/api/user-management/get/{user_id}/permissions") => {
-            Some("user.permissions.get")
-        }
+        ("GET", "/api/user-management/get/{user_id}/permissions") => Some("user.permissions.get"),
         ("POST", "/api/user-management/create") => Some("user.create"),
         ("POST", "/api/user-management/is-taken") => Some("user.is_taken"),
         ("PUT", "/api/user-management/update/{user_id}") => Some("user.update"),
         ("PUT", "/api/user-management/update/{user_id}/permissions") => {
             Some("user.permissions.update")
         }
-        ("PUT", "/api/user-management/update/{user_id}/password") => {
-            Some("user.password.update")
-        }
+        ("PUT", "/api/user-management/update/{user_id}/password") => Some("user.password.update"),
         ("PUT", "/api/user-management/update/{user_id}/status") => Some("user.status.update"),
         ("DELETE", "/api/user-management/delete/{user_id}") => Some("user.delete"),
         ("GET", "/api/storage/list") => Some("storage.list"),
@@ -107,20 +103,12 @@ pub fn classify_api_action(http_method: &str, http_route: &str) -> Option<&'stat
         ("GET", "/api/repository/browse/{repository_id}/{*path}") => Some("repository.browse"),
         ("GET", "/api/repository/browse-ws/{repository_id}") => Some("repository.browse_ws"),
         ("GET", "/api/repository/{repository_id}/packages") => Some("repository.package.list"),
-        ("DELETE", "/api/repository/{repository_id}/packages") => {
-            Some("repository.package.delete")
-        }
+        ("DELETE", "/api/repository/{repository_id}/packages") => Some("repository.package.delete"),
         ("GET", "/api/repository/{repository_id}/configs") => Some("repository.config.list"),
         ("POST", "/api/repository/new/{repository_type}") => Some("repository.create"),
-        ("PUT", "/api/repository/{repository_id}/config/{key}") => {
-            Some("repository.config.update")
-        }
-        ("GET", "/api/repository/{repository_id}/config/{key}") => {
-            Some("repository.config.get")
-        }
-        ("POST", "/api/repository/{repository_id}/deb/refresh") => {
-            Some("repository.deb.refresh")
-        }
+        ("PUT", "/api/repository/{repository_id}/config/{key}") => Some("repository.config.update"),
+        ("GET", "/api/repository/{repository_id}/config/{key}") => Some("repository.config.get"),
+        ("POST", "/api/repository/{repository_id}/deb/refresh") => Some("repository.deb.refresh"),
         ("GET", "/api/repository/{repository_id}/deb/refresh/status") => {
             Some("repository.deb.refresh_status")
         }

@@ -1,7 +1,6 @@
 use anyhow::{anyhow, bail};
 use nr_core::database::entities::{
-    package_file::DBPackageFile,
-    project::versions::DBProjectVersion,
+    package_file::DBPackageFile, project::versions::DBProjectVersion,
 };
 use tracing::{info, warn};
 use uuid::Uuid;
@@ -9,18 +8,9 @@ use uuid::Uuid;
 use crate::{
     app::Pkgly,
     repository::{
-        DynRepository,
-        Repository,
-        cargo::CargoRegistry,
-        deb::DebRepository,
-        docker::DockerRegistry,
-        go::GoRepository,
-        helm::HelmRepository,
-        maven::MavenRepository,
-        npm::NPMRegistry,
-        php::PhpRepository,
-        python::PythonRepository,
-        ruby::RubyRepository,
+        DynRepository, Repository, cargo::CargoRegistry, deb::DebRepository,
+        docker::DockerRegistry, go::GoRepository, helm::HelmRepository, maven::MavenRepository,
+        npm::NPMRegistry, php::PhpRepository, python::PythonRepository, ruby::RubyRepository,
     },
 };
 
@@ -49,23 +39,58 @@ impl ReindexKind {
     fn matches_repository(self, repository: &DynRepository) -> bool {
         matches!(
             (self, repository),
-            (ReindexKind::NpmHosted, DynRepository::NPM(NPMRegistry::Hosted(_)))
-                | (ReindexKind::NpmProxy, DynRepository::NPM(NPMRegistry::Proxy(_)))
-                | (ReindexKind::PythonHosted, DynRepository::Python(PythonRepository::Hosted(_)))
-                | (ReindexKind::PythonProxy, DynRepository::Python(PythonRepository::Proxy(_)))
-                | (ReindexKind::MavenHosted, DynRepository::Maven(MavenRepository::Hosted(_)))
-                | (ReindexKind::MavenProxy, DynRepository::Maven(MavenRepository::Proxy(_)))
-                | (ReindexKind::PhpHosted, DynRepository::Php(PhpRepository::Hosted(_)))
-                | (ReindexKind::PhpProxy, DynRepository::Php(PhpRepository::Proxy(_)))
-                | (ReindexKind::GoHosted, DynRepository::Go(GoRepository::Hosted(_)))
-                | (ReindexKind::GoProxy, DynRepository::Go(GoRepository::Proxy(_)))
-                | (ReindexKind::DockerHosted, DynRepository::Docker(DockerRegistry::Hosted(_)))
-                | (ReindexKind::DockerProxy, DynRepository::Docker(DockerRegistry::Proxy(_)))
-                | (ReindexKind::CargoHosted, DynRepository::Cargo(CargoRegistry::Hosted(_)))
-                | (ReindexKind::HelmHosted, DynRepository::Helm(HelmRepository::Hosted(_)))
-                | (ReindexKind::DebHosted, DynRepository::Deb(DebRepository::Hosted(_)))
-                | (ReindexKind::DebProxy, DynRepository::Deb(DebRepository::Proxy(_)))
-                | (ReindexKind::RubyHosted, DynRepository::Ruby(RubyRepository::Hosted(_)))
+            (
+                ReindexKind::NpmHosted,
+                DynRepository::NPM(NPMRegistry::Hosted(_))
+            ) | (
+                ReindexKind::NpmProxy,
+                DynRepository::NPM(NPMRegistry::Proxy(_))
+            ) | (
+                ReindexKind::PythonHosted,
+                DynRepository::Python(PythonRepository::Hosted(_))
+            ) | (
+                ReindexKind::PythonProxy,
+                DynRepository::Python(PythonRepository::Proxy(_))
+            ) | (
+                ReindexKind::MavenHosted,
+                DynRepository::Maven(MavenRepository::Hosted(_))
+            ) | (
+                ReindexKind::MavenProxy,
+                DynRepository::Maven(MavenRepository::Proxy(_))
+            ) | (
+                ReindexKind::PhpHosted,
+                DynRepository::Php(PhpRepository::Hosted(_))
+            ) | (
+                ReindexKind::PhpProxy,
+                DynRepository::Php(PhpRepository::Proxy(_))
+            ) | (
+                ReindexKind::GoHosted,
+                DynRepository::Go(GoRepository::Hosted(_))
+            ) | (
+                ReindexKind::GoProxy,
+                DynRepository::Go(GoRepository::Proxy(_))
+            ) | (
+                ReindexKind::DockerHosted,
+                DynRepository::Docker(DockerRegistry::Hosted(_))
+            ) | (
+                ReindexKind::DockerProxy,
+                DynRepository::Docker(DockerRegistry::Proxy(_))
+            ) | (
+                ReindexKind::CargoHosted,
+                DynRepository::Cargo(CargoRegistry::Hosted(_))
+            ) | (
+                ReindexKind::HelmHosted,
+                DynRepository::Helm(HelmRepository::Hosted(_))
+            ) | (
+                ReindexKind::DebHosted,
+                DynRepository::Deb(DebRepository::Hosted(_))
+            ) | (
+                ReindexKind::DebProxy,
+                DynRepository::Deb(DebRepository::Proxy(_))
+            ) | (
+                ReindexKind::RubyHosted,
+                DynRepository::Ruby(RubyRepository::Hosted(_))
+            )
         )
     }
 

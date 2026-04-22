@@ -33,11 +33,7 @@ impl Extractor for HeaderMapCarrier<'_> {
     }
 }
 
-pub fn make_span<B>(
-    request: &Request<B>,
-    request_id: RequestId,
-    state: &Pkgly,
-) -> tracing::Span {
+pub fn make_span<B>(request: &Request<B>, request_id: RequestId, state: &Pkgly) -> tracing::Span {
     let user_agent = request.headers().get_string_ignore_empty(&USER_AGENT);
     let client_ip = ip_addr::extract_ip_as_string(request, state);
 

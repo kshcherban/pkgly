@@ -141,8 +141,8 @@ impl BlobUploadStateHandle {
 mod upload_state_tests;
 
 pub use self::site::{
-    AppMetrics, InternalServices, Pkgly, PkglyInner, PkglyState,
-    REPOSITORY_CONFIG_TYPES, REPOSITORY_TYPES,
+    AppMetrics, InternalServices, Pkgly, PkglyInner, PkglyState, REPOSITORY_CONFIG_TYPES,
+    REPOSITORY_TYPES,
 };
 
 #[cfg(test)]

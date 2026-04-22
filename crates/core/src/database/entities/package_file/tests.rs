@@ -28,10 +28,19 @@ fn file_name_from_path_uses_last_segment() {
 #[test]
 fn sort_expression_covers_all_variants() {
     assert_eq!(sort_expression(PackageFileSortBy::Modified), "modified_at");
-    assert_eq!(sort_expression(PackageFileSortBy::Package), "LOWER(package) COLLATE \"C\"");
-    assert_eq!(sort_expression(PackageFileSortBy::Name), "LOWER(name) COLLATE \"C\"");
+    assert_eq!(
+        sort_expression(PackageFileSortBy::Package),
+        "LOWER(package) COLLATE \"C\""
+    );
+    assert_eq!(
+        sort_expression(PackageFileSortBy::Name),
+        "LOWER(name) COLLATE \"C\""
+    );
     assert_eq!(sort_expression(PackageFileSortBy::Size), "size_bytes");
-    assert_eq!(sort_expression(PackageFileSortBy::Path), "LOWER(path) COLLATE \"C\"");
+    assert_eq!(
+        sort_expression(PackageFileSortBy::Path),
+        "LOWER(path) COLLATE \"C\""
+    );
     assert_eq!(
         sort_expression(PackageFileSortBy::Digest),
         "LOWER(COALESCE(content_digest, upstream_digest, '')) COLLATE \"C\""

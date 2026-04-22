@@ -19,8 +19,8 @@ mod r#virtual;
 pub use configs::*;
 pub use hosted::NugetHosted;
 pub use proxy::NugetProxy;
-pub use r#virtual::NugetVirtualRepository;
 pub use utils::REPOSITORY_TYPE_ID;
+pub use r#virtual::NugetVirtualRepository;
 
 use crate::error::OtherInternalError;
 use crate::{
@@ -215,12 +215,18 @@ impl RepositoryType for NugetRepositoryType {
                     Ok(DynRepository::Nuget(NugetRepository::Hosted(hosted)))
                 }
                 NugetRepositoryConfig::Proxy(proxy_config) => {
-                    let proxy = proxy::NugetProxy::load(website, storage, repo, proxy_config).await?;
+                    let proxy =
+                        proxy::NugetProxy::load(website, storage, repo, proxy_config).await?;
                     Ok(DynRepository::Nuget(NugetRepository::Proxy(proxy)))
                 }
                 NugetRepositoryConfig::Virtual(virtual_config) => {
-                    let virtual_repo =
-                        r#virtual::NugetVirtualRepository::load(website, storage, repo, virtual_config).await?;
+                    let virtual_repo = r#virtual::NugetVirtualRepository::load(
+                        website,
+                        storage,
+                        repo,
+                        virtual_config,
+                    )
+                    .await?;
                     Ok(DynRepository::Nuget(NugetRepository::Virtual(virtual_repo)))
                 }
             }

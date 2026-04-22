@@ -178,10 +178,7 @@ fn build_config_json_marks_auth_required() {
 fn build_login_response_points_to_web_ui() {
     let base = "https://example.com".parse::<Uri>().unwrap();
     let json = build_login_response(&base);
-    assert_eq!(
-        json["message"],
-        "Use Pkgly UI to generate an API token."
-    );
+    assert_eq!(json["message"], "Use Pkgly UI to generate an API token.");
     assert_eq!(
         json["token_help_url"],
         "https://example.com/app/settings/tokens"

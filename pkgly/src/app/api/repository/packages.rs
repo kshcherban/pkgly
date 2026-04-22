@@ -26,14 +26,18 @@ use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json;
 use sha2::{Digest, Sha256};
-use sqlx::{PgPool, Row};
 #[cfg(test)]
 use sqlx::types::Json as SqlxJson;
+use sqlx::{PgPool, Row};
 use tokio::io::AsyncReadExt;
 use tracing::{debug, instrument, warn};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
+#[cfg(test)]
+use crate::repository::docker::metadata::collect_manifest_entries;
+#[cfg(test)]
+use crate::repository::helm::HelmChartVersionExtra;
 use crate::{
     app::{
         Pkgly,
@@ -58,12 +62,12 @@ use crate::{
     },
     utils::ResponseBuilder,
 };
-#[cfg(test)]
-use crate::repository::docker::metadata::collect_manifest_entries;
-#[cfg(test)]
-use crate::repository::helm::HelmChartVersionExtra;
 use ahash::{HashSet, HashSetExt};
+#[cfg(test)]
+use nr_core::repository::project::{CargoPackageMetadata, DebPackageMetadata, VersionData};
 use nr_core::user::permissions::{HasPermissions, RepositoryActions};
+#[cfg(test)]
+use nr_core::utils::base64_utils;
 use nr_core::{
     database::entities::package_file::{
         DBPackageFile, PackageFileListParams, PackageFileSortBy, SortDirection,
@@ -71,10 +75,6 @@ use nr_core::{
     repository::project::ProxyArtifactKey,
     storage::StoragePath,
 };
-#[cfg(test)]
-use nr_core::repository::project::{CargoPackageMetadata, DebPackageMetadata, VersionData};
-#[cfg(test)]
-use nr_core::utils::base64_utils;
 #[cfg(test)]
 use std::cmp::min;
 #[cfg(test)]
@@ -729,7 +729,8 @@ pub async fn list_cached_packages(
         sort_by: query.sort_by.into(),
         sort_dir: query.sort_dir.into(),
     };
-    let (total_packages, rows) = DBPackageFile::list_repository_page(&site.database, &params).await?;
+    let (total_packages, rows) =
+        DBPackageFile::list_repository_page(&site.database, &params).await?;
     let items = rows
         .into_iter()
         .map(|row| PackageFileEntry {
@@ -748,7 +749,8 @@ pub async fn list_cached_packages(
         items,
     };
     let mut response = ResponseBuilder::ok().json(&response_body);
-    let has_index_rows = DBPackageFile::repository_has_rows(&site.database, repository.id()).await?;
+    let has_index_rows =
+        DBPackageFile::repository_has_rows(&site.database, repository.id()).await?;
     let repository_name = repository.name();
 
     if !has_index_rows {

@@ -70,9 +70,7 @@ impl RepositoryConfigType for PythonRepositoryConfigType {
         ConfigDescription {
             name: "Python Repository Config",
             description: Some("Handles the type of Python repository."),
-            documentation_link: Some(
-                "https://pkgly.kingtux.dev/repositoryTypes/python/configs/",
-            ),
+            documentation_link: Some("https://pkgly.kingtux.dev/repositoryTypes/python/configs/"),
             ..Default::default()
         }
     }

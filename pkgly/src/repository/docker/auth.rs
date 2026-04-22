@@ -448,10 +448,7 @@ pub fn docker_unauthorized_body(repository_scope: &str, actions: &[&str]) -> Str
     .to_string()
 }
 
-pub fn resolve_registry_location(
-    site: &Pkgly,
-    headers: Option<&HeaderMap>,
-) -> (String, String) {
+pub fn resolve_registry_location(site: &Pkgly, headers: Option<&HeaderMap>) -> (String, String) {
     let forwarded_proto = headers
         .and_then(|h| h.get("x-forwarded-proto"))
         .and_then(|value| value.to_str().ok())

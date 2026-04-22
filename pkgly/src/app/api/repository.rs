@@ -80,10 +80,13 @@ mod types;
         DBRepositoryNamesWithVisibility,
         RepositoryListEntry,
         packages::PackageDeleteRequest,
-        packages::PackageDeleteResponse
-        , crate::repository::deb::proxy_refresh::DebProxyRefreshSummary
-        , virtual_api::VirtualConfigView, virtual_api::VirtualMemberView, virtual_api::UpdateMembersRequest, virtual_api::UpdateResolutionOrderRequest
-    )),
+        packages::PackageDeleteResponse,
+        crate::repository::deb::proxy_refresh::DebProxyRefreshSummary,
+        virtual_api::VirtualConfigView,
+        virtual_api::VirtualMemberView,
+        virtual_api::UpdateMembersRequest,
+        virtual_api::UpdateResolutionOrderRequest
+    ))
 )]
 pub struct RepositoryAPI;
 pub fn repository_routes() -> axum::Router<Pkgly> {

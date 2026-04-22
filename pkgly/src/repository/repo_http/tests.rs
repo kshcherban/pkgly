@@ -91,8 +91,7 @@ fn docker_v2_unauthorized_response_sets_challenge() {
 
 #[test]
 fn www_authenticate_response_sets_header_and_body() {
-    let response =
-        RepoResponse::www_authenticate("Basic realm=\"Pkgly\"").into_response_default();
+    let response = RepoResponse::www_authenticate("Basic realm=\"Pkgly\"").into_response_default();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let headers = response.headers();
     assert_eq!(
@@ -152,11 +151,8 @@ fn npm_login_paths_bypass_auth() {
 
 #[test]
 fn classify_repo_audit_action_marks_write_operations() {
-    let action = super::classify_repo_audit_action(
-        &Method::PUT,
-        &StoragePath::from("crate/file.tgz"),
-        None,
-    );
+    let action =
+        super::classify_repo_audit_action(&Method::PUT, &StoragePath::from("crate/file.tgz"), None);
     assert_eq!(action, "package.upload");
 }
 

@@ -20,9 +20,8 @@ use super::{
     utils::{
         REPOSITORY_TYPE_ID, base_repository_path, can_read_with_auth, external_repository_base,
         json_response, parse_flatcontainer_index_versions, parse_published_package,
-        read_storage_bytes, registration_index_path,
-        rewrite_upstream_urls, save_json_cache, save_text_cache, service_index,
-        upsert_proxy_metadata,
+        read_storage_bytes, registration_index_path, rewrite_upstream_urls, save_json_cache,
+        save_text_cache, service_index, upsert_proxy_metadata,
     },
 };
 use crate::{
@@ -102,7 +101,12 @@ impl NugetProxy {
     }
 
     fn base_path(&self) -> String {
-        let storage = self.storage().storage_config().storage_config.storage_name.clone();
+        let storage = self
+            .storage()
+            .storage_config()
+            .storage_config
+            .storage_name
+            .clone();
         base_repository_path(&storage, &self.0.name)
     }
 
@@ -129,7 +133,9 @@ impl NugetProxy {
         }
 
         let service_index_url = self.upstream_service_index_url()?;
-        let response = crate::utils::upstream::send(&self.0.client, self.0.client.get(service_index_url)).await?;
+        let response =
+            crate::utils::upstream::send(&self.0.client, self.0.client.get(service_index_url))
+                .await?;
         if !response.status().is_success() {
             return Err(NugetError::InvalidPackage(format!(
                 "NuGet upstream service index returned {}",
@@ -138,7 +144,9 @@ impl NugetProxy {
         }
         let value: Value = response.json().await?;
         let Some(resources) = value.get("resources").and_then(Value::as_array) else {
-            return Err(NugetError::InvalidPackage("NuGet upstream service index missing resources".into()));
+            return Err(NugetError::InvalidPackage(
+                "NuGet upstream service index missing resources".into(),
+            ));
         };
 
         let mut flatcontainer_base = None;
@@ -171,10 +179,12 @@ impl NugetProxy {
         }
 
         let resources = ProxyResources {
-            flatcontainer_base: flatcontainer_base
-                .ok_or_else(|| NugetError::InvalidPackage("NuGet upstream missing PackageBaseAddress".into()))?,
-            registration_base: registration_base
-                .ok_or_else(|| NugetError::InvalidPackage("NuGet upstream missing RegistrationsBaseUrl".into()))?,
+            flatcontainer_base: flatcontainer_base.ok_or_else(|| {
+                NugetError::InvalidPackage("NuGet upstream missing PackageBaseAddress".into())
+            })?,
+            registration_base: registration_base.ok_or_else(|| {
+                NugetError::InvalidPackage("NuGet upstream missing RegistrationsBaseUrl".into())
+            })?,
             publish_base,
         };
         *self.0.resources.write().await = Some(resources.clone());
@@ -189,18 +199,28 @@ impl NugetProxy {
         local_base: &str,
         rewrite_registration: bool,
     ) -> Result<RepoResponse, NugetError> {
-        if let Some(bytes) = super::utils::read_storage_bytes(&self.storage(), self.id(), cache_path).await? {
+        if let Some(bytes) =
+            super::utils::read_storage_bytes(&self.storage(), self.id(), cache_path).await?
+        {
             let value: Value = serde_json::from_slice(&bytes)?;
             return Ok(RepoResponse::Other(json_response(&method, &value)));
         }
 
-        let response = crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone())).await?;
+        let response =
+            crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone()))
+                .await?;
         if response.status() == StatusCode::NOT_FOUND {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
         if !response.status().is_success() {
             warn!(status = %response.status(), url = %upstream_url, "NuGet proxy upstream request failed");
-            return Ok(RepoResponse::basic_text_response(StatusCode::BAD_GATEWAY, "Upstream NuGet request failed"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::BAD_GATEWAY,
+                "Upstream NuGet request failed",
+            ));
         }
 
         let mut value: Value = response.json().await?;
@@ -228,15 +248,27 @@ impl NugetProxy {
                 self.index_cached_package(cache_path, bytes.into(), Some(&upstream_url))
                     .await;
             }
-            return Ok(self.storage().open_file(self.id(), cache_path).await?.into());
+            return Ok(self
+                .storage()
+                .open_file(self.id(), cache_path)
+                .await?
+                .into());
         }
-        let response = crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone())).await?;
+        let response =
+            crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone()))
+                .await?;
         if response.status() == StatusCode::NOT_FOUND {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
         if !response.status().is_success() {
             warn!(status = %response.status(), url = %upstream_url, "NuGet proxy upstream binary request failed");
-            return Ok(RepoResponse::basic_text_response(StatusCode::BAD_GATEWAY, "Upstream NuGet request failed"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::BAD_GATEWAY,
+                "Upstream NuGet request failed",
+            ));
         }
         let bytes = response.bytes().await?;
         self.storage()
@@ -244,7 +276,11 @@ impl NugetProxy {
             .await?;
         self.index_cached_package(cache_path, bytes.clone(), Some(&upstream_url))
             .await;
-        Ok(self.storage().open_file(self.id(), cache_path).await?.into())
+        Ok(self
+            .storage()
+            .open_file(self.id(), cache_path)
+            .await?
+            .into())
     }
 
     async fn index_cached_package(
@@ -282,27 +318,38 @@ impl NugetProxy {
         cache_path: &StoragePath,
         method: http::Method,
     ) -> Result<RepoResponse, NugetError> {
-        if let Some(bytes) = super::utils::read_storage_bytes(&self.storage(), self.id(), cache_path).await? {
+        if let Some(bytes) =
+            super::utils::read_storage_bytes(&self.storage(), self.id(), cache_path).await?
+        {
             let xml = String::from_utf8(bytes)?;
-            return Ok(RepoResponse::Other(super::utils::xml_response(&method, xml)));
+            return Ok(RepoResponse::Other(super::utils::xml_response(
+                &method, xml,
+            )));
         }
-        let response = crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone())).await?;
+        let response =
+            crate::utils::upstream::send(&self.0.client, self.0.client.get(upstream_url.clone()))
+                .await?;
         if response.status() == StatusCode::NOT_FOUND {
-            return Ok(RepoResponse::basic_text_response(StatusCode::NOT_FOUND, "Package not found"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::NOT_FOUND,
+                "Package not found",
+            ));
         }
         if !response.status().is_success() {
             warn!(status = %response.status(), url = %upstream_url, "NuGet proxy upstream nuspec request failed");
-            return Ok(RepoResponse::basic_text_response(StatusCode::BAD_GATEWAY, "Upstream NuGet request failed"));
+            return Ok(RepoResponse::basic_text_response(
+                StatusCode::BAD_GATEWAY,
+                "Upstream NuGet request failed",
+            ));
         }
         let text = response.text().await?;
         save_text_cache(&self.storage(), self.id(), cache_path, text.clone()).await?;
-        Ok(RepoResponse::Other(super::utils::xml_response(&method, text)))
+        Ok(RepoResponse::Other(super::utils::xml_response(
+            &method, text,
+        )))
     }
 
-    async fn handle_read(
-        &self,
-        request: RepositoryRequest,
-    ) -> Result<RepoResponse, NugetError> {
+    async fn handle_read(&self, request: RepositoryRequest) -> Result<RepoResponse, NugetError> {
         let authentication = request.authentication.clone();
         let can_read =
             can_read_with_auth(&authentication, self.visibility(), self.id(), &self.site()).await?;
@@ -312,39 +359,82 @@ impl NugetProxy {
 
         let path = request.path.to_string();
         let method = request.parts.method.clone();
-        let local_base = external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
-        if path.is_empty() || path == "v3" || path == "v3/" || path == "v3/index.json" || path == "index.json" {
+        let local_base =
+            external_repository_base(&self.site(), Some(&request.parts), &self.base_path());
+        if path.is_empty()
+            || path == "v3"
+            || path == "v3/"
+            || path == "v3/index.json"
+            || path == "index.json"
+        {
             let body = service_index(&local_base, false);
             return Ok(RepoResponse::Other(json_response(&method, &body)));
         }
 
         let parts: Vec<_> = path.split('/').collect();
         let resources = self.discover_resources().await?;
-        if parts.len() >= 4 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[3] == "index.json" {
-            let upstream = Url::parse(&format!("{}/{}/index.json", resources.flatcontainer_base, parts[2]))?;
-            return self.fetch_json(upstream, &request.path, method.clone(), &local_base, false).await;
+        if parts.len() >= 4
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[3] == "index.json"
+        {
+            let upstream = Url::parse(&format!(
+                "{}/{}/index.json",
+                resources.flatcontainer_base, parts[2]
+            ))?;
+            return self
+                .fetch_json(upstream, &request.path, method.clone(), &local_base, false)
+                .await;
         }
-        if parts.len() == 5 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[4].ends_with(".nupkg") {
+        if parts.len() == 5
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[4].ends_with(".nupkg")
+        {
             let upstream = Url::parse(&format!(
                 "{}/{}/{}/{}",
                 resources.flatcontainer_base, parts[2], parts[3], parts[4]
             ))?;
             return self.fetch_binary(upstream, &request.path).await;
         }
-        if parts.len() == 5 && parts[0] == "v3" && parts[1] == "flatcontainer" && parts[4].ends_with(".nuspec") {
+        if parts.len() == 5
+            && parts[0] == "v3"
+            && parts[1] == "flatcontainer"
+            && parts[4].ends_with(".nuspec")
+        {
             let upstream = Url::parse(&format!(
                 "{}/{}/{}/{}",
                 resources.flatcontainer_base, parts[2], parts[3], parts[4]
             ))?;
-            return self.fetch_nuspec(upstream, &request.path, method.clone()).await;
+            return self
+                .fetch_nuspec(upstream, &request.path, method.clone())
+                .await;
         }
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3] == "index.json" {
-            let upstream = Url::parse(&format!("{}/{}/index.json", resources.registration_base, parts[2]))?;
-            return self.fetch_json(upstream, &request.path, method.clone(), &local_base, true).await;
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3] == "index.json"
+        {
+            let upstream = Url::parse(&format!(
+                "{}/{}/index.json",
+                resources.registration_base, parts[2]
+            ))?;
+            return self
+                .fetch_json(upstream, &request.path, method.clone(), &local_base, true)
+                .await;
         }
-        if parts.len() == 4 && parts[0] == "v3" && parts[1] == "registration" && parts[3].ends_with(".json") {
-            let upstream = Url::parse(&format!("{}/{}/{}", resources.registration_base, parts[2], parts[3]))?;
-            return self.fetch_json(upstream, &request.path, method.clone(), &local_base, true).await;
+        if parts.len() == 4
+            && parts[0] == "v3"
+            && parts[1] == "registration"
+            && parts[3].ends_with(".json")
+        {
+            let upstream = Url::parse(&format!(
+                "{}/{}/{}",
+                resources.registration_base, parts[2], parts[3]
+            ))?;
+            return self
+                .fetch_json(upstream, &request.path, method.clone(), &local_base, true)
+                .await;
         }
 
         let _ = parse_flatcontainer_index_versions(&Value::Null);

@@ -88,7 +88,7 @@ clear_nuget_global_packages() {
 ensure_nuget_hosted_repo() {
     local repo_name="$1"
     local existing_id="$2"
-    local storage_id="$3"
+    local storage_name="$3"
 
     if [ -n "$existing_id" ] && [ "$existing_id" != "null" ]; then
         echo "$existing_id"
@@ -99,7 +99,7 @@ ensure_nuget_hosted_repo() {
     payload=$(cat <<JSON
 {
   "name": "${repo_name}",
-  "storage": "${storage_id}",
+  "storage_name": "${storage_name}",
   "configs": {
     "nuget": { "type": "Hosted" },
     "auth": { "enabled": false }
@@ -114,27 +114,25 @@ JSON
 
 ensure_nuget_virtual_repo() {
     local virtual_id="$1"
-    local storage_id="$2"
-    local hosted2_id="$3"
-    local proxy_id="$4"
+    local storage_name="$2"
 
     if [ -z "$virtual_id" ] || [ "$virtual_id" = "null" ]; then
         local payload
         payload=$(cat <<JSON
 {
   "name": "nuget-virtual",
-  "storage": "${storage_id}",
+  "storage_name": "${storage_name}",
   "configs": {
     "nuget": {
       "type": "Virtual",
       "config": {
         "member_repositories": [
-          {"repository_id": "${hosted2_id}", "repository_name": "nuget-hosted-2", "priority": 1, "enabled": true},
-          {"repository_id": "${proxy_id}", "repository_name": "nuget-proxy", "priority": 10, "enabled": true}
+          {"repository_name": "nuget-hosted-2", "priority": 1, "enabled": true},
+          {"repository_name": "nuget-proxy", "priority": 10, "enabled": true}
         ],
         "resolution_order": "Priority",
         "cache_ttl_seconds": 60,
-        "publish_to": "${hosted2_id}"
+        "publish_to": "nuget-hosted-2"
       }
     },
     "auth": { "enabled": false }
@@ -151,12 +149,12 @@ JSON
     update_payload=$(cat <<JSON
 {
   "members": [
-    {"repository_id": "${hosted2_id}", "repository_name": "nuget-hosted-2", "priority": 1, "enabled": true},
-    {"repository_id": "${proxy_id}", "repository_name": "nuget-proxy", "priority": 10, "enabled": true}
+    {"repository_name": "nuget-hosted-2", "priority": 1, "enabled": true},
+    {"repository_name": "nuget-proxy", "priority": 10, "enabled": true}
   ],
   "resolution_order": "Priority",
   "cache_ttl_seconds": 60,
-  "publish_to": "${hosted2_id}"
+  "publish_to": "nuget-hosted-2"
 }
 JSON
 )
@@ -173,7 +171,7 @@ HOSTED_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-hosted") | .id
 PROXY_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-proxy") | .id')
 HOSTED2_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-hosted-2") | .id')
 VIRTUAL_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-virtual") | .id')
-STORAGE_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-hosted") | .storage_id')
+STORAGE_NAME=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="nuget-hosted") | .storage_name')
 
 if [ -z "$HOSTED_ID" ] || [ "$HOSTED_ID" = "null" ] || [ -z "$PROXY_ID" ] || [ "$PROXY_ID" = "null" ]; then
     fail "Seeded nuget-hosted or nuget-proxy repository missing"
@@ -181,8 +179,8 @@ if [ -z "$HOSTED_ID" ] || [ "$HOSTED_ID" = "null" ] || [ -z "$PROXY_ID" ] || [ "
     exit 1
 fi
 
-HOSTED2_ID=$(ensure_nuget_hosted_repo "nuget-hosted-2" "$HOSTED2_ID" "$STORAGE_ID")
-VIRTUAL_ID=$(ensure_nuget_virtual_repo "$VIRTUAL_ID" "$STORAGE_ID" "$HOSTED2_ID" "$PROXY_ID")
+HOSTED2_ID=$(ensure_nuget_hosted_repo "nuget-hosted-2" "$HOSTED2_ID" "$STORAGE_NAME")
+VIRTUAL_ID=$(ensure_nuget_virtual_repo "$VIRTUAL_ID" "$STORAGE_NAME")
 
 VIRTUAL_CFG=$(api_get "/api/repository/${VIRTUAL_ID}/virtual/members" || echo "{}")
 record_output "$VIRTUAL_CFG"

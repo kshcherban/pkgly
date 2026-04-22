@@ -287,14 +287,7 @@ async fn fetch_repository_rows_filters_by_digest() {
         "sha256:deadbeef",
     )
     .await;
-    insert_package_with_digest(
-        db.pool(),
-        repository_id,
-        "beta",
-        "1.0.0",
-        "sha256:cafebabe",
-    )
-    .await;
+    insert_package_with_digest(db.pool(), repository_id, "beta", "1.0.0", "sha256:cafebabe").await;
 
     let repository = PackageSearchRepository::new(db.pool());
     let query = SearchQuery {

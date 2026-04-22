@@ -50,7 +50,10 @@ fn sample_session() -> Session {
 }
 
 fn sample_session_for_user(user_id: i32) -> Session {
-    Session { user_id, ..sample_session() }
+    Session {
+        user_id,
+        ..sample_session()
+    }
 }
 
 fn sample_auth_token() -> AuthToken {
@@ -235,7 +238,12 @@ async fn change_email_updates_current_session_user() {
     .expect("handler ok");
 
     assert_eq!(response.status(), StatusCode::OK);
-    let payload = response.into_body().collect().await.expect("body").to_bytes();
+    let payload = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
     let updated: UserSafeData = serde_json::from_slice(&payload).expect("updated user");
     assert_eq!(updated.email.to_string(), "updated@example.com");
 
@@ -269,7 +277,12 @@ async fn change_email_returns_conflict_when_email_is_taken() {
 
     assert_eq!(response.status(), StatusCode::CONFLICT);
     let payload: serde_json::Value = serde_json::from_slice(
-        &response.into_body().collect().await.expect("body").to_bytes(),
+        &response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
     )
     .expect("json");
     assert_eq!(payload["details"], "email");
@@ -295,8 +308,16 @@ async fn change_email_rejects_auth_token_requests() {
     .expect("handler ok");
 
     assert_eq!(response.status(), StatusCode::BAD_REQUEST);
-    let body = response.into_body().collect().await.expect("body").to_bytes();
-    assert_eq!(std::str::from_utf8(&body).expect("utf8"), "Must be a session");
+    let body = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
+    assert_eq!(
+        std::str::from_utf8(&body).expect("utf8"),
+        "Must be a session"
+    );
 
     site.close().await;
 }

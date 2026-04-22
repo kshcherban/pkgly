@@ -393,9 +393,7 @@ impl MavenProxy {
         path: StoragePath,
     ) -> Result<Option<RepoResponse>, MavenError> {
         let proxy_config = self.config.read().clone();
-        let http_client = reqwest::Client::builder()
-            .user_agent("Pkgly")
-            .build()?;
+        let http_client = reqwest::Client::builder().user_agent("Pkgly").build()?;
 
         for route in proxy_config.routes {
             let mut path_as_string = path.to_string();

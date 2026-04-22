@@ -237,7 +237,7 @@ record_output "$REPO_LIST"
 HOSTED_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="npm-hosted") | .id')
 PROXY_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="npm-proxy") | .id')
 VIRTUAL_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="npm-virtual") | .id')
-STORAGE_ID=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="npm-hosted") | .storage_id')
+STORAGE_NAME=$(echo "$REPO_LIST" | jq -r '.[] | select(.name=="npm-hosted") | .storage_name')
 
 if [ -z "$HOSTED_ID" ] || [ -z "$PROXY_ID" ] || [ "$HOSTED_ID" = "null" ] || [ "$PROXY_ID" = "null" ]; then
     fail "Hosted or proxy repository missing"
@@ -247,16 +247,17 @@ if [ -z "$VIRTUAL_ID" ] || [ "$VIRTUAL_ID" = "null" ]; then
     VIRTUAL_PAYLOAD=$(cat <<JSON
 {
   "name": "npm-virtual",
-  "storage": "$STORAGE_ID",
+  "storage_name": "$STORAGE_NAME",
   "configs": {
     "npm": {
       "type": "Virtual",
       "config": {
         "member_repositories": [
-          {"repository_id": "$HOSTED_ID", "repository_name": "npm-hosted", "priority": 1, "enabled": true},
-          {"repository_id": "$PROXY_ID", "repository_name": "npm-proxy", "priority": 10, "enabled": true}
+          {"repository_name": "npm-hosted", "priority": 1, "enabled": true},
+          {"repository_name": "npm-proxy", "priority": 10, "enabled": true}
         ],
-        "resolution_order": "Priority"
+        "resolution_order": "Priority",
+        "publish_to": "npm-hosted"
       }
     },
     "auth": {"enabled": false}
@@ -273,9 +274,22 @@ if [ -z "$VIRTUAL_ID" ] || [ "$VIRTUAL_ID" = "null" ]; then
     fail "Failed to create or resolve npm-virtual repository"
 fi
 
+VIRTUAL_UPDATE_PAYLOAD=$(cat <<JSON
+{
+  "members": [
+    {"repository_name": "npm-hosted", "priority": 1, "enabled": true},
+    {"repository_name": "npm-proxy", "priority": 10, "enabled": true}
+  ],
+  "resolution_order": "Priority",
+  "publish_to": "npm-hosted"
+}
+JSON
+)
+api_post "/api/repository/${VIRTUAL_ID}/virtual/members" -H "Content-Type: application/json" -d "$VIRTUAL_UPDATE_PAYLOAD" > /dev/null
+
 MEMBERS=$(api_get "/api/repository/${VIRTUAL_ID}/virtual/members" || echo "[]")
 record_output "$MEMBERS"
-MEMBER_COUNT=$(echo "$MEMBERS" | jq 'length')
+MEMBER_COUNT=$(echo "$MEMBERS" | jq '.members | length')
 if [ "$MEMBER_COUNT" -ge 2 ]; then
     clear_last_log
     pass

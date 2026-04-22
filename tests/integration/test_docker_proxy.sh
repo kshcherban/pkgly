@@ -15,7 +15,6 @@ WORKSPACE=$(create_workspace "docker-proxy")
 REPO_NAME="${DOCKER_PROXY_REPOSITORY:-docker-proxy}"
 REPO_ID=""
 STORAGE_NAME=""
-STORAGE_ID=""
 DOCKER_REGISTRY_HOST="${PKGLY_DOCKER_HOST:-${PKGLY_URL#http://}}"
 UPSTREAM_IMAGE="library/alpine"
 CACHE_PATH=""
@@ -38,9 +37,8 @@ if repos=$(api_get "/api/repository/list"); then
     else
         REPO_ID=$(jq -r '.id' <<<"$REPO_ENTRY")
         STORAGE_NAME=$(jq -r '.storage_name' <<<"$REPO_ENTRY")
-        STORAGE_ID=$(jq -r '.storage_id' <<<"$REPO_ENTRY")
-        if [[ -z "$STORAGE_ID" || "$STORAGE_ID" == "null" ]]; then
-            fail "Seeded repository '$REPO_NAME' is missing storage_id field"
+        if [[ -z "$STORAGE_NAME" || "$STORAGE_NAME" == "null" ]]; then
+            fail "Seeded repository '$REPO_NAME' is missing storage_name field"
             exit 1
         fi
         REPO_PATH="${STORAGE_NAME}/${REPO_NAME}"
@@ -59,11 +57,11 @@ NEW_REPO_PATH=""
 NEW_PROXY_IMAGE=""
 NEW_REPO_JSON=$(jq -n \
     --arg name "$NEW_REPO_NAME" \
-    --arg storage_id "$STORAGE_ID" \
+    --arg storage_name "$STORAGE_NAME" \
     --arg upstream "https://registry-1.docker.io" \
     '{
         name: $name,
-        storage: $storage_id,
+        storage_name: $storage_name,
         configs: {
             docker: {
                 type: "Proxy",

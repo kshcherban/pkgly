@@ -158,7 +158,10 @@ pub fn normalize_version(value: &str) -> String {
 }
 
 pub fn flatcontainer_index_path(package_id: &str) -> StoragePath {
-    StoragePath::from(format!("v3/flatcontainer/{}/index.json", lower_id(package_id)))
+    StoragePath::from(format!(
+        "v3/flatcontainer/{}/index.json",
+        lower_id(package_id)
+    ))
 }
 
 pub fn flatcontainer_package_path(package_id: &str, version: &str) -> StoragePath {
@@ -178,7 +181,10 @@ pub fn flatcontainer_nuspec_path(package_id: &str, version: &str) -> StoragePath
 }
 
 pub fn registration_index_path(package_id: &str) -> StoragePath {
-    StoragePath::from(format!("v3/registration/{}/index.json", lower_id(package_id)))
+    StoragePath::from(format!(
+        "v3/registration/{}/index.json",
+        lower_id(package_id)
+    ))
 }
 
 pub fn registration_leaf_path(package_id: &str, version: &str) -> StoragePath {
@@ -193,18 +199,30 @@ pub fn base_repository_path(storage_name: &str, repository_name: &str) -> String
     format!("/repositories/{storage_name}/{repository_name}")
 }
 
-pub fn external_repository_base(site: &Pkgly, parts: Option<&Parts>, repository_path: &str) -> String {
+pub fn external_repository_base(
+    site: &Pkgly,
+    parts: Option<&Parts>,
+    repository_path: &str,
+) -> String {
     let instance = site.inner.instance.lock();
     let scheme = if instance.is_https { "https" } else { "http" };
 
     if let Some(parts) = parts {
-        if let Some(host) = parts.headers.get(HOST).and_then(|value| value.to_str().ok()) {
+        if let Some(host) = parts
+            .headers
+            .get(HOST)
+            .and_then(|value| value.to_str().ok())
+        {
             return format!("{scheme}://{host}{repository_path}");
         }
     }
 
     if !instance.app_url.is_empty() {
-        return format!("{}{}", instance.app_url.trim_end_matches('/'), repository_path);
+        return format!(
+            "{}{}",
+            instance.app_url.trim_end_matches('/'),
+            repository_path
+        );
     }
 
     format!("{scheme}://localhost:6742{repository_path}")
@@ -376,12 +394,24 @@ pub fn rewrite_upstream_urls(
         }
         Value::Array(items) => {
             for item in items {
-                rewrite_upstream_urls(item, registration_base, flatcontainer_base, publish_base, local_base);
+                rewrite_upstream_urls(
+                    item,
+                    registration_base,
+                    flatcontainer_base,
+                    publish_base,
+                    local_base,
+                );
             }
         }
         Value::Object(map) => {
             for item in map.values_mut() {
-                rewrite_upstream_urls(item, registration_base, flatcontainer_base, publish_base, local_base);
+                rewrite_upstream_urls(
+                    item,
+                    registration_base,
+                    flatcontainer_base,
+                    publish_base,
+                    local_base,
+                );
             }
         }
         _ => {}
@@ -418,7 +448,8 @@ pub fn parse_published_package(bytes: Bytes) -> Result<ParsedNugetPackage, Nuget
         }
     }
 
-    let nuspec_xml = nuspec_xml.ok_or_else(|| NugetError::InvalidPackage("Missing .nuspec".into()))?;
+    let nuspec_xml =
+        nuspec_xml.ok_or_else(|| NugetError::InvalidPackage("Missing .nuspec".into()))?;
     let metadata = parse_nuspec(&nuspec_xml)?;
 
     Ok(ParsedNugetPackage {
@@ -632,7 +663,9 @@ pub async fn list_hosted_versions(
     repository_id: Uuid,
     package_id: &str,
 ) -> Result<Vec<HostedVersionRecord>, NugetError> {
-    let Some(project) = DBProject::find_by_project_key(package_id, repository_id, site.as_ref()).await? else {
+    let Some(project) =
+        DBProject::find_by_project_key(package_id, repository_id, site.as_ref()).await?
+    else {
         return Ok(Vec::new());
     };
     let versions = DBProjectVersion::get_all_versions(project.id, site.as_ref()).await?;
@@ -668,7 +701,11 @@ pub async fn find_hosted_version(
         .find(|entry| entry.lower_version == normalize_version(version)))
 }
 
-pub fn hosted_leaf(base_url: &str, package_id: &str, version: &HostedVersionRecord) -> RegistrationLeaf {
+pub fn hosted_leaf(
+    base_url: &str,
+    package_id: &str,
+    version: &HostedVersionRecord,
+) -> RegistrationLeaf {
     let package_id_lower = lower_id(package_id);
     let package_content = format!(
         "{base_url}/v3/flatcontainer/{package_id_lower}/{}/{package_id_lower}.{}.nupkg",
@@ -750,13 +787,18 @@ pub async fn can_read_with_auth(
     .await?)
 }
 
-pub async fn first_multipart_bytes(body: RepositoryRequestBody, content_type: &str) -> Result<Bytes, NugetError> {
+pub async fn first_multipart_bytes(
+    body: RepositoryRequestBody,
+    content_type: &str,
+) -> Result<Bytes, NugetError> {
     let boundary = multer::parse_boundary(content_type)?;
     let bytes = body.body_as_bytes().await?;
     let stream = futures::stream::once(async move { Ok::<Bytes, multer::Error>(bytes) });
     let mut multipart = multer::Multipart::new(stream, boundary);
     let Some(field) = multipart.next_field().await? else {
-        return Err(NugetError::InvalidPackage("Missing multipart payload".into()));
+        return Err(NugetError::InvalidPackage(
+            "Missing multipart payload".into(),
+        ));
     };
     Ok(field.bytes().await?)
 }
@@ -783,7 +825,9 @@ pub async fn resolve_project_version(
         return Ok(ProjectResolution::default());
     }
     let version_dir = format!("v3/flatcontainer/{}/{}/", parts[2], parts[3]);
-    let Some(ids) = DBProjectVersion::find_ids_by_version_dir(&version_dir, repository_id, database).await? else {
+    let Some(ids) =
+        DBProjectVersion::find_ids_by_version_dir(&version_dir, repository_id, database).await?
+    else {
         return Ok(ProjectResolution::default());
     };
     Ok(ids.into())
@@ -820,7 +864,11 @@ pub async fn save_text_cache(
     value: String,
 ) -> Result<(), NugetError> {
     storage
-        .save_file(repository_id, FileContent::Content(value.into_bytes()), path)
+        .save_file(
+            repository_id,
+            FileContent::Content(value.into_bytes()),
+            path,
+        )
         .await?;
     Ok(())
 }

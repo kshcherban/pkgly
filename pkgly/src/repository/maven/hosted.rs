@@ -15,9 +15,7 @@ use nr_core::{
     },
     repository::{
         Visibility,
-        config::{
-            RepositoryConfigType, get_repository_config_or_default,
-        },
+        config::{RepositoryConfigType, get_repository_config_or_default},
         project::ProjectResolution,
     },
     storage::StoragePath,

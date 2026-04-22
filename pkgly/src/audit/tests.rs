@@ -64,7 +64,10 @@ fn json_layer_for_target(
 
 #[test]
 fn classify_api_action_covers_expected_routes() {
-    assert_eq!(classify_api_action("POST", "/api/install"), Some("system.install"));
+    assert_eq!(
+        classify_api_action("POST", "/api/install"),
+        Some("system.install")
+    );
     assert_eq!(classify_api_action("GET", "/api/user/me"), Some("auth.me"));
     assert_eq!(
         classify_api_action("POST", "/api/user/password-reset/request"),
@@ -132,7 +135,10 @@ fn emit_http_audit_log_uses_structured_fields() {
     });
 
     let output = read_buffer(&writer);
-    assert!(output.contains("\"message\":\"Audit event\""), "output was: {output}");
+    assert!(
+        output.contains("\"message\":\"Audit event\""),
+        "output was: {output}"
+    );
     assert!(
         output.contains("\"action\":\"repository.list\""),
         "output was: {output}"
@@ -150,7 +156,10 @@ fn emit_http_audit_log_uses_structured_fields() {
         output.contains("\"resource_kind\":\"repository\""),
         "output was: {output}"
     );
-    assert!(output.contains("\"resource_id\":\"repo-1\""), "output was: {output}");
+    assert!(
+        output.contains("\"resource_id\":\"repo-1\""),
+        "output was: {output}"
+    );
     assert!(
         output.contains("\"storage_id\":\"storage-1\""),
         "output was: {output}"
@@ -180,8 +189,14 @@ fn emit_http_audit_log_uses_route_classifier_when_no_override_exists() {
     });
 
     let output = read_buffer(&writer);
-    assert!(output.contains("\"action\":\"package.search\""), "output was: {output}");
-    assert!(output.contains("\"outcome\":\"denied\""), "output was: {output}");
+    assert!(
+        output.contains("\"action\":\"package.search\""),
+        "output was: {output}"
+    );
+    assert!(
+        output.contains("\"outcome\":\"denied\""),
+        "output was: {output}"
+    );
     assert!(
         output.contains("\"actor_username\":\"anonymous\""),
         "output was: {output}"

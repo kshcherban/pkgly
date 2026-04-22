@@ -25,11 +25,11 @@ use tracing_opentelemetry::OpenTelemetrySpanExt;
 
 use super::BrowseStreamPrimaryData;
 use crate::{
-    audit::{AuditActor, AuditMetadata, AuditOutcome, emit_named_audit_log},
     app::{
         Pkgly,
         authentication::ws::{WebSocketAuthentication, WebSocketAuthenticationMessage},
     },
+    audit::{AuditActor, AuditMetadata, AuditOutcome, emit_named_audit_log},
     error::InternalError,
     repository::{
         DynRepository, Repository, RepositoryAuthConfig, docker::metadata::resolve_browse_path,
@@ -122,11 +122,7 @@ fn ws_audit_metadata(
 }
 
 impl BrowseWSState {
-    pub fn new(
-        repository: DynRepository,
-        site: Pkgly,
-        auth_config: RepositoryAuthConfig,
-    ) -> Self {
+    pub fn new(repository: DynRepository, site: Pkgly, auth_config: RepositoryAuthConfig) -> Self {
         let active_path = StoragePathStream::new(repository.clone());
         BrowseWSState {
             repository,
