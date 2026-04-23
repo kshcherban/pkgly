@@ -64,6 +64,7 @@ async function init() {
 
   if (!info?.is_installed) {
     router.push("/admin/install");
+    return;
   }
   const session = sessionStore();
   const user = await session.updateUser();

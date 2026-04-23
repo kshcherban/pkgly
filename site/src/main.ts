@@ -39,10 +39,10 @@ import {
   faFolder,
 } from "@fortawesome/free-solid-svg-icons";
 
-import { sessionStore } from "./stores/session";
 import { autoAnimatePlugin } from "@formkit/auto-animate/vue";
 import { applyThemeTokens } from "@/utils/themeTokens";
 import vuetify from "./plugins/vuetify";
+import { installAwareAuthGuard } from "@/router/installGuard";
 
 const pinia = createPinia();
 setActivePinia(pinia);
@@ -50,24 +50,7 @@ const app = createApp(App);
 const vfm = createVfm();
 applyThemeTokens();
 
-router.beforeEach(async (to) => {
-  const store = sessionStore(pinia);
-  const requiresIdentity =
-    to.meta.requiresAuth === true || to.meta.requiresIdentity === true;
-  if (!requiresIdentity) {
-    return true;
-  }
-  if (store.session === undefined) {
-    await store.updateUser();
-  }
-  if (store.session === undefined) {
-    return {
-      name: "login",
-      query: { redirect: to.fullPath },
-    };
-  }
-  return true;
-});
+router.beforeEach((to) => installAwareAuthGuard(to, pinia));
 
 app.use(router);
 
