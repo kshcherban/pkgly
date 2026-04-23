@@ -16,10 +16,11 @@ services:
       retries: 10
 
   pkgly:
+    image: ghcr.io/kshcherban/pkgly:latest
     build: .
     restart: unless-stopped
     network_mode: "bridge"
-    mem_limit: 2048mb
+    # mem_limit: 2048mb
     depends_on:
       postgres:
         condition: service_healthy

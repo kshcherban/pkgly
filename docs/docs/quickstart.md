@@ -21,7 +21,7 @@ Use this when you want the quickest local setup on one machine.
 ```bash
 git clone https://github.com/kshcherban/pkgly.git
 cd pkgly
-docker compose up --detach --build
+docker compose up --detach
 ```
 
 What this uses:
