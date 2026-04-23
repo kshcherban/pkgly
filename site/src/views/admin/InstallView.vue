@@ -22,51 +22,13 @@
       <div
         class="install-form__field"
         data-testid="install-field">
-        <TextInput
-          id="name"
-          v-model="input.name"
-          autocomplete="name"
+        <PasswordInput
+          id="password"
+          v-model="input.password"
           required
-          placeholder="Admin User"
-          >Name</TextInput
+          :newPassword="true"
+          >Password</PasswordInput
         >
-      </div>
-
-      <div
-        class="install-form__field"
-        data-testid="install-field">
-        <EmailInput
-          id="email"
-          v-model="input.email"
-          placeholder="admin@pkgly.dev"
-          required
-          >Email</EmailInput
-        >
-      </div>
-
-      <div class="install-form__row">
-        <div
-          class="install-form__field"
-          data-testid="install-field">
-          <PasswordInput
-            id="password"
-            v-model="input.password"
-            required
-            :newPassword="true"
-            >Password</PasswordInput
-          >
-        </div>
-        <div
-          class="install-form__field"
-          data-testid="install-field">
-          <PasswordInput
-            id="confirmPassword"
-            v-model="input.confirmPassword"
-            required
-            :newPassword="true"
-            >Confirm Password</PasswordInput
-          >
-        </div>
       </div>
 
       <SubmitButton
@@ -80,7 +42,6 @@
 </template>
 <script setup lang="ts">
 import SubmitButton from "@/components/form/SubmitButton.vue";
-import EmailInput from "@/components/form/text/EmailInput.vue";
 import PasswordInput from "@/components/form/text/PasswordInput.vue";
 import TextInput from "@/components/form/text/TextInput.vue";
 import http from "@/http";
@@ -90,10 +51,7 @@ import { useAlertsStore } from "@/stores/alerts";
 import { computed, ref } from "vue";
 const input = ref({
   username: "",
-  email: "",
-  name: "",
   password: "",
-  confirmPassword: "",
 });
 const installing = ref(false);
 const site = siteStore();
@@ -108,17 +66,8 @@ const formValid = computed(() => {
   if (input.value.username === "") {
     return "Username is required.";
   }
-  if (input.value.email === "") {
-    return "Email is required.";
-  }
-  if (input.value.name === "") {
-    return "Name is required.";
-  }
   if (input.value.password === "") {
     return "Password is required.";
-  }
-  if (input.value.password !== input.value.confirmPassword) {
-    return "Passwords do not match.";
   }
   return "";
 });
@@ -128,8 +77,6 @@ async function install() {
   }
   const newUser = {
     username: input.value.username,
-    email: input.value.email,
-    name: input.value.name,
     password: input.value.password,
   };
   const install = {

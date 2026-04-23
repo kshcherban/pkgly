@@ -17,7 +17,7 @@ vi.mock("@/router", () => ({
 }));
 
 const fieldStub = {
-  template: `<label class="form-field"><slot /></label>`,
+  template: `<label class="form-field" :id="$attrs.id"><slot /></label>`,
   props: ["modelValue"],
   emits: ["update:modelValue"],
 };
@@ -48,7 +48,6 @@ describe("InstallView.vue", () => {
       global: {
         stubs: {
           TextInput: fieldStub,
-          EmailInput: fieldStub,
           PasswordInput: fieldStub,
           SubmitButton: {
             template: `<button><slot /></button>`,
@@ -68,5 +67,29 @@ describe("InstallView.vue", () => {
     for (const field of fields) {
       expect(field.classes()).toContain("install-form__field");
     }
+  });
+
+  it("asks only for username and password during first admin setup", async () => {
+    const InstallView = (await import("@/views/admin/InstallView.vue")).default;
+    const wrapper = mount(InstallView, {
+      global: {
+        stubs: {
+          TextInput: fieldStub,
+          PasswordInput: fieldStub,
+          SubmitButton: {
+            template: `<button><slot /></button>`,
+            props: ["disabled"],
+          },
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.find("#username").exists()).toBe(true);
+    expect(wrapper.find("#password").exists()).toBe(true);
+    expect(wrapper.find("#confirmPassword").exists()).toBe(false);
+    expect(wrapper.find("#name").exists()).toBe(false);
+    expect(wrapper.find("#email").exists()).toBe(false);
   });
 });

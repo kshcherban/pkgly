@@ -6,7 +6,10 @@ use axum::{
 use http::{StatusCode, Uri};
 use nr_core::{
     database::entities::user::NewUserRequest,
-    user::scopes::{NRScope, ScopeDescription},
+    user::{
+        Email, Username,
+        scopes::{NRScope, ScopeDescription},
+    },
 };
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use strum::IntoEnumIterator;
@@ -77,9 +80,29 @@ pub async fn scopes() -> Response {
         .header("Content-Type", "application/json")
         .json(&scopes)
 }
+
+const DEFAULT_FIRST_ADMIN_EMAIL: &str = "admin@pkgly.local";
+
 #[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
 pub struct InstallRequest {
-    pub user: NewUserRequest,
+    pub user: InstallUserRequest,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, ToSchema)]
+pub struct InstallUserRequest {
+    pub username: Username,
+    pub password: Option<String>,
+}
+
+impl InstallUserRequest {
+    fn into_new_user_request(self) -> Result<NewUserRequest, nr_core::user::InvalidEmail> {
+        Ok(NewUserRequest {
+            name: self.username.as_ref().to_string(),
+            username: self.username,
+            email: Email::new(DEFAULT_FIRST_ADMIN_EMAIL.to_string())?,
+            password: self.password,
+        })
+    }
 }
 /// Installs the site with the first user. If Site is already installed, it will return a 404.
 #[utoipa::path(
@@ -103,7 +126,14 @@ pub async fn install(
             return Ok(StatusCode::NOT_FOUND);
         }
     }
-    let InstallRequest { mut user } = request;
+    let InstallRequest { user } = request;
+    let mut user = match user.into_new_user_request() {
+        Ok(user) => user,
+        Err(err) => {
+            error!(?err, "Failed to create default email for first admin.");
+            return Ok(StatusCode::BAD_REQUEST);
+        }
+    };
     let password = user
         .password
         .as_ref()
