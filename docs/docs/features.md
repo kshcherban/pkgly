@@ -28,6 +28,7 @@ without guesswork.
 | Repository Search | Yes | Global and per-repository search filter packages, tags, and metadata (including Docker manifests) directly from the UI and API. |
 | Audit Logging | Yes | Dedicated `info`-level audit events under `pkgly::audit` record successful and denied user actions across API management routes, package operations, search/listing, and repository protocol traffic. |
 | SSO Support | Yes | Optional SSO proxy integration with auto-provisioned users when enabled in security settings ([docs](./sso/index.md)). |
+| Package Webhooks | Yes | Admin-managed outbound webhooks for `package.published` and `package.deleted`, backed by a durable retry queue and write-only custom headers. |
 | S3 Disk Cache | Yes | Configurable on-disk LRU cache keeps hot artifacts locally; knobs for path, byte cap, and entry cap are exposed in the Admin UI. |
 
 Use this page as the single source of truth when deciding which repository modes to enable or when

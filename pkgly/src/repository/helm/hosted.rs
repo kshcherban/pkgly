@@ -35,7 +35,7 @@ use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use sqlx::Row;
-use tracing::instrument;
+use tracing::{instrument, warn};
 use uuid::Uuid;
 
 use super::{
@@ -49,7 +49,10 @@ use super::{
     types::HelmChartVersionExtra,
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, PackageWebhookSnapshot, WebhookEventType},
+    },
     repository::docker::{
         DockerError, handlers as docker_handlers,
         hosted::DockerHosted,
@@ -944,6 +947,20 @@ impl HelmHosted {
         let created = persist_result?;
 
         self.invalidate_index_cache();
+        if let Some(user) = request.authentication.get_user() {
+            if let Err(err) = webhooks::enqueue_package_path_event(
+                &self.site(),
+                self.id(),
+                WebhookEventType::PackagePublished,
+                canonical_path.to_string(),
+                PackageWebhookActor::from_user(user),
+                false,
+            )
+            .await
+            {
+                warn!(error = %err, "Failed to enqueue Helm chart publish webhook");
+            }
+        }
 
         Ok(RepoResponse::put_response(
             created,
@@ -1147,6 +1164,21 @@ impl HelmHosted {
         }
 
         self.invalidate_index_cache();
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            canonical_path.to_string(),
+            PackageWebhookActor {
+                user_id: Some(user_id),
+                username: None,
+            },
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue Helm OCI publish webhook");
+        }
 
         Ok(())
     }
@@ -1358,14 +1390,16 @@ impl HelmHosted {
     pub async fn delete_chart_versions(
         &self,
         entries: &[DeletePackageEntry],
-    ) -> Result<usize, HelmRepositoryError> {
+        actor: Option<PackageWebhookActor>,
+    ) -> Result<Vec<PackageWebhookSnapshot>, HelmRepositoryError> {
         if entries.is_empty() {
-            return Ok(0);
+            return Ok(Vec::new());
         }
 
         let db = &self.site().database;
         let storage = self.storage();
-        let mut removed = 0usize;
+        let mut removed_snapshots = Vec::new();
+        let mut removed_count = 0usize;
 
         for entry in entries {
             let chart_name = entry.name.clone();
@@ -1384,6 +1418,22 @@ impl HelmHosted {
                             chart_name, chart_version
                         ))
                     })?;
+            if let Some(actor) = actor.clone() {
+                match webhooks::build_package_event_snapshot(
+                    &self.site(),
+                    self.id(),
+                    WebhookEventType::PackageDeleted,
+                    version.path.clone(),
+                    actor,
+                    true,
+                )
+                .await
+                {
+                    Ok(Some(snapshot)) => removed_snapshots.push(snapshot),
+                    Ok(None) => {}
+                    Err(err) => warn!(error = %err, chart = %chart_name, version = %chart_version, "Failed to prepare Helm delete webhook snapshot"),
+                }
+            }
 
             let mut chart_path = StoragePath::from(format!(
                 "charts/{}/{}-{}.tgz",
@@ -1456,15 +1506,14 @@ impl HelmHosted {
                     .execute(db)
                     .await?;
             }
-
-            removed += 1;
+            removed_count += 1;
         }
 
-        if removed > 0 {
+        if removed_count > 0 {
             self.invalidate_index_cache();
         }
 
-        Ok(removed)
+        Ok(removed_snapshots)
     }
 
     async fn handle_delete_packages(
@@ -1482,14 +1531,27 @@ impl HelmHosted {
             Some(id) => id,
             None => return Ok(RepoResponse::unauthorized()),
         };
+        let actor = request
+            .authentication
+            .get_user()
+            .map(PackageWebhookActor::from_user)
+            .or(Some(PackageWebhookActor {
+                user_id: Some(user_id),
+                username: None,
+            }));
 
         let body = request.body.body_as_json::<DeletePackagesRequest>().await?;
-        let deleted = self.delete_chart_versions(&body.charts).await?;
+        let deleted_snapshots = self.delete_chart_versions(&body.charts, actor).await?;
         tracing::debug!(
-            deleted,
+            deleted = deleted_snapshots.len(),
             user_id,
             "Deleted Helm chart versions via HTTP request"
         );
+        for snapshot in deleted_snapshots {
+            if let Err(err) = webhooks::enqueue_snapshot(&self.site(), snapshot).await {
+                warn!(error = %err, "Failed to enqueue Helm delete webhook");
+            }
+        }
 
         Ok(ResponseBuilder::no_content().empty().into())
     }
@@ -1529,12 +1591,18 @@ impl HelmHosted {
                 .into());
         };
 
-        let removed = self
+        let snapshots = self
             .delete_chart_versions(&[DeletePackageEntry {
                 name: chart_name,
                 version,
-            }])
+            }], request.authentication.get_user().map(PackageWebhookActor::from_user))
             .await?;
+        let removed = snapshots.len();
+        for snapshot in snapshots {
+            if let Err(err) = webhooks::enqueue_snapshot(&self.site(), snapshot).await {
+                warn!(error = %err, "Failed to enqueue ChartMuseum delete webhook");
+            }
+        }
 
         if removed > 0 {
             Ok(ResponseBuilder::ok().body("Chart deleted").into())

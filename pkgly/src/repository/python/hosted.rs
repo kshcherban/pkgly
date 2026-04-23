@@ -22,7 +22,7 @@ use nr_core::{
 };
 use nr_storage::{DynStorage, FileContent, Storage};
 use parking_lot::RwLock;
-use tracing::{debug, info, instrument};
+use tracing::{debug, info, instrument, warn};
 use uuid::Uuid;
 
 use super::{
@@ -31,7 +31,10 @@ use super::{
     utils::{PythonPackagePathInfo, html_escape, normalize_package_name},
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryRequest,
@@ -121,6 +124,18 @@ impl PythonHosted {
             .await?;
 
         self.upsert_metadata(Some(publisher), &info).await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            request.path.to_string(),
+            PackageWebhookActor::from_user(&user),
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue python publish webhook");
+        }
 
         Ok(RepoResponse::Other(ResponseBuilder::created().empty()))
     }
@@ -201,6 +216,21 @@ impl PythonHosted {
             .await?;
 
         self.upsert_metadata(Some(publisher), &info).await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            storage_path.to_string(),
+            PackageWebhookActor {
+                user_id: Some(publisher),
+                username: None,
+            },
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue python multipart publish webhook");
+        }
 
         Ok(RepoResponse::Other(ResponseBuilder::created().empty()))
     }

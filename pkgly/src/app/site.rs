@@ -61,6 +61,7 @@ use super::{
     email::EmailSetting,
     email_service::{EmailAccess, EmailService},
     state::{Instance, InstanceOAuth2Settings, InstanceSsoSettings, RepositoryStorageName},
+    webhooks::WebhookService,
 };
 use current_semver::current_semver;
 use http::{HeaderName, Uri};
@@ -70,6 +71,7 @@ pub struct InternalServices {
     pub session_cleaner: Option<JoinHandle<()>>,
     pub email: Option<EmailService>,
     pub background_scheduler: Option<JoinHandle<()>>,
+    pub webhook: Option<Arc<WebhookService>>,
 }
 
 pub struct PkglyInner {
@@ -107,7 +109,8 @@ impl PkglyInner {
     take_service! {
         take_session_cleaner => session_cleaner -> JoinHandle<()>,
         take_background_scheduler => background_scheduler -> JoinHandle<()>,
-        take_email => email -> EmailService
+        take_email => email -> EmailService,
+        take_webhook => webhook -> Arc<WebhookService>
     }
 
     /// Notifies services that have waiters that the application is shutting down
@@ -115,6 +118,9 @@ impl PkglyInner {
         let services = self.services.lock();
         if let Some(email) = services.email.as_ref() {
             email.notify_shutdown.notify_waiters();
+        }
+        if let Some(webhook) = services.webhook.as_ref() {
+            webhook.notify_shutdown();
         }
     }
 }
@@ -332,6 +338,7 @@ impl Pkgly {
 
         let (email_access, service) = EmailService::start(email_settings).await?;
         services.email = Some(service);
+        services.webhook = Some(Arc::new(WebhookService::start(database.clone())?));
         let suggested_local_storage_path = if let Some(path) = suggested_local_storage_path {
             path
         } else {
@@ -474,6 +481,17 @@ impl Pkgly {
         let background_scheduler = self.inner.take_background_scheduler();
         if let Some(handle) = background_scheduler {
             handle.abort();
+        }
+        let webhook = self.inner.take_webhook();
+        if let Some(service) = webhook {
+            service.abort();
+        }
+    }
+
+    pub fn notify_webhook_worker(&self) {
+        let services = self.inner.services.lock();
+        if let Some(webhook) = services.webhook.as_ref() {
+            webhook.notify_new_work();
         }
     }
 

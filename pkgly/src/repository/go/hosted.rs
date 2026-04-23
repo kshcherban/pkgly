@@ -32,7 +32,10 @@ use super::{
 };
 
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryFactoryError, RepositoryRequest,
         utils::can_read_repository_with_auth,
@@ -385,6 +388,21 @@ impl GoHosted {
         self.ensure_version_list(&module_path, &version).await?;
         self.record_go_catalog_entry(&module_path, &version, GoFileType::Zip, publisher_id)
             .await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            go_cache_path(&module_path, &version, GoFileType::Zip),
+            PackageWebhookActor {
+                user_id: Some(publisher_id),
+                username: None,
+            },
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue Go module publish webhook");
+        }
         if let Err(err) = self.refresh_latest_aliases(&module_path).await {
             warn!(
                 module = %module_path.as_str(),
@@ -1140,6 +1158,20 @@ impl Repository for GoHosted {
                 .await?;
             this.record_go_catalog_entry(&module_path, &version, file_type.clone(), publisher_id)
                 .await?;
+            if file_type == GoFileType::Zip {
+                if let Err(err) = webhooks::enqueue_package_path_event(
+                    &this.site(),
+                    this.id(),
+                    WebhookEventType::PackagePublished,
+                    go_cache_path(&module_path, &version, GoFileType::Zip),
+                    PackageWebhookActor::from_user(&user),
+                    false,
+                )
+                .await
+                {
+                    warn!(error = %err, "Failed to enqueue Go zip publish webhook");
+                }
+            }
 
             match file_type {
                 GoFileType::Info => {

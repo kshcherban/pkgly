@@ -24,7 +24,10 @@ use super::{
     },
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryRequest,
@@ -209,6 +212,21 @@ impl NugetHosted {
 
         self.persist_package(&package).await?;
         upsert_hosted_metadata(&self.site(), self.id(), &package, Some(publisher)).await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            nupkg_path.to_string(),
+            PackageWebhookActor {
+                user_id: Some(publisher),
+                username: None,
+            },
+            false,
+        )
+        .await
+        {
+            debug!(error = %err, "Failed to enqueue NuGet publish webhook");
+        }
 
         debug!(
             package_id = %package.package_id,

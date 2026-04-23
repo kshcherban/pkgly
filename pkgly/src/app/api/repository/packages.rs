@@ -43,6 +43,7 @@ use crate::{
         Pkgly,
         authentication::Authentication,
         responses::{MissingPermission, RepositoryNotFound},
+        webhooks::{self, PackageWebhookActor, PackageWebhookSnapshot, WebhookEventType},
     },
     error::{InternalError, OtherInternalError},
     repository::{
@@ -4066,9 +4067,9 @@ async fn delete_helm_package(
         version,
     };
     let removed = hosted
-        .delete_chart_versions(std::slice::from_ref(&entry))
+        .delete_chart_versions(std::slice::from_ref(&entry), None)
         .await?;
-    Ok(removed > 0)
+    Ok(!removed.is_empty())
 }
 
 fn collect_blob_path(
@@ -4276,6 +4277,23 @@ pub async fn delete_cached_packages(
     let mut deleted_paths: HashSet<String> = HashSet::new();
     let catalog_mode = catalog_deletion_mode(&repository);
     let mut catalog_targets: HashSet<String> = HashSet::new();
+    let mut delete_webhook_snapshots: std::collections::HashMap<String, PackageWebhookSnapshot> =
+        std::collections::HashMap::new();
+    for path in &request.paths {
+        if let Some(snapshot) = webhooks::build_package_event_snapshot(
+            &site,
+            repository.id(),
+            WebhookEventType::PackageDeleted,
+            path.clone(),
+            PackageWebhookActor::from_user(&auth),
+            true,
+        )
+        .await
+        .map_err(|err| InternalError::from(OtherInternalError::new(std::io::Error::other(err.to_string()))))?
+        {
+            delete_webhook_snapshots.insert(path.clone(), snapshot);
+        }
+    }
 
     if matches!(
         strategy,
@@ -4429,6 +4447,13 @@ pub async fn delete_cached_packages(
         let mut paths: Vec<String> = deleted_paths.into_iter().collect();
         paths.sort();
         let _ = DBPackageFile::soft_delete_by_paths(&site.database, repository.id(), &paths).await;
+        for path in paths {
+            if let Some(snapshot) = delete_webhook_snapshots.remove(&path) {
+                if let Err(err) = webhooks::enqueue_snapshot(&site, snapshot).await {
+                    warn!(error = %err, path, "Failed to enqueue package delete webhook");
+                }
+            }
+        }
     }
 
     let response = PackageDeleteResponse {

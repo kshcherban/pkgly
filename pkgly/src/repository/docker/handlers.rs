@@ -36,7 +36,10 @@ use super::{
     types::{Manifest, MediaType},
 };
 use crate::{
-    app::{BlobUploadStateHandle, FinalizedUpload, Pkgly},
+    app::{
+        BlobUploadStateHandle, FinalizedUpload, Pkgly,
+        webhooks::{self, PackageWebhookActor, PackageWebhookSnapshot, WebhookEventType},
+    },
     repository::repo_http::RepositoryAuthentication,
     utils::ResponseBuilder,
 };
@@ -719,7 +722,11 @@ pub async fn handle_delete(
         // DELETE /v2/<name>/manifests/<reference> - Delete manifest
         ["v2", name @ .., "manifests", reference] if !name.is_empty() => {
             let repository_name = name.join("/");
-            delete_manifest(&repo, &repository_name, reference).await
+            let actor = request
+                .authentication
+                .get_user()
+                .map(PackageWebhookActor::from_user);
+            delete_manifest(&repo, &repository_name, reference, actor).await
         }
 
         // DELETE /v2/<name>/blobs/uploads/<uuid> - Cancel upload
@@ -1056,6 +1063,23 @@ async fn put_manifest(
                 publisher,
             )
             .await?;
+        }
+    }
+
+    if !reference.starts_with("sha256:") {
+        if let Some(user) = request.authentication.get_user() {
+            if let Err(err) = webhooks::enqueue_package_path_event(
+                &repo.site(),
+                repo.id(),
+                WebhookEventType::PackagePublished,
+                manifest_path.to_string(),
+                PackageWebhookActor::from_user(user),
+                false,
+            )
+            .await
+            {
+                warn!(error = %err, "Failed to enqueue Docker publish webhook");
+            }
         }
     }
 
@@ -1471,12 +1495,27 @@ async fn delete_manifest(
     repo: &DockerHosted,
     repository_name: &str,
     reference: &str,
+    actor: Option<PackageWebhookActor>,
 ) -> Result<RepoResponse, DockerError> {
     info!("Deleting manifest: {}/{}", repository_name, reference);
 
     let manifest_path =
         StoragePath::from(format!("v2/{}/manifests/{}", repository_name, reference));
     let manifest_path_str = manifest_path.to_string();
+    let snapshot: Option<PackageWebhookSnapshot> = if let Some(actor) = actor {
+        webhooks::build_package_event_snapshot(
+            &repo.site(),
+            repo.id(),
+            WebhookEventType::PackageDeleted,
+            manifest_path_str.clone(),
+            actor,
+            true,
+        )
+        .await
+        .map_err(|err| DockerError::InvalidManifest(err.to_string()))?
+    } else {
+        None
+    };
 
     // Use the same comprehensive deletion logic as the packages API
     // This ensures proper garbage collection of associated blobs and layers
@@ -1489,6 +1528,13 @@ async fn delete_manifest(
     .await
     {
         Ok(result) => {
+            if result.removed_manifests > 0 {
+                if let Some(snapshot) = snapshot {
+                    if let Err(err) = webhooks::enqueue_snapshot(&repo.site(), snapshot).await {
+                        warn!(error = %err, "Failed to enqueue Docker delete webhook");
+                    }
+                }
+            }
             info!(
                 "Successfully deleted Docker manifest: {}/{} (removed {} manifests, {} blobs)",
                 repository_name, reference, result.removed_manifests, result.removed_blobs

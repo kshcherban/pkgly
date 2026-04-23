@@ -16,6 +16,7 @@ pub mod open_api;
 pub mod request_logging;
 pub mod resources;
 pub mod scheduler;
+pub mod webhooks;
 
 pub mod responses;
 pub mod routes;

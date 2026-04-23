@@ -25,7 +25,7 @@ use nr_core::{
 use nr_storage::{DynStorage, Storage, StorageFile, local::LocalStorage};
 use parking_lot::RwLock;
 use tokio::io::{AsyncWriteExt, BufWriter};
-use tracing::{debug, error, event, info, instrument};
+use tracing::{debug, error, event, info, instrument, warn};
 use uuid::Uuid;
 
 use super::{
@@ -33,7 +33,10 @@ use super::{
     utils::MavenRepositoryExt,
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         maven::{MavenRepositoryConfigType, configs::MavenPushRulesConfigType},
@@ -227,6 +230,21 @@ impl MavenHosted {
         if let Some(pom) = pom {
             debug!(?pom, "Parsed POM File");
             self.post_pom_upload(path.clone(), Some(user_id), pom).await;
+            if let Err(err) = webhooks::enqueue_package_path_event(
+                &self.site(),
+                self.id,
+                WebhookEventType::PackagePublished,
+                path.parent().to_string(),
+                PackageWebhookActor {
+                    user_id: Some(user_id),
+                    username: None,
+                },
+                false,
+            )
+            .await
+            {
+                warn!(error = %err, "Failed to enqueue maven publish webhook");
+            }
         };
         Ok(RepoResponse::put_response(created, save_path))
     }

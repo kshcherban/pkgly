@@ -23,12 +23,15 @@ use parking_lot::RwLock;
 use serde::Deserialize;
 use sha2::Digest;
 use tokio::io::AsyncWriteExt;
-use tracing::{debug, error, info, instrument};
+use tracing::{debug, error, info, instrument, warn};
 use uuid::Uuid;
 
 use super::{REPOSITORY_TYPE_ID, RubyRepositoryConfigType, RubyRepositoryError};
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError},
     utils::ResponseBuilder,
 };
@@ -576,6 +579,18 @@ impl RubyHosted {
         new_version.insert(&self.site().database).await?;
 
         self.rebuild_indexes().await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            gem_path.to_string(),
+            PackageWebhookActor::from_user(&user),
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue ruby publish webhook");
+        }
 
         tracing::Span::current().record("nr.ruby.publish.outcome", "ok");
         info!(
@@ -668,6 +683,7 @@ impl RubyHosted {
                 "Version not found",
             ));
         };
+        let delete_path = version.path.clone();
 
         sqlx::query("DELETE FROM project_versions WHERE id = $1")
             .bind(version.id)
@@ -690,6 +706,18 @@ impl RubyHosted {
         }
 
         self.rebuild_indexes().await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackageDeleted,
+            delete_path,
+            PackageWebhookActor::from_user(&user),
+            true,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue ruby yank webhook");
+        }
 
         tracing::Span::current().record("nr.ruby.yank.outcome", "ok");
         info!(

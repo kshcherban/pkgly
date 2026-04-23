@@ -29,7 +29,10 @@ use tracing::{debug, instrument};
 use uuid::Uuid;
 
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfig, RepositoryAuthConfigType,
         RepositoryFactoryError, RepositoryRequest, repo_http::RepositoryAuthentication,
@@ -285,7 +288,20 @@ impl CargoHosted {
         };
         let body = request.body.body_as_bytes().await?;
         let payload = parse_publish_payload(&body)?;
+        let publish_path = crate_archive_storage_path(&payload.metadata.name, &payload.metadata.vers);
         self.persist_publish(Some(user.id), payload).await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            publish_path.to_string(),
+            PackageWebhookActor::from_user(&user),
+            false,
+        )
+        .await
+        {
+            tracing::warn!(error = %err, "Failed to enqueue cargo publish webhook");
+        }
         Ok(RepoResponse::Other(ResponseBuilder::ok().json(
             &serde_json::json!({
                 "ok": true

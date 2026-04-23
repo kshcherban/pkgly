@@ -143,6 +143,42 @@ export interface OAuth2Configuration {
   available_roles: string[];
 }
 
+export type WebhookEventType = "package.published" | "package.deleted";
+
+export type WebhookDeliveryStatus = "pending" | "processing" | "delivered" | "failed";
+
+export interface WebhookHeader {
+  name: string;
+  configured: boolean;
+}
+
+export interface WebhookConfiguration {
+  id: string;
+  name: string;
+  enabled: boolean;
+  target_url: string;
+  events: WebhookEventType[];
+  headers: WebhookHeader[];
+  last_delivery_status?: WebhookDeliveryStatus | null;
+  last_delivery_at?: string | null;
+  last_http_status?: number | null;
+  last_error?: string | null;
+}
+
+export interface WebhookHeaderUpdate {
+  name: string;
+  value?: string | null;
+  configured: boolean;
+}
+
+export interface WebhookUpdatePayload {
+  name: string;
+  enabled: boolean;
+  target_url: string;
+  events: WebhookEventType[];
+  headers: WebhookHeaderUpdate[];
+}
+
 export enum RepositoryActions {
   Read = "Read",
   Write = "Write",

@@ -22,6 +22,7 @@ use serde_json::to_value;
 use sha1::{Digest, Sha1};
 use tempfile::{NamedTempFile, TempPath};
 use tokio::{fs::File, io::AsyncWriteExt};
+use tracing::warn;
 use uuid::Uuid;
 
 use super::{
@@ -31,7 +32,10 @@ use super::{
     extract_composer_from_zip, validate_package_against_path,
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryRequest, RepositoryRequestBody,
@@ -361,6 +365,18 @@ impl PhpHosted {
             .await?;
         self.upsert_metadata(Some(user.id), &composer, &dist_storage_path)
             .await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackagePublished,
+            dist_storage_path.to_string(),
+            PackageWebhookActor::from_user(&user),
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue PHP publish webhook");
+        }
 
         Ok(RepoResponse::Other(
             ResponseBuilder::created()

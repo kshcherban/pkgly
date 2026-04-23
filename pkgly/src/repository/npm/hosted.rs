@@ -21,7 +21,10 @@ use super::{
     utils::{NpmRegistryExt, npm_time},
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryHandlerError, RepositoryRequest,
@@ -112,6 +115,19 @@ impl NPMHostedRegistry {
             storage
                 .save_file(self.id, FileContent::Content(attachment_data), &path)
                 .await?;
+        }
+
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site,
+            self.id,
+            WebhookEventType::PackagePublished,
+            version_path.to_string(),
+            PackageWebhookActor::from_user(&user),
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue npm publish webhook");
         }
 
         Ok(ResponseBuilder::no_content().empty().into())
