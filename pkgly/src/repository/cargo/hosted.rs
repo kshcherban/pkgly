@@ -288,7 +288,8 @@ impl CargoHosted {
         };
         let body = request.body.body_as_bytes().await?;
         let payload = parse_publish_payload(&body)?;
-        let publish_path = crate_archive_storage_path(&payload.metadata.name, &payload.metadata.vers);
+        let publish_path =
+            crate_archive_storage_path(&payload.metadata.name, &payload.metadata.vers);
         self.persist_publish(Some(user.id), payload).await?;
         if let Err(err) = webhooks::enqueue_package_path_event(
             &self.site(),

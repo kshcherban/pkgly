@@ -684,6 +684,22 @@ impl RubyHosted {
             ));
         };
         let delete_path = version.path.clone();
+        let delete_webhook_snapshot = match webhooks::build_package_event_snapshot(
+            &self.site(),
+            self.id(),
+            WebhookEventType::PackageDeleted,
+            delete_path.clone(),
+            PackageWebhookActor::from_user(&user),
+            true,
+        )
+        .await
+        {
+            Ok(snapshot) => snapshot,
+            Err(err) => {
+                warn!(error = %err, "Failed to prepare ruby yank webhook");
+                None
+            }
+        };
 
         sqlx::query("DELETE FROM project_versions WHERE id = $1")
             .bind(version.id)
@@ -706,17 +722,10 @@ impl RubyHosted {
         }
 
         self.rebuild_indexes().await?;
-        if let Err(err) = webhooks::enqueue_package_path_event(
-            &self.site(),
-            self.id(),
-            WebhookEventType::PackageDeleted,
-            delete_path,
-            PackageWebhookActor::from_user(&user),
-            true,
-        )
-        .await
-        {
-            warn!(error = %err, "Failed to enqueue ruby yank webhook");
+        if let Some(snapshot) = delete_webhook_snapshot {
+            if let Err(err) = webhooks::enqueue_snapshot(&self.site(), snapshot).await {
+                warn!(error = %err, "Failed to enqueue ruby yank webhook");
+            }
         }
 
         tracing::Span::current().record("nr.ruby.yank.outcome", "ok");

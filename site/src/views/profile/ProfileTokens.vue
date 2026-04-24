@@ -9,6 +9,7 @@
           </div>
         </div>
         <v-btn
+          v-if="authTokens.length > 0"
           color="primary"
           variant="flat"
           prepend-icon="mdi-key-plus"

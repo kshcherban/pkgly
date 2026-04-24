@@ -84,9 +84,12 @@ async fn build_site(db: &TestDb, root: &std::path::Path) -> Pkgly {
     .expect("create site")
 }
 
-fn sample_user(user_id: i32, system_manager: bool) -> nr_core::database::entities::user::UserSafeData {
-    let fixed_time = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
-        .expect("time");
+fn sample_user(
+    user_id: i32,
+    system_manager: bool,
+) -> nr_core::database::entities::user::UserSafeData {
+    let fixed_time =
+        chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
     nr_core::database::entities::user::UserSafeData {
         id: user_id,
         name: "Test User".into(),
@@ -104,8 +107,8 @@ fn sample_user(user_id: i32, system_manager: bool) -> nr_core::database::entitie
 }
 
 fn sample_auth(user_id: i32, system_manager: bool) -> Authentication {
-    let fixed_time = chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00")
-        .expect("time");
+    let fixed_time =
+        chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
     let token = nr_core::database::entities::user::auth_token::AuthToken {
         id: 1,
         user_id,
@@ -121,7 +124,12 @@ fn sample_auth(user_id: i32, system_manager: bool) -> Authentication {
 }
 
 async fn body_json(response: Response) -> Value {
-    let bytes = response.into_body().collect().await.expect("body").to_bytes();
+    let bytes = response
+        .into_body()
+        .collect()
+        .await
+        .expect("body")
+        .to_bytes();
     serde_json::from_slice(&bytes).expect("json body")
 }
 
@@ -230,5 +238,10 @@ async fn webhook_crud_redacts_headers_and_preserves_secret_on_update() {
 fn openapi_registers_webhook_routes() {
     let document = crate::app::open_api::ApiDoc::openapi();
     assert!(document.paths.paths.contains_key("/api/system/webhooks"));
-    assert!(document.paths.paths.contains_key("/api/system/webhooks/{id}"));
+    assert!(
+        document
+            .paths
+            .paths
+            .contains_key("/api/system/webhooks/{id}")
+    );
 }

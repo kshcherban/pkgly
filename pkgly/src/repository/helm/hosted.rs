@@ -1431,7 +1431,9 @@ impl HelmHosted {
                 {
                     Ok(Some(snapshot)) => removed_snapshots.push(snapshot),
                     Ok(None) => {}
-                    Err(err) => warn!(error = %err, chart = %chart_name, version = %chart_version, "Failed to prepare Helm delete webhook snapshot"),
+                    Err(err) => {
+                        warn!(error = %err, chart = %chart_name, version = %chart_version, "Failed to prepare Helm delete webhook snapshot")
+                    }
                 }
             }
 
@@ -1592,10 +1594,16 @@ impl HelmHosted {
         };
 
         let snapshots = self
-            .delete_chart_versions(&[DeletePackageEntry {
-                name: chart_name,
-                version,
-            }], request.authentication.get_user().map(PackageWebhookActor::from_user))
+            .delete_chart_versions(
+                &[DeletePackageEntry {
+                    name: chart_name,
+                    version,
+                }],
+                request
+                    .authentication
+                    .get_user()
+                    .map(PackageWebhookActor::from_user),
+            )
             .await?;
         let removed = snapshots.len();
         for snapshot in snapshots {

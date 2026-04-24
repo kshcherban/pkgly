@@ -1,5 +1,5 @@
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 
 vi.mock("@/http", () => ({
@@ -73,9 +73,16 @@ const vuetifyStubs = {
     template: "<div class='v-expansion-panel-text'><slot /></div>",
   }),
   "v-btn": defineComponent({
-    props: { color: String, variant: String },
+    props: { color: String, variant: String, to: [String, Object] },
     emits: ["click"],
-    template: "<button class='v-btn' @click=\"$emit('click', $event)\"><slot /></button>",
+    template: `
+      <button
+        class='v-btn'
+        :data-to-name="to && typeof to === 'object' ? to.name : to"
+        @click="$emit('click', $event)">
+        <slot />
+      </button>
+    `,
   }),
   "v-chip": defineComponent({
     props: { color: String, variant: String },
@@ -84,9 +91,16 @@ const vuetifyStubs = {
 };
 
 describe("ProfileTokens.vue", () => {
+  beforeEach(async () => {
+    const http = await import("@/http");
+    vi.mocked(http.default.get).mockReset();
+    vi.mocked(http.default.delete).mockReset();
+    vi.mocked(http.default.delete).mockResolvedValue(undefined);
+  });
+
   it("renders tokens inside expansion panels with delete actions", async () => {
     const http = await import("@/http");
-    (http.default.get as vi.Mock).mockResolvedValue({ data: tokenResponse });
+    vi.mocked(http.default.get).mockResolvedValue({ data: tokenResponse });
     const module = await import("@/views/profile/ProfileTokens.vue");
     const ProfileTokens = module.default;
 
@@ -99,7 +113,31 @@ describe("ProfileTokens.vue", () => {
     await flushPromises();
 
     expect(wrapper.findAll(".v-expansion-panel")).toHaveLength(1);
+    expect(wrapper.findAll("button").filter((button) => button.text().includes("New Token"))).toHaveLength(1);
     await wrapper.get('[data-testid="token-delete-button"]').trigger("click");
     expect(http.default.delete).toHaveBeenCalledWith("/api/user/token/delete/1");
+  });
+
+  it("shows one create token CTA when no tokens exist", async () => {
+    const http = await import("@/http");
+    vi.mocked(http.default.get).mockResolvedValue({ data: [] });
+    const module = await import("@/views/profile/ProfileTokens.vue");
+    const ProfileTokens = module.default;
+
+    const wrapper = mount(ProfileTokens, {
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    const createTokenButtons = wrapper
+      .findAll("button")
+      .filter((button) => button.text().includes("Create Token"));
+    expect(wrapper.text()).toContain("No tokens yet");
+    expect(wrapper.text()).not.toContain("New Token");
+    expect(createTokenButtons).toHaveLength(1);
+    expect(createTokenButtons[0]!.attributes("data-to-name")).toBe("profileTokenCreate");
   });
 });

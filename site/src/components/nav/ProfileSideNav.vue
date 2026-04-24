@@ -12,29 +12,17 @@
       <font-awesome-icon icon="fa-solid fa-gear" />
       <span>Login</span>
     </SideNavElement>
-    <ExpandingSideNav :openIfHasTag="profileTokenTag">
-      <template #button>
-        <SideNavElement
-          to="/profile/tokens"
-          routeName="profileTokens">
-          <font-awesome-icon icon="fa-solid fa-gear" />
-          <span>Tokens</span>
-        </SideNavElement>
-      </template>
-      <template #content>
-        <SideNavElement
-          to="/profile/token/create"
-          routeName="profileTokenCreate">
-          <font-awesome-icon icon="fa-solid fa-box-open" />
-          <span>Create Token</span>
-        </SideNavElement>
-      </template>
-    </ExpandingSideNav>
+    <SideNavElement
+      to="/profile/tokens"
+      routeName="profileTokens"
+      :activeTag="profileTokenTag">
+      <font-awesome-icon icon="fa-solid fa-gear" />
+      <span>Tokens</span>
+    </SideNavElement>
   </SideNav>
 </template>
 <script setup lang="ts">
 import { profileTokenTag } from "@/views/profile/profileRoutes";
-import ExpandingSideNav from "./sideNav/ExpandingSideNav.vue";
 import SideNav from "./sideNav/SideNav.vue";
 import SideNavElement from "./sideNav/SideNavElement.vue";
 </script>

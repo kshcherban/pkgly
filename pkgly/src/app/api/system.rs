@@ -32,16 +32,14 @@ use tracing::{error, instrument};
         update_webhook,
         delete_webhook
     ),
-    components(
-        schemas(
-            WebhookEventType,
-            WebhookDeliveryStatus,
-            WebhookHeaderResponse,
-            WebhookHeaderRequest,
-            WebhookResponse,
-            WebhookUpsertRequest
-        )
-    )
+    components(schemas(
+        WebhookEventType,
+        WebhookDeliveryStatus,
+        WebhookHeaderResponse,
+        WebhookHeaderRequest,
+        WebhookResponse,
+        WebhookUpsertRequest
+    ))
 )]
 pub struct SystemAPI;
 
@@ -155,7 +153,11 @@ pub async fn list_webhooks(
 
     let webhooks = webhooks::list_webhooks(&site.database)
         .await
-        .map_err(|err| InternalError::from(OtherInternalError::new(std::io::Error::other(err.to_string()))))?;
+        .map_err(|err| {
+            InternalError::from(OtherInternalError::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })?;
     let response = webhooks
         .into_iter()
         .map(WebhookResponse::from)
@@ -213,7 +215,11 @@ pub async fn get_webhook(
 
     let webhook = webhooks::get_webhook(&site.database, id)
         .await
-        .map_err(|err| InternalError::from(OtherInternalError::new(std::io::Error::other(err.to_string()))))?;
+        .map_err(|err| {
+            InternalError::from(OtherInternalError::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })?;
     let Some(webhook) = webhook else {
         return Ok(ResponseBuilder::not_found().body("Webhook not found"));
     };
@@ -276,7 +282,11 @@ pub async fn delete_webhook(
 
     let deleted = webhooks::delete_webhook(&site.database, id)
         .await
-        .map_err(|err| InternalError::from(OtherInternalError::new(std::io::Error::other(err.to_string()))))?;
+        .map_err(|err| {
+            InternalError::from(OtherInternalError::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })?;
     if !deleted {
         return Ok(ResponseBuilder::not_found().body("Webhook not found"));
     }

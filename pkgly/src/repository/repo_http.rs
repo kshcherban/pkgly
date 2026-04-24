@@ -293,6 +293,12 @@ impl RepositoryRequestBody {
     pub fn empty() -> Self {
         RepositoryRequestBody(Body::empty())
     }
+
+    #[cfg(test)]
+    pub fn from_bytes(bytes: Bytes) -> Self {
+        RepositoryRequestBody(Body::from(bytes))
+    }
+
     #[instrument]
     pub async fn body_as_bytes(self) -> Result<Bytes, RepositoryHandlerError> {
         // I am not sure if this error is user fault or server fault. I am going to assume it is a user fault for now

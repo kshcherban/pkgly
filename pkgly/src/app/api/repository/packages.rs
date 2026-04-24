@@ -4289,8 +4289,11 @@ pub async fn delete_cached_packages(
             true,
         )
         .await
-        .map_err(|err| InternalError::from(OtherInternalError::new(std::io::Error::other(err.to_string()))))?
-        {
+        .map_err(|err| {
+            InternalError::from(OtherInternalError::new(std::io::Error::other(
+                err.to_string(),
+            )))
+        })? {
             delete_webhook_snapshots.insert(path.clone(), snapshot);
         }
     }

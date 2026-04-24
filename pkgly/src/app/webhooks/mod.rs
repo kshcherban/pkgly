@@ -443,7 +443,10 @@ pub async fn build_package_event_snapshot(
     }))
 }
 
-pub async fn enqueue_snapshot(site: &Pkgly, snapshot: PackageWebhookSnapshot) -> anyhow::Result<usize> {
+pub async fn enqueue_snapshot(
+    site: &Pkgly,
+    snapshot: PackageWebhookSnapshot,
+) -> anyhow::Result<usize> {
     let event_filter = json!([snapshot.event_type.as_str()]);
     let rows = sqlx::query(
         r#"
@@ -670,7 +673,8 @@ fn parse_events(value: Value) -> anyhow::Result<Vec<WebhookEventType>> {
     let Value::Array(items) = value else {
         return Err(anyhow!("Webhook events payload is not an array"));
     };
-    items.into_iter()
+    items
+        .into_iter()
         .map(|item| {
             let Value::String(value) = item else {
                 return Err(anyhow!("Webhook event entry is not a string"));
@@ -792,7 +796,9 @@ async fn resolve_package_snapshot(
         .bind(repository_name)
         .fetch_optional(database)
         .await
-        .with_context(|| format!("Failed to resolve package snapshot for manifest path `{canonical_path}`"))?
+        .with_context(|| {
+            format!("Failed to resolve package snapshot for manifest path `{canonical_path}`")
+        })?
     } else {
         None
     };
@@ -816,7 +822,9 @@ fn parse_manifest_reference_path(path: &str) -> Option<(String, String)> {
         return None;
     }
     let segments: Vec<&str> = trimmed.split('/').collect();
-    let manifest_idx = segments.iter().position(|segment| *segment == "manifests")?;
+    let manifest_idx = segments
+        .iter()
+        .position(|segment| *segment == "manifests")?;
     if manifest_idx < 2 || manifest_idx + 1 >= segments.len() {
         return None;
     }
@@ -1071,7 +1079,12 @@ async fn finalize_delivery_attempt(
             .bind(http_status)
             .execute(database)
             .await
-            .with_context(|| format!("Failed to mark webhook delivery {} as delivered", delivery.id))?;
+            .with_context(|| {
+                format!(
+                    "Failed to mark webhook delivery {} as delivered",
+                    delivery.id
+                )
+            })?;
         }
         DeliveryAttemptOutcome::Retryable {
             http_status,
@@ -1125,7 +1138,9 @@ async fn finalize_delivery_attempt(
             .bind(error)
             .execute(database)
             .await
-            .with_context(|| format!("Failed to mark webhook delivery {} as failed", delivery.id))?;
+            .with_context(|| {
+                format!("Failed to mark webhook delivery {} as failed", delivery.id)
+            })?;
         }
     }
 
@@ -1138,7 +1153,12 @@ pub fn latest_delivery_summary(
     delivered_at: Option<DateTime<Utc>>,
     last_http_status: Option<i32>,
     last_error: Option<String>,
-) -> (Option<WebhookDeliveryStatus>, Option<DateTime<Utc>>, Option<i32>, Option<String>) {
+) -> (
+    Option<WebhookDeliveryStatus>,
+    Option<DateTime<Utc>>,
+    Option<i32>,
+    Option<String>,
+) {
     (
         status,
         delivered_at.or(last_attempt_at),
