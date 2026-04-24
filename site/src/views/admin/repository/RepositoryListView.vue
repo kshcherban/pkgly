@@ -23,6 +23,7 @@
           </v-btn>
         </div>
         <v-btn
+          v-if="repositories.length >= 1 && hasStorages"
           color="primary"
           prepend-icon="mdi-plus"
           :to="{ name: 'RepositoryCreate' }"
@@ -56,7 +57,7 @@
             item-value="id"
             @click:row="handleRowClick"
             class="elevation-0 repository-table">
-            <template v-slot:item.repository_kind="{ value }">
+            <template #[`item.repository_kind`]="{ value }">
               <v-chip
                 size="small"
                 :color="value === 'Proxy' ? 'primary' : value === 'Virtual' ? '#b388ff' : 'default'"
@@ -64,7 +65,7 @@
                 {{ value }}
               </v-chip>
             </template>
-            <template v-slot:item.auth_enabled="{ value }">
+            <template #[`item.auth_enabled`]="{ value }">
               <v-chip
                 :color="value ? 'success' : 'default'"
                 :variant="value ? 'flat' : 'outlined'"
@@ -73,11 +74,11 @@
               </v-chip>
             </template>
 
-            <template v-slot:item.storage_usage_bytes="{ value }">
+            <template #[`item.storage_usage_bytes`]="{ value }">
               <span class="text-no-wrap">{{ formatBytes(value) }}</span>
             </template>
 
-            <template v-slot:item.storage_usage_updated_at="{ value }">
+            <template #[`item.storage_usage_updated_at`]="{ value }">
               <span class="text-caption text-medium-emphasis">
                 {{ formatUpdatedAt(value) }}
               </span>
@@ -96,17 +97,17 @@
           class="text-center py-8"
           variant="outlined">
           <v-icon color="medium-emphasis" size="48" class="mb-2">mdi-package-variant</v-icon>
-          <div class="text-h6 text-medium-emphasis mb-2">No repositories found</div>
+          <div class="text-h6 text-medium-emphasis mb-2">{{ emptyStateTitle }}</div>
           <div class="text-body-2 text-medium-emphasis mb-4">
-            Create your first repository to get started.
+            {{ emptyStateMessage }}
           </div>
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-plus"
-          :to="{ name: 'RepositoryCreate' }"
-          variant="flat">
-          Create Repository
-        </v-btn>
+          <v-btn
+            color="primary"
+            prepend-icon="mdi-plus"
+            :to="{ name: emptyStateActionRoute }"
+            variant="flat">
+            {{ emptyStateActionLabel }}
+          </v-btn>
         </v-card>
       </v-col>
     </v-row>
@@ -119,9 +120,13 @@ import http from "@/http";
 import { computed, ref } from "vue";
 import type { DataTableHeader } from "vuetify";
 import type { RepositoryWithStorageName } from "@/types/repository";
+import type { StorageItem } from "@/components/nr/storage/storageTypes";
+import { useRepositoryStore } from "@/stores/repositories";
 
 const router = useRouter();
+const repositoryStore = useRepositoryStore();
 const repositories = ref<RepositoryWithStorageName[]>([]);
+const storages = ref<StorageItem[]>([]);
 const loading = ref(true);
 const refreshing = ref(false);
 const error = ref<string | null>(null);
@@ -203,6 +208,36 @@ const tableItems = computed(() => {
     };
   });
 });
+
+const hasStorages = computed(() => storages.value.length > 0);
+const emptyStateTitle = computed(() => (hasStorages.value ? "No repositories found" : "No storages found"));
+const emptyStateMessage = computed(() =>
+  hasStorages.value
+    ? "Create your first repository to get started."
+    : "Create a storage before adding repositories.",
+);
+const emptyStateActionRoute = computed(() => (hasStorages.value ? "RepositoryCreate" : "StorageCreate"));
+const emptyStateActionLabel = computed(() => (hasStorages.value ? "Create Repository" : "Create Storage"));
+
+async function fetchInitialData() {
+  loading.value = true;
+  error.value = null;
+  try {
+    const [repositoryResponse, availableStorages] = await Promise.all([
+      http.get<RepositoryWithStorageName[]>("/api/repository/list", {
+        params: { include_usage: true },
+      }),
+      repositoryStore.getStorages(),
+    ]);
+    repositories.value = repositoryResponse.data;
+    storages.value = availableStorages;
+  } catch (err) {
+    console.error(err);
+    error.value = "Failed to fetch repositories";
+  } finally {
+    loading.value = false;
+  }
+}
 
 async function fetchRepositories(options: { refresh?: boolean } = {}) {
   if (options.refresh) {
@@ -307,7 +342,7 @@ const usageStatusText = computed(() => {
   return `Last updated ${date.toLocaleString()}`;
 });
 
-void fetchRepositories();
+void fetchInitialData();
 </script>
 
 <style scoped lang="scss">

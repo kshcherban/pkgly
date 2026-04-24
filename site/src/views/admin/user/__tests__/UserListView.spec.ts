@@ -54,7 +54,14 @@ const vuetifyStubs = {
   "v-btn": defineComponent({
     props: { to: [String, Object] },
     emits: ["click"],
-    template: "<button class='v-btn'><slot /></button>",
+    template: `
+      <button
+        class="v-btn"
+        :data-testid="$attrs['data-testid']"
+        :data-to-name="to && typeof to === 'object' ? to.name : to">
+        <slot />
+      </button>
+    `,
   }),
   "v-alert": defineComponent({
     template: "<div data-testid='user-error'><slot /></div>",
@@ -105,6 +112,25 @@ describe("UserListView.vue", () => {
     expect(list.exists()).toBe(true);
     expect(list.attributes("data-count")).toBe("1");
     expect(wrapper.find('[data-testid="create-user-button"]').exists()).toBe(true);
+    expect(wrapper.findAll(".v-btn").filter((button) => button.text().includes("Create User"))).toHaveLength(1);
+  });
+
+  it("shows only the empty-state create action when no users exist", async () => {
+    (http.get as vi.Mock).mockResolvedValue({ data: [] });
+
+    const wrapper = mount(UserListView, {
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    const createButtons = wrapper.findAll(".v-btn").filter((button) => button.text().includes("Create User"));
+    expect(wrapper.text()).toContain("No users found");
+    expect(createButtons).toHaveLength(1);
+    expect(createButtons[0]!.attributes("data-to-name")).toBe("UserCreate");
+    expect(wrapper.find('[data-testid="create-user-button"]').exists()).toBe(false);
   });
 });
 

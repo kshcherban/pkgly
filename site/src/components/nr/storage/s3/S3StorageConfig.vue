@@ -10,12 +10,19 @@
         Bucket Name
       </TextInput>
       <div v-if="!useCustomEndpoint" class="stacked-field">
-        <DropDown
+        <v-autocomplete
           id="s3-region"
           v-model="regionSelection"
-          :options="regionOptions">
-          AWS Region
-        </DropDown>
+          :items="regionOptions"
+          item-title="label"
+          item-value="value"
+          label="AWS Region"
+          variant="outlined"
+          density="comfortable"
+          autocomplete="off"
+          clearable
+          auto-select-first
+          no-data-text="No matching regions" />
         <p v-if="regionsLoading" class="helper">Loading regions…</p>
         <p v-else-if="regionError" class="helper error">{{ regionError }}</p>
         <p v-else class="helper">
@@ -340,7 +347,7 @@ async function loadRegions() {
   try {
     const response = await http.get<string[]>("/api/storage/s3/regions");
     regionOptions.value = response.data.map((region) => ({
-      label: humanizeRegion(region),
+      label: formatRegionId(region),
       value: region,
     }));
     regionError.value = null;
@@ -361,14 +368,11 @@ async function loadRegions() {
   }
 }
 
-function humanizeRegion(value: string): string {
-  return (
-    value
-      // insert space before capitals
-      .replace(/([A-Z])/g, " $1")
-      .replace(/\s+/g, " ")
-      .trim() || value
-  );
+function formatRegionId(value: string): string {
+  if (value.includes("-")) {
+    return value.toLowerCase();
+  }
+  return value.match(/[A-Z][a-z]+|\d+/g)?.join("-").toLowerCase() ?? value;
 }
 
 onMounted(() => {

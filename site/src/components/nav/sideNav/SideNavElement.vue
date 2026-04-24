@@ -18,10 +18,17 @@ const props = defineProps({
     type: String,
     required: false,
   },
+  activeTag: {
+    type: String,
+    required: false,
+  },
 });
 const router = useRouter();
 const isActive = computed(() => {
-  return props.routeName === router.currentRoute.value.name;
+  return (
+    props.routeName === router.currentRoute.value.name ||
+    props.activeTag === router.currentRoute.value.meta.tag
+  );
 });
 </script>
 <style scoped lang="scss">

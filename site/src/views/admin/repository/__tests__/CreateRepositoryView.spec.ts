@@ -6,6 +6,8 @@ vi.mock("@vue/devtools-kit", () => ({}));
 
 const mockGetStorages = vi.fn();
 const mockGetRepositoryTypes = vi.fn();
+const mockHttpPost = vi.fn();
+const mockHttpPut = vi.fn();
 
 vi.mock("@/stores/repositories", () => ({
   useRepositoryStore: () => ({
@@ -16,7 +18,8 @@ vi.mock("@/stores/repositories", () => ({
 
 vi.mock("@/http", () => ({
   default: {
-    post: vi.fn(),
+    post: mockHttpPost,
+    put: mockHttpPut,
   },
 }));
 
@@ -168,6 +171,8 @@ describe("CreateRepositoryView.vue", () => {
     mockAlerts.error.mockReset();
     mockGetStorages.mockReset();
     mockGetRepositoryTypes.mockReset();
+    mockHttpPost.mockReset();
+    mockHttpPut.mockReset();
     mockGetStorages.mockResolvedValue([
       { id: "storage-1", name: "Primary", storage_type: "s3" },
     ]);
@@ -235,9 +240,35 @@ describe("CreateRepositoryView.vue", () => {
     expect(selects[1].text()).toContain("Alpha (s3)");
   });
 
+  it("does not submit when no storage is available", async () => {
+    mockGetStorages.mockResolvedValue([]);
+
+    const wrapper = mount(CreateRepositoryView, {
+      global: {
+        stubs: {
+          ...vuetifyStubs,
+          ...controlStubs,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const inputs = wrapper.findAll("input");
+    await inputs[0]!.setValue("npm-hosted");
+    const selects = wrapper.findAll("select");
+    await selects[0]!.setValue("npm");
+    await wrapper.get('[data-testid="repository-create-form"]').trigger("submit");
+    await flushPromises();
+
+    const inlineError = wrapper.get('[data-testid="repository-create-alert"]');
+    expect(inlineError.text()).toContain("Storage required");
+    expect(inlineError.text()).toContain("Select a storage before creating a repository.");
+    expect(mockHttpPost).not.toHaveBeenCalled();
+  });
+
   it("renders inline repository creation errors without a global toast", async () => {
-    const http = (await import("@/http")).default as { post: ReturnType<typeof vi.fn> };
-    http.post.mockRejectedValueOnce({
+    mockHttpPost.mockRejectedValueOnce({
       response: {
         status: 409,
         data: {

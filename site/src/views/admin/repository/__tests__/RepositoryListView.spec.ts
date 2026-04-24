@@ -6,6 +6,7 @@ import type { RepositoryWithStorageName } from "@/types/repository";
 import http from "@/http";
 
 const pushMock = vi.fn();
+const mockGetStorages = vi.fn();
 
 vi.mock("vue-router", () => ({
   useRouter: () => ({
@@ -17,6 +18,12 @@ vi.mock("@/http", () => ({
   default: {
     get: vi.fn(),
   },
+}));
+
+vi.mock("@/stores/repositories", () => ({
+  useRepositoryStore: () => ({
+    getStorages: mockGetStorages,
+  }),
 }));
 
 const repositories: RepositoryWithStorageName[] = [
@@ -43,6 +50,12 @@ const stubs = {
   "v-container": defineComponent({
     template: "<div data-testid='container'><slot /></div>",
   }),
+  "v-row": defineComponent({
+    template: "<div class='v-row'><slot /></div>",
+  }),
+  "v-col": defineComponent({
+    template: "<div class='v-col'><slot /></div>",
+  }),
   "v-card": defineComponent({
     emits: ["click"],
     template: "<div class='v-card'><slot /></div>",
@@ -66,7 +79,14 @@ const stubs = {
       to: [String, Object],
     },
     emits: ["click"],
-    template: "<button type='button' @click=\"$emit('click')\"><slot /></button>",
+    template: `
+      <button
+        type="button"
+        :data-to-name="to && typeof to === 'object' ? to.name : to"
+        @click="$emit('click')">
+        <slot />
+      </button>
+    `,
   }),
   "v-progress-circular": defineComponent({
     template: "<div data-testid='loading-indicator'><slot /></div>",
@@ -129,6 +149,10 @@ describe("RepositoryListView.vue", () => {
   beforeEach(() => {
     pushMock.mockReset();
     httpGet.mockReset();
+    mockGetStorages.mockReset();
+    mockGetStorages.mockResolvedValue([
+      { id: "storage-1", name: "primary", storage_type: "local", active: true },
+    ]);
   });
 
   it("renders the repository table once data is loaded", async () => {
@@ -143,6 +167,7 @@ describe("RepositoryListView.vue", () => {
     const table = wrapper.find("[data-testid='repository-table']");
     expect(table.exists()).toBe(true);
     expect(wrapper.findAll("[data-testid='repository-row']")).toHaveLength(repositories.length);
+    expect(wrapper.findAll("button").filter((button) => button.text().includes("Create Repository"))).toHaveLength(1);
   });
 
   it("navigates to the repository details when a row is clicked", async () => {
@@ -173,5 +198,43 @@ describe("RepositoryListView.vue", () => {
 
     expect(wrapper.find("[data-testid='repository-error']").text()).toContain("Failed to fetch repositories");
     consoleError.mockRestore();
+  });
+
+  it("shows one create repository CTA when no repositories exist but storage exists", async () => {
+    httpGet.mockResolvedValue({ data: [] });
+
+    const wrapper = mount(RepositoryListView, {
+      global: { stubs },
+    });
+
+    await flushPromises();
+
+    const createRepositoryButtons = wrapper
+      .findAll("button")
+      .filter((button) => button.text().includes("Create Repository"));
+    expect(wrapper.text()).toContain("No repositories found");
+    expect(wrapper.text()).toContain("Create your first repository to get started.");
+    expect(createRepositoryButtons).toHaveLength(1);
+    expect(createRepositoryButtons[0]!.attributes("data-to-name")).toBe("RepositoryCreate");
+  });
+
+  it("directs users to create storage when repository creation has no storage target", async () => {
+    httpGet.mockResolvedValue({ data: [] });
+    mockGetStorages.mockResolvedValue([]);
+
+    const wrapper = mount(RepositoryListView, {
+      global: { stubs },
+    });
+
+    await flushPromises();
+
+    const createStorageButtons = wrapper
+      .findAll("button")
+      .filter((button) => button.text().includes("Create Storage"));
+    expect(wrapper.text()).toContain("No storages found");
+    expect(wrapper.text()).toContain("Create a storage before adding repositories.");
+    expect(wrapper.text()).not.toContain("Create Repository");
+    expect(createStorageButtons).toHaveLength(1);
+    expect(createStorageButtons[0]!.attributes("data-to-name")).toBe("StorageCreate");
   });
 });

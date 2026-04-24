@@ -328,6 +328,11 @@ async function load() {
 void load();
 
 async function createRepository() {
+  resetError();
+  if (!selectedStorage.value) {
+    showError("Storage required", "Select a storage before creating a repository.");
+    return;
+  }
   if (!(await maybeUpdateStorageCache())) {
     return;
   }
@@ -339,7 +344,6 @@ async function createRepository() {
   for (const [key, value] of Object.entries(requiredConfigValues.value)) {
     request.configs[key] = value;
   }
-  resetError();
   isSubmitting.value = true;
   try {
     const response = await http.post(`/api/repository/new/${selectedRepositoryType.value}`, request);

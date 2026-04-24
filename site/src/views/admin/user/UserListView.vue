@@ -17,7 +17,9 @@
     </v-card>
 
     <template v-else>
-      <div class="d-flex justify-end mb-4">
+      <div
+        v-if="users.length > 0"
+        class="d-flex justify-end mb-4">
         <v-btn
           data-testid="create-user-button"
           color="primary"
