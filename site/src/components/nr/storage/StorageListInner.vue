@@ -8,7 +8,7 @@
           id="nameSearch"
           v-model="searchValue"
           autofocus
-          placeholder="Search by Name, Username, or Primary Email Address"
+          placeholder="Search by Name, Username, Email"
           aria-label="Search storages" />
         <button
           v-if="searchValue.length"

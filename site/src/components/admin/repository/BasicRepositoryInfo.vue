@@ -2,7 +2,8 @@
   <v-card
     v-if="repository"
     data-testid="repository-info-card"
-    class="repository-info-card">
+    :class="['repository-info-card', { 'repository-info-card--embedded': embedded }]"
+    :variant="embedded ? 'flat' : undefined">
     <v-card-title class="repository-info-card__header">
       <div>
         <div class="text-h6">Repository Info</div>
@@ -128,6 +129,10 @@ const props = defineProps({
     type: Object as PropType<RepositoryWithStorageName>,
     required: true,
   },
+  embedded: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const statusChip = computed(() => {
@@ -242,6 +247,12 @@ async function confirmDelete() {
 @use "@/assets/styles/theme.scss" as *;
 
 .repository-info-card {
+  &--embedded {
+    border: 0;
+    border-radius: 0;
+    box-shadow: none;
+  }
+
   &__header {
     align-items: flex-start;
     gap: 1rem;

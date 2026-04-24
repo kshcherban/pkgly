@@ -37,8 +37,11 @@ vi.mock("@/http", () => ({
 vi.mock("@vue/devtools-kit", () => ({}));
 
 const BasicRepositoryInfoStub = defineComponent({
-  props: ["repository"],
-  template: `<div data-testid="basic-repo-info">{{ repository?.name }}</div>`,
+  props: {
+    repository: Object,
+    embedded: Boolean,
+  },
+  template: `<div data-testid="basic-repo-info" :data-embedded="String(embedded)">{{ repository?.name }}</div>`,
 });
 
 const RepositoryPackagesTabStub = defineComponent({
@@ -239,6 +242,34 @@ describe("ViewRepositoryView", () => {
     expect(cacheText).toContain("/var/cache/pkgly");
     expect(cacheText).toContain("1.00 MB");
     expect(cacheText).toContain("32 entries");
+  });
+
+  it("embeds repository info without rendering a nested card surface", async () => {
+    mockHttpSequence();
+    const ViewRepositoryView = (await import("@/views/admin/repository/ViewRepositoryView.vue")).default;
+
+    const wrapper = mount(ViewRepositoryView, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          BasicRepositoryInfo: BasicRepositoryInfoStub,
+          RepositoryPackagesTab: RepositoryPackagesTabStub,
+          FallBackEditor: DynamicConfigStub,
+          DockerConfig: DynamicConfigStub,
+          "v-container": VContainerStub,
+          "v-card": VCardStub,
+          "v-tabs": VTabsStub,
+          "v-tab": VTabStub,
+          "v-divider": VDividerStub,
+          "v-window": VWindowStub,
+          "v-window-item": VWindowItemStub,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="basic-repo-info"]').attributes("data-embedded")).toBe("true");
   });
 
   it("shows packages tab for PHP repositories", async () => {

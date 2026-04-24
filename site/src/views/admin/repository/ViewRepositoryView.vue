@@ -31,7 +31,9 @@
         v-model="activeTab"
           class="py-4">
         <v-window-item value="main">
-          <BasicRepositoryInfo :repository="repository" />
+          <BasicRepositoryInfo
+            :repository="repository"
+            embedded />
         </v-window-item>
 
         <v-window-item value="storage">
@@ -214,8 +216,18 @@ getRepository();
 @use "@/assets/styles/theme.scss" as *;
 
 .repository-view__card {
+  border: 1px solid var(--nr-card-border);
   border-radius: 16px;
+  box-shadow: none !important;
   overflow: hidden;
+}
+
+.repository-view__card {
+  :deep(.v-window .v-card) {
+    border: 0 !important;
+    border-radius: 0;
+    box-shadow: none !important;
+  }
 }
 
 .repository-view__tabs {

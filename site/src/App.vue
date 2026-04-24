@@ -4,7 +4,10 @@
     <v-main>
       <RouterView v-slot="{ Component, route }">
         <div
-          class="contentWithSideBar"
+          :class="[
+            'contentWithSideBar',
+            { 'contentWithSideBar--admin': route.fullPath.startsWith('/admin') },
+          ]"
           v-if="route.meta.sideBar">
           <component :is="route.meta.sideBar" />
           <v-slide-x-transition mode="out-in">
@@ -82,6 +85,12 @@ init();
   main {
     flex: 1;
     padding: 1rem;
+  }
+}
+
+.contentWithSideBar--admin {
+  :deep(.v-card) {
+    box-shadow: none !important;
   }
 }
 </style>

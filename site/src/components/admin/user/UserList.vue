@@ -5,7 +5,7 @@
       <v-spacer />
       <v-text-field
         v-model="searchValue"
-        placeholder="Search by Name, Username, or Primary Email Address"
+        placeholder="Search by Name, Username, Email"
         prepend-inner-icon="mdi-magnify"
         variant="outlined"
         density="compact"
