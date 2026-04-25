@@ -28,14 +28,47 @@
                 Description
               </TextInput>
             </v-col>
-            <v-col cols="12" md="6">
-              <TextInput
-                id="tokenExpiration"
-                v-model="newToken.tokenExpiration"
-                disabled
-                placeholder="Not implemented">
-                Expiration
-              </TextInput>
+            <v-col cols="12">
+              <fieldset class="expiration-options">
+                <legend class="text-subtitle-2 font-weight-medium">Expiration</legend>
+                <div class="expiration-options__presets">
+                  <button
+                    type="button"
+                    class="expiration-option"
+                    :class="{ 'expiration-option--active': expirationMode === 'never' }"
+                    data-testid="expiration-never"
+                    @click="selectExpiration('never')">
+                    Never
+                  </button>
+                  <button
+                    v-for="preset in expirationPresets"
+                    :key="preset.days"
+                    type="button"
+                    class="expiration-option"
+                    :class="{ 'expiration-option--active': expirationMode === preset.days }"
+                    :data-testid="`expiration-preset-${preset.days}`"
+                    @click="selectExpiration(preset.days)">
+                    {{ preset.label }}
+                  </button>
+                  <button
+                    type="button"
+                    class="expiration-option"
+                    :class="{ 'expiration-option--active': expirationMode === 'custom' }"
+                    data-testid="expiration-custom"
+                    @click="selectExpiration('custom')">
+                    Custom
+                  </button>
+                </div>
+                <TextInput
+                  id="customExpirationDays"
+                  v-model="customExpirationDays"
+                  type="number"
+                  min="1"
+                  :disabled="expirationMode !== 'custom'"
+                  placeholder="Days">
+                  Custom days
+                </TextInput>
+              </fieldset>
             </v-col>
           </v-row>
 
@@ -94,9 +127,33 @@
         </div>
       </v-card-title>
       <v-card-text>
-        <CopyCode
-          data-testid="token-output"
-          :code="newResponseTokenResponse.token" />
+        <div class="one-time-token">
+          <div class="one-time-token__header">
+            <div>
+              <div class="text-subtitle-2 font-weight-medium">One-time token</div>
+              <div class="text-body-2 text-medium-emphasis">
+                {{ tokenExpirationSummary }}
+              </div>
+            </div>
+            <v-btn
+              color="primary"
+              variant="tonal"
+              data-testid="copy-token-button"
+              prepend-icon="mdi-content-copy"
+              @click="copyToken">
+              Copy
+            </v-btn>
+          </div>
+          <code
+            class="one-time-token__secret"
+            data-testid="token-output">{{ newResponseTokenResponse.token }}</code>
+          <v-alert
+            type="warning"
+            variant="tonal"
+            class="mt-4">
+            Store this secret now. You will not be able to view it again.
+          </v-alert>
+        </div>
         <div class="d-flex justify-end mt-4">
           <v-btn
             color="primary"
@@ -112,49 +169,126 @@
 </template>
 
 <script setup lang="ts">
-import CopyCode from "@/components/core/code/CopyCode.vue";
 import ScopesSelector from "@/components/form/ScopesSelector.vue";
 import SubmitButton from "@/components/form/SubmitButton.vue";
 import TextInput from "@/components/form/text/TextInput.vue";
 import RepositoryToActionList from "@/components/nr/repository/RepositoryToActionList.vue";
 import http from "@/http";
-import type { RepositoryActions, ScopeDescription } from "@/types/base";
+import type { ScopeDescription } from "@/types/base";
 import type { RepositoryToActions } from "@/types/repository";
 import { type NewAuthTokenResponse } from "@/types/user/token";
 import { useAlertsStore } from "@/stores/alerts";
-import { ref } from "vue";
+import { computed, ref } from "vue";
 
 const newToken = ref({
   tokenName: "",
   tokenDescription: "",
-  tokenExpiration: "",
 });
+const expirationPresets = [
+  { days: 7, label: "7 days" },
+  { days: 30, label: "30 days" },
+  { days: 90, label: "90 days" },
+] as const;
+const expirationMode = ref<"never" | "custom" | 7 | 30 | 90>("never");
+const customExpirationDays = ref("");
 const isSubmitting = ref(false);
 const newResponseTokenResponse = ref<NewAuthTokenResponse | undefined>(undefined);
 const repositoryScopes = ref<Array<RepositoryToActions>>([]);
 const scopes = ref<Array<ScopeDescription>>([]);
 const alerts = useAlertsStore();
 
+const tokenExpirationSummary = computed(() => {
+  const expiresAt = newResponseTokenResponse.value?.expires_at;
+  if (!expiresAt) {
+    return "Never expires";
+  }
+  return `Expires ${formatDateTime(expiresAt)}`;
+});
+
 function resetForm() {
   newResponseTokenResponse.value = undefined;
   newToken.value = {
     tokenName: "",
     tokenDescription: "",
-    tokenExpiration: "",
   };
+  expirationMode.value = "never";
+  customExpirationDays.value = "";
   repositoryScopes.value = [];
   scopes.value = [];
+}
+
+function selectExpiration(mode: "never" | "custom" | 7 | 30 | 90) {
+  expirationMode.value = mode;
+}
+
+function resolveExpiresInDays(): number | null | undefined {
+  if (expirationMode.value === "never") {
+    return null;
+  }
+  if (expirationMode.value !== "custom") {
+    return expirationMode.value;
+  }
+  if (!/^\d+$/.test(customExpirationDays.value)) {
+    return undefined;
+  }
+  const days = Number(customExpirationDays.value);
+  if (!Number.isSafeInteger(days) || days <= 0) {
+    return undefined;
+  }
+  return days;
+}
+
+function formatDateTime(iso: string): string {
+  return new Date(iso).toLocaleString();
+}
+
+async function copyToken() {
+  const token = newResponseTokenResponse.value?.token;
+  if (!token) {
+    return;
+  }
+  try {
+    if (navigator.clipboard?.writeText) {
+      await navigator.clipboard.writeText(token);
+    } else {
+      fallbackCopyToken(token);
+    }
+    alerts.success("Token copied", "The token was copied to the clipboard.");
+  } catch (error) {
+    console.error(error);
+    alerts.error("Copy failed", "Copy the token manually from the token panel.");
+  }
+}
+
+function fallbackCopyToken(token: string) {
+  const input = document.createElement("textarea");
+  input.value = token;
+  input.setAttribute("readonly", "true");
+  input.style.position = "fixed";
+  input.style.left = "-9999px";
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand("copy");
+  document.body.removeChild(input);
 }
 
 async function createToken() {
   if (isSubmitting.value) {
     return;
   }
+  const expiresInDays = resolveExpiresInDays();
+  if (expiresInDays === undefined) {
+    alerts.error(
+      "Invalid expiration",
+      "Custom expiration must be a positive whole number of days.",
+    );
+    return;
+  }
   isSubmitting.value = true;
   try {
     const repositoryScopesRequest = repositoryScopes.value.map((repositoryScope) => ({
-      repository_string: repositoryScope.repositoryId,
-      actions: repositoryScope.actions.asArray(),
+      repository_id: repositoryScope.repositoryId,
+      scopes: repositoryScope.actions.asArray(),
     }));
 
     const scopesRequest = scopes.value.map((scope) => scope.key);
@@ -162,6 +296,7 @@ async function createToken() {
     const request = {
       name: newToken.value.tokenName,
       description: newToken.value.tokenDescription,
+      expires_in_days: expiresInDays,
       repository_scopes: repositoryScopesRequest,
       scopes: scopesRequest,
     };
@@ -193,5 +328,64 @@ async function createToken() {
 .token-create__actions {
   display: flex;
   justify-content: flex-start;
+}
+
+.expiration-options {
+  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  padding: 0.75rem;
+}
+
+.expiration-options__presets {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  margin: 0.5rem 0 0.75rem;
+}
+
+.expiration-option {
+  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  min-height: 2.25rem;
+  padding: 0 0.85rem;
+  font-weight: 500;
+}
+
+.expiration-option--active {
+  background: rgb(var(--v-theme-primary));
+  border-color: rgb(var(--v-theme-primary));
+  color: rgb(var(--v-theme-on-primary));
+}
+
+.one-time-token {
+  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+  padding: 1rem;
+}
+
+.one-time-token__header {
+  align-items: flex-start;
+  display: flex;
+  gap: 1rem;
+  justify-content: space-between;
+  margin-bottom: 0.75rem;
+}
+
+.one-time-token__secret {
+  background: rgba(0, 0, 0, 0.04);
+  border-radius: 6px;
+  display: block;
+  font-family: var(--nr-font-family-mono, "Roboto Mono", monospace);
+  overflow-wrap: anywhere;
+  padding: 0.75rem;
+  white-space: pre-wrap;
+}
+
+@media (max-width: 768px) {
+  .one-time-token__header {
+    flex-direction: column;
+  }
 }
 </style>

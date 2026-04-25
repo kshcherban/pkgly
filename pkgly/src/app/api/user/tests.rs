@@ -9,13 +9,14 @@ use nr_core::{
         entities::user::{NewUserRequest, auth_token::AuthToken},
         migration::run_migrations,
     },
-    user::{Email, Username, permissions::RepositoryActions},
+    user::{Email, Username, permissions::RepositoryActions, scopes::NRScope},
 };
 use serde_json::json;
 use sqlx::{PgPool, postgres::PgPoolOptions};
+use std::str::FromStr;
 use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
 
-use crate::test_support::DB_TEST_LOCK;
+use crate::{app::authentication::OnlySessionAllowedAuthentication, test_support::DB_TEST_LOCK};
 
 fn fixed_time() -> DateTime<FixedOffset> {
     DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").unwrap()
@@ -318,6 +319,103 @@ async fn change_email_rejects_auth_token_requests() {
         std::str::from_utf8(&body).expect("utf8"),
         "Must be a session"
     );
+
+    site.close().await;
+}
+
+#[test]
+fn token_create_request_accepts_missing_and_null_expiration() {
+    let missing: tokens::NewAuthTokenRequest =
+        serde_json::from_value(json!({ "scopes": ["ReadRepository"] })).expect("missing");
+    assert!(missing.expires_in_days.is_none());
+
+    let null: tokens::NewAuthTokenRequest =
+        serde_json::from_value(json!({ "expires_in_days": null })).expect("null");
+    assert!(null.expires_in_days.is_none());
+}
+
+#[test]
+fn token_expiration_days_validation_rejects_invalid_values() {
+    let now = fixed_time();
+    for value in [json!(0), json!(-1), json!(1.5), json!("7"), json!(true)] {
+        assert!(tokens::expires_at_from_days(Some(&value), now).is_err());
+    }
+}
+
+#[test]
+fn token_expiration_days_validation_computes_days() {
+    let now = fixed_time();
+    let expires_at = tokens::expires_at_from_days(Some(&json!(7)), now)
+        .expect("valid")
+        .expect("expires at");
+
+    assert_eq!(expires_at, now + chrono::Duration::days(7));
+    assert_eq!(
+        tokens::expires_at_from_days(None, now).expect("missing"),
+        None
+    );
+    assert_eq!(
+        tokens::expires_at_from_days(Some(&json!(null)), now).expect("null"),
+        None
+    );
+}
+
+#[tokio::test]
+async fn create_token_persists_expiration_and_get_by_id_returns_scopes() {
+    let _guard = DB_TEST_LOCK.lock().await;
+    let db = fresh_db().await;
+    let root = tempfile::tempdir().expect("tempdir");
+    let site = test_site(&db, root.path()).await;
+    let user = insert_user(db.pool(), "Test User", "test_user", "user@example.com").await;
+
+    let response = tokens::create(
+        OnlySessionAllowedAuthentication {
+            user: user.clone(),
+            session: sample_session_for_user(user.id),
+        },
+        TypedHeader(UserAgent::from_str("test-agent").expect("user agent")),
+        axum::extract::State(site.clone()),
+        Json(tokens::NewAuthTokenRequest {
+            name: Some("CI".into()),
+            description: Some("automation".into()),
+            expires_in_days: Some(json!(7)),
+            scopes: vec![NRScope::ReadRepository],
+            repository_scopes: Vec::new(),
+        }),
+    )
+    .await
+    .expect("handler ok");
+
+    assert_eq!(response.status(), StatusCode::OK);
+    let payload: tokens::NewAuthTokenResponse = serde_json::from_slice(
+        &response
+            .into_body()
+            .collect()
+            .await
+            .expect("body")
+            .to_bytes(),
+    )
+    .expect("new token response");
+    assert!(payload.expires_at.is_some());
+
+    let stored = AuthToken::get_by_id_and_user_id(payload.id, user.id, db.pool())
+        .await
+        .expect("lookup")
+        .expect("token");
+    assert!(stored.expires_at.is_some());
+
+    let full = AuthTokenFullResponse::find_by_id_and_user_id(payload.id, user.id, db.pool())
+        .await
+        .expect("full lookup")
+        .expect("full token");
+    assert_eq!(full.scopes.len(), 1);
+    assert_eq!(full.scopes[0].scope, NRScope::ReadRepository);
+
+    let other = insert_user(db.pool(), "Other User", "other_user", "other@example.com").await;
+    let not_owned = AuthTokenFullResponse::find_by_id_and_user_id(payload.id, other.id, db.pool())
+        .await
+        .expect("other lookup");
+    assert!(not_owned.is_none());
 
     site.close().await;
 }

@@ -33,59 +33,87 @@
           {{ error }}
         </v-alert>
 
-        <v-expansion-panels
+        <div
           v-else-if="authTokens.length > 0"
-          multiple
-          class="token-panels">
-          <v-expansion-panel
+          class="token-list">
+          <div
             v-for="token in authTokens"
-            :key="token.token.id">
-            <v-expansion-panel-title>
-              <div class="panel-title">
-                <div class="panel-title__primary">
-                  <span class="panel-title__name">{{ token.token.name || "Untitled Token" }}</span>
-                  <span class="panel-title__source">{{ token.token.source }}</span>
-                </div>
-                <div class="panel-title__meta">
-                  <span>Created {{ formatDate(token.token.created_at) }}</span>
-                  <v-chip
-                    :color="token.token.active ? 'success' : 'error'"
-                    :variant="token.token.active ? 'flat' : 'outlined'"
-                    size="small">
-                    {{ token.token.active ? "Active" : "Revoked" }}
-                  </v-chip>
+            :key="token.token.id"
+            class="token-row"
+            data-testid="token-row">
+            <div class="token-row__main">
+              <div class="token-row__identity">
+                <div class="token-row__name">{{ token.token.name || "Untitled Token" }}</div>
+                <div class="token-row__description">
+                  {{ token.token.description || token.token.source }}
                 </div>
               </div>
-            </v-expansion-panel-title>
-            <v-expansion-panel-text>
-              <div class="panel-body">
-                <div class="panel-body__row">
-                  <span class="panel-body__label">Token ID</span>
-                  <code class="panel-body__value">{{ token.token.id }}</code>
-                </div>
-                <div class="panel-body__row">
-                  <span class="panel-body__label">Created</span>
-                  <span class="panel-body__value">{{ formatDateTime(token.token.created_at) }}</span>
-                </div>
-                <div class="d-flex justify-end mt-4">
-                  <v-btn
-                    color="error"
-                    variant="tonal"
-                    prepend-icon="mdi-delete"
-                    data-testid="token-delete-button"
-                    @click.stop="deleteToken(token.token.id)">
-                    Delete Token
-                  </v-btn>
-                </div>
+              <div class="token-row__meta">
+                <v-chip
+                  :color="tokenStatus(token).color"
+                  :variant="tokenStatus(token).variant"
+                  size="small">
+                  {{ tokenStatus(token).label }}
+                </v-chip>
+                <span>Created {{ formatDate(token.token.created_at) }}</span>
+                <span>{{ formatExpiration(token.token.expires_at) }}</span>
               </div>
-            </v-expansion-panel-text>
-          </v-expansion-panel>
-        </v-expansion-panels>
+            </div>
 
-        <v-card
+            <div class="token-row__scopes">
+              <div class="token-scope-group">
+                <div class="token-scope-group__label">Role scopes</div>
+                <div class="token-scope-group__values">
+                  <span
+                    v-for="scope in token.scopes"
+                    :key="scope.id"
+                    class="scope-pill">
+                    {{ roleScopeName(scope.scope) }}
+                  </span>
+                  <span
+                    v-if="token.scopes.length === 0"
+                    class="scope-empty">None</span>
+                </div>
+              </div>
+
+              <div class="token-scope-group">
+                <div class="token-scope-group__label">Repository scopes</div>
+                <div class="token-scope-group__values token-scope-group__values--stacked">
+                  <span
+                    v-for="repositoryScope in token.repository_scopes"
+                    :key="repositoryScope.id"
+                    class="repo-scope">
+                    <span class="repo-scope__name">
+                      {{ repositoryName(repositoryScope.repository_id) }}
+                    </span>
+                    <span class="repo-scope__actions">
+                      {{ repositoryScope.actions.join(", ") }}
+                    </span>
+                  </span>
+                  <span
+                    v-if="token.repository_scopes.length === 0"
+                    class="scope-empty">None</span>
+                </div>
+              </div>
+            </div>
+
+            <div class="token-row__actions">
+              <code class="token-row__id">#{{ token.token.id }}</code>
+              <v-btn
+                color="error"
+                variant="tonal"
+                prepend-icon="mdi-delete"
+                data-testid="token-delete-button"
+                @click.stop="deleteToken(token.token.id)">
+                Delete Token
+              </v-btn>
+            </div>
+          </div>
+        </div>
+
+        <div
           v-else
-          variant="outlined"
-          class="text-center py-8">
+          class="empty-state text-center py-8">
           <div class="text-h6 text-medium-emphasis mb-2">No tokens yet</div>
           <div class="text-body-2 text-medium-emphasis mb-4">
             Generate a token to authenticate CLI and automation workflows.
@@ -97,7 +125,7 @@
             :to="{ name: 'profileTokenCreate' }">
             Create Token
           </v-btn>
-        </v-card>
+        </div>
       </v-card-text>
     </v-card>
   </v-container>
@@ -105,14 +133,20 @@
 
 <script setup lang="ts">
 import http from "@/http";
-import { sessionStore } from "@/stores/session";
-import { type RawAuthTokenFullResponse } from "@/types/user/token";
 import { useAlertsStore } from "@/stores/alerts";
+import { useRepositoryStore } from "@/stores/repositories";
+import { sessionStore } from "@/stores/session";
+import { siteStore } from "@/stores/site";
+import type { ScopeDescription } from "@/types/base";
+import { type RawAuthTokenFullResponse } from "@/types/user/token";
 import { ref } from "vue";
 
 const session = sessionStore();
 const user = session.user;
+const repositories = useRepositoryStore();
+const site = siteStore();
 const authTokens = ref<Array<RawAuthTokenFullResponse>>([]);
+const scopeDescriptions = ref<Map<string, ScopeDescription>>(new Map());
 const loading = ref(true);
 const error = ref<string | null>(null);
 const alerts = useAlertsStore();
@@ -123,6 +157,35 @@ function formatDate(iso: string): string {
 
 function formatDateTime(iso: string): string {
   return new Date(iso).toLocaleString();
+}
+
+function formatExpiration(iso?: string | null): string {
+  if (!iso) {
+    return "Never expires";
+  }
+  return `Expires ${formatDateTime(iso)}`;
+}
+
+function tokenStatus(token: RawAuthTokenFullResponse): {
+  label: string;
+  color: "success" | "warning" | "error";
+  variant: "flat" | "outlined" | "tonal";
+} {
+  if (!token.token.active) {
+    return { label: "Revoked", color: "error", variant: "outlined" };
+  }
+  if (token.token.expires_at && new Date(token.token.expires_at).getTime() <= Date.now()) {
+    return { label: "Expired", color: "warning", variant: "tonal" };
+  }
+  return { label: "Active", color: "success", variant: "flat" };
+}
+
+function roleScopeName(scope: string): string {
+  return scopeDescriptions.value.get(scope)?.name ?? scope;
+}
+
+function repositoryName(repositoryId: string): string {
+  return repositories.getRepositoryFromCache(repositoryId)?.name ?? repositoryId;
 }
 
 async function deleteToken(id: number) {
@@ -138,12 +201,18 @@ async function deleteToken(id: number) {
 
 async function getAuthTokens() {
   if (!user) {
+    loading.value = false;
     return;
   }
   loading.value = true;
   error.value = null;
   try {
-    const response = await http.get<Array<RawAuthTokenFullResponse>>("/api/user/token/list");
+    const [response, scopes] = await Promise.all([
+      http.get<Array<RawAuthTokenFullResponse>>("/api/user/token/list"),
+      site.getScopes(),
+      repositories.getRepositories(false),
+    ]);
+    scopeDescriptions.value = new Map(scopes.map((scope) => [String(scope.key), scope]));
     authTokens.value = response.data.filter((token) => !isDockerBearerToken(token));
   } catch (err) {
     console.error(err);
@@ -162,76 +231,111 @@ function isDockerBearerToken(token: RawAuthTokenFullResponse): boolean {
 </script>
 
 <style scoped lang="scss">
-.token-panels {
+.token-list {
   border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
   border-radius: 8px;
+  overflow: hidden;
 }
 
-.panel-title {
-  display: flex;
-  justify-content: space-between;
-  width: 100%;
+.token-row {
+  display: grid;
   gap: 1rem;
-  text-align: left;
+  grid-template-columns: minmax(12rem, 1.2fr) minmax(16rem, 2fr) auto;
+  padding: 1rem;
 }
 
-.panel-title__primary {
+.token-row + .token-row {
+  border-top: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+}
+
+.token-row__main,
+.token-row__scopes,
+.token-row__actions {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+
+.token-row__identity,
+.token-scope-group {
   display: flex;
   flex-direction: column;
   gap: 0.25rem;
 }
 
-.panel-title__name {
+.token-row__name {
   font-weight: 600;
 }
 
-.panel-title__source {
+.token-row__description,
+.token-row__meta,
+.token-scope-group__label,
+.scope-empty,
+.token-row__id {
   font-size: 0.9rem;
   color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
 }
 
-.panel-title__meta {
+.token-row__meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 0.75rem;
-  font-size: 0.9rem;
-  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
 }
 
-.panel-body {
+.token-scope-group__values {
   display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+}
+
+.token-scope-group__values--stacked {
   flex-direction: column;
-  gap: 0.75rem;
+  align-items: flex-start;
 }
 
-.panel-body__row {
+.scope-pill,
+.repo-scope {
+  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 6px;
+  padding: 0.25rem 0.5rem;
+}
+
+.repo-scope {
   display: flex;
-  justify-content: space-between;
   align-items: center;
-  gap: 1rem;
-  font-size: 0.95rem;
+  gap: 0.5rem;
 }
 
-.panel-body__label {
-  font-weight: 500;
-  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
+.repo-scope__name {
+  font-weight: 600;
 }
 
-.panel-body__value {
+.repo-scope__actions,
+.token-row__id {
   font-family: var(--nr-font-family-mono, "Roboto Mono", monospace);
 }
 
+.token-row__actions {
+  align-items: flex-end;
+  justify-content: space-between;
+}
+
+.empty-state {
+  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
+  border-radius: 8px;
+}
+
 @media (max-width: 768px) {
-  .panel-title {
-    flex-direction: column;
+  .token-row {
+    grid-template-columns: 1fr;
+  }
+
+  .token-row__actions {
     align-items: flex-start;
   }
 
-  .panel-title__meta {
-    flex-wrap: wrap;
-  }
-
-  .panel-body__row {
+  .repo-scope {
     flex-direction: column;
     align-items: flex-start;
   }

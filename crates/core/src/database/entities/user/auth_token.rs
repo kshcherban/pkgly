@@ -128,6 +128,7 @@ pub struct NewAuthToken {
     pub name: Option<String>,
     pub description: Option<String>,
     pub source: String,
+    pub expires_at: Option<chrono::DateTime<chrono::FixedOffset>>,
     pub scopes: Vec<NRScope>,
     pub repositories: Vec<(Uuid, Vec<RepositoryActions>)>,
 }
@@ -139,18 +140,20 @@ impl NewAuthToken {
             name,
             description,
             source,
+            expires_at,
             scopes,
             repositories,
         } = self;
 
         let token_id: i32 = sqlx::query_scalar(
-            r#"INSERT INTO user_auth_tokens (user_id, name, description, token, source) VALUES ($1, $2, $3, $4, $5) RETURNING id"#,
+            r#"INSERT INTO user_auth_tokens (user_id, name, description, token, source, expires_at) VALUES ($1, $2, $3, $4, $5, $6) RETURNING id"#,
         )
         .bind(user_id)
         .bind(name)
         .bind(description)
         .bind(hashed_token)
         .bind(source)
+        .bind(expires_at)
         .fetch_one(database)
         .await?;
 

@@ -8,7 +8,7 @@ export interface RawAuthTokenResponse {
   description?: string;
   active: boolean;
   source: string;
-  expires_at?: string;
+  expires_at?: string | null;
   created_at: string;
 }
 
@@ -26,13 +26,14 @@ export interface RawAuthTokenScopes {
 export interface RawAuthTokenRepositoryScope {
   id: number;
   user_auth_token_id: number;
-  repository_id: number;
+  repository_id: string;
   actions: Array<RepositoryActions>;
 }
 
 export interface NewAuthTokenResponse {
   id: number;
   token: string;
+  expires_at?: string | null;
 }
 
 export interface NewAuthTokenRepositoryScope {

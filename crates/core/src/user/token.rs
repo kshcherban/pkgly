@@ -29,7 +29,7 @@ impl AuthTokenFullResponse {
         database: &sqlx::PgPool,
     ) -> Result<Option<AuthTokenFullResponse>, sqlx::Error> {
         let Some(base) = sqlx::query_as::<_, AuthTokenResponse>(
-            r#"SELECT * FROM user_auth_tokens WHERE id = $1 user_id = $2"#,
+            r#"SELECT * FROM user_auth_tokens WHERE id = $1 AND user_id = $2"#,
         )
         .bind(id)
         .bind(user_id)

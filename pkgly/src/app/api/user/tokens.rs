@@ -5,6 +5,7 @@ use axum::{
     routing::{delete, get, post},
 };
 use axum_extra::{TypedHeader, headers::UserAgent};
+use chrono::{DateTime, FixedOffset, Local};
 use nr_core::{
     database::entities::user::{
         UserType,
@@ -36,6 +37,8 @@ pub struct NewAuthTokenRequest {
     pub name: Option<String>,
     pub description: Option<String>,
     #[serde(default)]
+    pub expires_in_days: Option<serde_json::Value>,
+    #[serde(default)]
     pub scopes: Vec<NRScope>,
     #[serde(default)]
     pub repository_scopes: Vec<NewRepositoryScope>,
@@ -49,6 +52,7 @@ pub struct NewRepositoryScope {
 pub struct NewAuthTokenResponse {
     pub id: i32,
     pub token: String,
+    pub expires_at: Option<DateTime<FixedOffset>>,
 }
 #[utoipa::path(
     post,
@@ -58,7 +62,7 @@ pub struct NewAuthTokenResponse {
         (status = 200, description = "A New Auth Token was created"),
     ),
 )]
-async fn create(
+pub(super) async fn create(
     auth: OnlySessionAllowedAuthentication,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     State(site): State<Pkgly>,
@@ -68,6 +72,13 @@ async fn create(
     if new_token.repository_scopes.is_empty() && new_token.scopes.is_empty() {
         return Ok(ResponseBuilder::bad_request().body("No Scopes Provided"));
     }
+    let expires_at = match expires_at_from_days(
+        new_token.expires_in_days.as_ref(),
+        Local::now().fixed_offset(),
+    ) {
+        Ok(expires_at) => expires_at,
+        Err(()) => return Ok(ResponseBuilder::bad_request().body("Invalid expires_in_days")),
+    };
     let repositories: Vec<(Uuid, Vec<RepositoryActions>)> = new_token
         .repository_scopes
         .into_iter()
@@ -78,13 +89,38 @@ async fn create(
         name: new_token.name,
         description: new_token.description,
         source,
+        expires_at,
         scopes: new_token.scopes,
         repositories,
     };
     let (id, token) = new_token.insert(site.as_ref()).await?;
-    let response = NewAuthTokenResponse { id, token };
+    let response = NewAuthTokenResponse {
+        id,
+        token,
+        expires_at,
+    };
 
     Ok(ResponseBuilder::ok().json(&response))
+}
+
+pub(super) fn expires_at_from_days(
+    expires_in_days: Option<&serde_json::Value>,
+    now: DateTime<FixedOffset>,
+) -> Result<Option<DateTime<FixedOffset>>, ()> {
+    let Some(value) = expires_in_days else {
+        return Ok(None);
+    };
+    if value.is_null() {
+        return Ok(None);
+    }
+    let Some(days) = value.as_i64() else {
+        return Err(());
+    };
+    if days <= 0 {
+        return Err(());
+    }
+    let duration = chrono::Duration::try_days(days).ok_or(())?;
+    now.checked_add_signed(duration).ok_or(()).map(Some)
 }
 #[utoipa::path(
     get,
