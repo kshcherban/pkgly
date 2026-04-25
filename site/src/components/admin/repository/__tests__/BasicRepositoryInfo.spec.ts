@@ -98,7 +98,7 @@ describe("BasicRepositoryInfo", () => {
     expect(wrapper.findAll('[data-testid="repository-meta-item"]').length).toBeGreaterThan(0);
   });
 
-  it("renders delete action and a disabled repository toggle placeholder", () => {
+  it("renders delete action without repository toggle controls", () => {
     const wrapper = mount(BasicRepositoryInfo, {
       props: { repository },
       global: {
@@ -106,10 +106,26 @@ describe("BasicRepositoryInfo", () => {
       },
     });
 
-    expect(wrapper.find('[data-testid="repository-toggle"]').exists()).toBe(true);
-    expect(wrapper.find('[data-testid="repository-toggle"]').attributes("disabled")).toBeDefined();
+    expect(wrapper.find('[data-testid="repository-toggle"]').exists()).toBe(false);
     expect(wrapper.find('[data-testid="repository-delete"]').exists()).toBe(true);
-    expect(wrapper.text()).toContain("Repository activation controls are coming soon.");
+    expect(wrapper.text()).not.toContain("Repository activation controls are coming soon.");
+  });
+
+  it("renders inactive repository status without repository toggle controls", () => {
+    const wrapper = mount(BasicRepositoryInfo, {
+      props: {
+        repository: {
+          ...repository,
+          active: false,
+        },
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    expect(wrapper.find('[data-testid="repository-status-chip"]').text()).toContain("Inactive");
+    expect(wrapper.find('[data-testid="repository-toggle"]').exists()).toBe(false);
   });
 
   it("opens a confirmation dialog before deleting a repository", async () => {

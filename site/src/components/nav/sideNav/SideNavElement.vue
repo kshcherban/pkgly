@@ -25,9 +25,11 @@ const props = defineProps({
 });
 const router = useRouter();
 const isActive = computed(() => {
+  const routeMatches = props.routeName === router.currentRoute.value.name;
+  const tagMatches = Boolean(props.activeTag) && props.activeTag === router.currentRoute.value.meta.tag;
   return (
-    props.routeName === router.currentRoute.value.name ||
-    props.activeTag === router.currentRoute.value.meta.tag
+    routeMatches ||
+    tagMatches
   );
 });
 </script>

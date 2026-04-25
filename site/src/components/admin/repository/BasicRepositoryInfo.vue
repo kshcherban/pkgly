@@ -52,32 +52,16 @@
         </div>
         <div class="repository-info-card__buttons">
           <v-btn
-            :color="toggleButton.color"
-            variant="tonal"
-            class="text-none"
-            data-testid="repository-toggle"
-            disabled>
-            <v-icon
-              class="mr-2"
-              icon="mdi-toggle-switch" />
-            {{ toggleButton.label }}
-          </v-btn>
-        <v-btn
-          color="error"
-          variant="flat"
-          class="text-none danger-hover"
-          data-testid="repository-delete"
-          @click="openDeleteDialog">
+            color="error"
+            variant="flat"
+            class="text-none danger-hover"
+            data-testid="repository-delete"
+            @click="openDeleteDialog">
             <v-icon
               class="mr-2"
               icon="mdi-delete-outline" />
             Delete Repository
           </v-btn>
-        </div>
-        <div
-          class="repository-info-card__hint text-body-2 text-medium-emphasis"
-          data-testid="repository-toggle-hint">
-          Repository activation controls are coming soon.
         </div>
       </div>
     </v-card-text>
@@ -142,13 +126,6 @@ const statusChip = computed(() => {
   return props.repository.active
     ? { label: "Active", color: "success" as const }
     : { label: "Inactive", color: "warning" as const };
-});
-
-const toggleButton = computed(() => {
-  if (!props.repository || props.repository.active) {
-    return { label: "Disable Repository", color: "warning" as const };
-  }
-  return { label: "Enable Repository", color: "primary" as const };
 });
 
 function repositoryTypeLabel(repo: RepositoryWithStorageName) {
