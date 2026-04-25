@@ -53,6 +53,9 @@ jobs:
           platforms: ${{ matrix.platform }}
           push: true
           tags: ${{ env.IMAGE_NAME }}:latest-${{ github.sha }}-${{ matrix.arch }}
+          labels: |
+            org.opencontainers.image.source=https://github.com/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
           cache-from: type=gha,scope=pkgly-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pkgly-${{ matrix.arch }}
 

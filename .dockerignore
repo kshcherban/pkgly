@@ -1,9 +1,17 @@
 target/
 .vscode/
 test/
+tests/
 .env
 site/node_modules/
 site/.env
 docs/node_modules/
 nr_tests.env
 storage_tests
+.github/
+AGENTS.md
+charts/
+benches/
+docker/
+scripts/
+dev.sh
