@@ -33,4 +33,24 @@ describe("router security metadata", () => {
 
     expect(admin?.redirect).toBe("/admin/repositories");
   });
+
+  it("redirects legacy system settings route to single sign on", async () => {
+    const router = (await import("@/router")).default;
+    const routes = router.getRoutes();
+    const system = routes.find((route) => route.name === "SystemSettings");
+
+    expect(system?.redirect).toBe("/admin/system/sso");
+  });
+
+  it("registers system settings subpages", async () => {
+    const router = (await import("@/router")).default;
+    const routes = router.getRoutes();
+
+    expect(routes.find((route) => route.name === "SystemSingleSignOn")?.path).toBe(
+      "/admin/system/sso",
+    );
+    expect(routes.find((route) => route.name === "SystemWebhooks")?.path).toBe(
+      "/admin/system/webhooks",
+    );
+  });
 });

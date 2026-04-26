@@ -1,0 +1,138 @@
+.systemSettings {
+  max-width: 960px;
+  margin: 0 auto;
+  padding: 2rem 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1.75rem;
+  color: var(--nr-text-primary);
+
+  h1 {
+    margin-bottom: 0.5rem;
+    text-align: center;
+  }
+}
+
+.card {
+  background: var(--nr-surface);
+  border: 1px solid var(--nr-border-color);
+  border-radius: var(--nr-radius-lg);
+  padding: 1.75rem;
+  box-shadow: var(--nr-shadow-2);
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+
+  header {
+    display: flex;
+    flex-direction: column;
+    gap: 0.5rem;
+
+    p {
+      margin: 0;
+      color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
+    }
+  }
+}
+
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 1rem 1.5rem;
+}
+
+.actions {
+  display: flex;
+  gap: 1rem;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.actions__spacer {
+  flex: 1 1 auto;
+}
+
+.providerSection {
+  border: 1px solid var(--nr-border-color);
+  border-radius: var(--nr-radius-lg);
+  padding: 1rem;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+  background-color: var(--nr-surface-variant);
+}
+
+.providerSection .grid {
+  margin-top: 0.5rem;
+}
+
+.providerSection__header {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.providerSection__title {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+
+  h3 {
+    margin: 0;
+  }
+}
+
+.hint {
+  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
+  font-size: 0.9rem;
+  margin: 0;
+}
+
+.emptyState {
+  padding: 0.75rem 1rem;
+  border-radius: var(--nr-radius-md);
+  border: 1px dashed var(--nr-border-color);
+  background: var(--nr-surface);
+  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
+}
+
+.mappingRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1rem;
+  align-items: center;
+
+  select {
+    width: 100%;
+    padding: 0.75rem;
+    border-radius: var(--nr-radius-md);
+    border: 1px solid var(--nr-input-border);
+    background: var(--nr-input-background);
+    color: var(--nr-text-primary);
+
+    &:hover {
+      border-color: var(--nr-input-border-hover);
+    }
+
+    &:focus {
+      outline: none;
+      border: 1px solid var(--nr-input-border-hover);
+      box-shadow: var(--nr-focus-ring);
+    }
+  }
+}
+
+.mappingRow .v-btn {
+  align-self: flex-start;
+}
+
+.actions > .v-btn {
+  min-width: 160px;
+}
+
+@media (max-width: 720px) {
+  .actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+}

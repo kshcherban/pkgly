@@ -68,6 +68,14 @@
         "name": "SystemSettings"
     },
     {
+        "path": "/admin/system/sso",
+        "name": "SystemSingleSignOn"
+    },
+    {
+        "path": "/admin/system/webhooks",
+        "name": "SystemWebhooks"
+    },
+    {
         "path": "/profile",
         "name": "profile"
     },

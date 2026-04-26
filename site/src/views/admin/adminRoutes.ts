@@ -10,6 +10,7 @@ import UserCreateView from "@/views/admin/user/UserCreateView.vue";
 import UserListView from "@/views/admin/user/UserListView.vue";
 import UserPage from "@/views/admin/user/UserPage.vue";
 import AdminSystem from "./AdminSystem.vue";
+import AdminWebhooks from "./AdminWebhooks.vue";
 const defaultAdminMeta = {
   sideBar: AdminNav,
   requiresAuth: true,
@@ -121,7 +122,19 @@ export const adminRoutes = [
   {
     path: "/admin/system",
     name: "SystemSettings",
+    redirect: "/admin/system/sso",
+    meta: defaultAdminMeta,
+  },
+  {
+    path: "/admin/system/sso",
+    name: "SystemSingleSignOn",
     component: AdminSystem,
+    meta: defaultAdminMeta,
+  },
+  {
+    path: "/admin/system/webhooks",
+    name: "SystemWebhooks",
+    component: AdminWebhooks,
     meta: defaultAdminMeta,
   },
 ];

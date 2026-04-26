@@ -15,14 +15,10 @@ import type {
   OidcProviderConfig,
   SsoConfiguration,
   TokenSource,
-  WebhookConfiguration,
-  WebhookDeliveryStatus,
-  WebhookEventType,
-  WebhookUpdatePayload,
 } from "@/types/base";
 import { useAlertsStore } from "@/stores/alerts";
 import { computed, onMounted, ref, watch } from "vue";
-import { isAxiosError } from "axios";
+import { resolveRequestError } from "./resolveRequestError";
 
 interface EditableSsoConfiguration {
   enabled: boolean;
@@ -104,22 +100,6 @@ interface OAuth2UpdatePayload {
   group_role_mappings: OAuth2GroupRoleMapping[];
 }
 
-interface EditableWebhookHeader {
-  id: string;
-  name: string;
-  value: string;
-  configured: boolean;
-}
-
-interface EditableWebhookConfiguration {
-  id: string | null;
-  name: string;
-  enabled: boolean;
-  target_url: string;
-  events: WebhookEventType[];
-  headers: EditableWebhookHeader[];
-}
-
 const site = siteStore();
 
 const ssoLoading = ref(true);
@@ -134,13 +114,6 @@ const oauthInitialSignature = ref(JSON.stringify(oauthForm.value));
 const availableRoles = ref<string[]>([]);
 const roleOptionsId = "pkgly-role-options";
 
-const webhooksLoading = ref(true);
-const webhooksSaving = ref(false);
-const webhooksDeletingId = ref<string | null>(null);
-const webhooks = ref<WebhookConfiguration[]>([]);
-const webhookForm = ref<EditableWebhookConfiguration>(defaultWebhookForm());
-const webhookInitialSignature = ref(JSON.stringify(toWebhookPayload(webhookForm.value)));
-
 const alerts = useAlertsStore();
 
 const providerConfigured = computed(() => ssoForm.value.provider_login_url.trim().length > 0);
@@ -150,11 +123,6 @@ const hasSsoChanges = computed(
 const hasOAuthChanges = computed(
   () => oauthInitialSignature.value !== JSON.stringify(oauthForm.value),
 );
-const hasWebhookChanges = computed(
-  () => webhookInitialSignature.value !== JSON.stringify(toWebhookPayload(webhookForm.value)),
-);
-const isEditingWebhook = computed(() => Boolean(webhookForm.value.id));
-
 const errorBanner = ref({
   visible: false,
   title: "",
@@ -174,7 +142,7 @@ const resetError = () => {
 };
 
 onMounted(async () => {
-  await Promise.all([fetchSsoSettings(), fetchOAuthSettings(), fetchWebhooks()]);
+  await Promise.all([fetchSsoSettings(), fetchOAuthSettings()]);
 });
 
 watch(
@@ -189,16 +157,6 @@ watch(
 
 watch(
   oauthForm,
-  () => {
-    if (errorBanner.value.visible) {
-      resetError();
-    }
-  },
-  { deep: true },
-);
-
-watch(
-  webhookForm,
   () => {
     if (errorBanner.value.visible) {
       resetError();
@@ -252,43 +210,6 @@ async function fetchOAuthSettings() {
     showError(resolved.title, resolved.message);
   } finally {
     oauthLoading.value = false;
-  }
-}
-
-async function fetchWebhooks() {
-  webhooksLoading.value = true;
-  resetError();
-  try {
-    const response = await http.get<WebhookConfiguration[]>("/api/system/webhooks");
-    webhooks.value = response.data;
-    if (webhookForm.value.id) {
-      const current = response.data.find((webhook) => webhook.id === webhookForm.value.id);
-      if (current) {
-        webhookForm.value = toWebhookEditable(current);
-        webhookInitialSignature.value = JSON.stringify(toWebhookPayload(webhookForm.value));
-      } else {
-        startNewWebhook();
-      }
-    } else if (response.data.length > 0) {
-      const [firstWebhook] = response.data;
-      if (firstWebhook) {
-        selectWebhook(firstWebhook);
-      } else {
-        startNewWebhook();
-      }
-    } else {
-      startNewWebhook();
-    }
-  } catch (error) {
-    const resolved = resolveRequestError(
-      error,
-      "Unable to load webhooks",
-      "Check the server logs for more information.",
-    );
-    console.error(resolved.debugMessage);
-    showError(resolved.title, resolved.message);
-  } finally {
-    webhooksLoading.value = false;
   }
 }
 
@@ -411,87 +332,6 @@ async function saveOAuthSettings() {
   }
 }
 
-async function saveWebhookSettings() {
-  if (webhooksSaving.value) {
-    return;
-  }
-  resetError();
-
-  if (!webhookForm.value.name.trim()) {
-    showError("Webhook name required", "Provide a webhook name.");
-    return;
-  }
-  if (!webhookForm.value.target_url.trim()) {
-    showError("Target URL required", "Provide a destination URL for the webhook.");
-    return;
-  }
-  if (webhookForm.value.events.length === 0) {
-    showError("Select an event", "Choose at least one package event.");
-    return;
-  }
-
-  for (const header of webhookForm.value.headers) {
-    if (!header.name.trim()) {
-      showError("Header name required", "Every configured header needs a name.");
-      return;
-    }
-    if (!header.configured && !header.value.trim()) {
-      showError(
-        "Header value required",
-        `Provide a value for header '${header.name.trim() || "(unnamed)"}'.`,
-      );
-      return;
-    }
-  }
-
-  webhooksSaving.value = true;
-  const payload = toWebhookPayload(webhookForm.value);
-
-  try {
-    if (webhookForm.value.id) {
-      await http.put(`/api/system/webhooks/${webhookForm.value.id}`, payload);
-      alerts.success("Webhook updated");
-    } else {
-      await http.post("/api/system/webhooks", payload);
-      alerts.success("Webhook created");
-    }
-    await fetchWebhooks();
-  } catch (error) {
-    const resolved = resolveRequestError(
-      error,
-      "Unable to save webhook",
-      "Check the server logs for more details.",
-    );
-    console.error(resolved.debugMessage);
-    showError(resolved.title, resolved.message);
-  } finally {
-    webhooksSaving.value = false;
-  }
-}
-
-async function deleteWebhook(id: string) {
-  if (webhooksDeletingId.value) {
-    return;
-  }
-  resetError();
-  webhooksDeletingId.value = id;
-  try {
-    await http.delete(`/api/system/webhooks/${id}`);
-    alerts.success("Webhook deleted");
-    await fetchWebhooks();
-  } catch (error) {
-    const resolved = resolveRequestError(
-      error,
-      "Unable to delete webhook",
-      "Check the server logs for more details.",
-    );
-    console.error(resolved.debugMessage);
-    showError(resolved.title, resolved.message);
-  } finally {
-    webhooksDeletingId.value = null;
-  }
-}
-
 function resetSsoSettings() {
   if (ssoSaving.value) {
     return;
@@ -508,21 +348,6 @@ function resetOAuthSettings() {
   resetError();
   const latest = JSON.parse(oauthInitialSignature.value) as EditableOAuthConfiguration;
   oauthForm.value = latest;
-}
-
-function resetWebhookSettings() {
-  if (webhooksSaving.value) {
-    return;
-  }
-  resetError();
-  if (webhookForm.value.id) {
-    const latest = webhooks.value.find((webhook) => webhook.id === webhookForm.value.id);
-    if (latest) {
-      selectWebhook(latest);
-      return;
-    }
-  }
-  startNewWebhook();
 }
 
 function defaultSsoForm(): EditableSsoConfiguration {
@@ -582,169 +407,6 @@ function defaultOAuthForm(): EditableOAuthConfiguration {
     casbin_policy: "",
     group_role_mappings: [],
   };
-}
-
-function defaultWebhookForm(): EditableWebhookConfiguration {
-  return {
-    id: null,
-    name: "",
-    enabled: true,
-    target_url: "",
-    events: ["package.published"],
-    headers: [],
-  };
-}
-
-function defaultWebhookHeader(): EditableWebhookHeader {
-  return {
-    id: generateId(),
-    name: "",
-    value: "",
-    configured: false,
-  };
-}
-
-function toWebhookEditable(settings: WebhookConfiguration): EditableWebhookConfiguration {
-  return {
-    id: settings.id,
-    name: settings.name,
-    enabled: settings.enabled,
-    target_url: settings.target_url,
-    events: [...settings.events],
-    headers: (settings.headers ?? []).map((header) => ({
-      id: generateId(),
-      name: header.name,
-      value: "",
-      configured: header.configured,
-    })),
-  };
-}
-
-function toWebhookPayload(settings: EditableWebhookConfiguration): WebhookUpdatePayload {
-  const headers = settings.headers
-    .map((header) => ({
-      name: header.name.trim(),
-      value: header.value.trim() ? header.value.trim() : null,
-      configured: header.configured,
-    }))
-    .filter((header) => header.name.length > 0);
-
-  return {
-    name: settings.name.trim(),
-    enabled: settings.enabled,
-    target_url: settings.target_url.trim(),
-    events: Array.from(new Set(settings.events)),
-    headers,
-  };
-}
-
-function selectWebhook(webhook: WebhookConfiguration) {
-  webhookForm.value = toWebhookEditable(webhook);
-  webhookInitialSignature.value = JSON.stringify(toWebhookPayload(webhookForm.value));
-}
-
-function startNewWebhook() {
-  webhookForm.value = defaultWebhookForm();
-  webhookInitialSignature.value = JSON.stringify(toWebhookPayload(webhookForm.value));
-}
-
-function addWebhookHeader() {
-  webhookForm.value.headers.push(defaultWebhookHeader());
-}
-
-function removeWebhookHeader(id: string) {
-  webhookForm.value.headers = webhookForm.value.headers.filter((header) => header.id !== id);
-}
-
-function toggleWebhookEvent(event: WebhookEventType, checked: boolean) {
-  if (checked) {
-    if (!webhookForm.value.events.includes(event)) {
-      webhookForm.value.events.push(event);
-    }
-    return;
-  }
-  webhookForm.value.events = webhookForm.value.events.filter((candidate) => candidate !== event);
-}
-
-function onWebhookEventToggle(event: WebhookEventType, inputEvent: Event) {
-  const target = inputEvent.target as HTMLInputElement | null;
-  toggleWebhookEvent(event, target?.checked ?? false);
-}
-
-function webhookStatusLabel(status?: WebhookDeliveryStatus | null): string {
-  switch (status) {
-    case "delivered":
-      return "Delivered";
-    case "failed":
-      return "Failed";
-    case "processing":
-      return "In progress";
-    case "pending":
-      return "Queued";
-    default:
-      return "Never sent";
-  }
-}
-
-function resolveRequestError(
-  error: unknown,
-  fallbackTitle: string,
-  fallbackMessage: string,
-  conflictTitle?: string,
-  conflictMessage?: string,
-): { title: string; message: string; debugMessage: string } {
-  const fallback = {
-    title: fallbackTitle,
-    message: fallbackMessage,
-    debugMessage: typeof error === "string" ? error : JSON.stringify(error),
-  };
-
-  if (isAxiosError(error)) {
-    const status = error.response?.status;
-    const data = error.response?.data;
-    let payloadMessage: string | undefined;
-
-    if (typeof data === "string" && data.trim().length > 0) {
-      payloadMessage = data.trim();
-    } else if (typeof data === "object" && data !== null && "message" in data) {
-      const candidate = (data as { message?: unknown }).message;
-      if (typeof candidate === "string" && candidate.trim().length > 0) {
-        payloadMessage = candidate.trim();
-      }
-    }
-
-    if (status === 409 && conflictTitle) {
-      return {
-        title: conflictTitle,
-        message: conflictMessage ?? payloadMessage ?? fallbackMessage,
-        debugMessage: JSON.stringify(error.toJSON?.() ?? error),
-      };
-    }
-
-    if (payloadMessage) {
-      return {
-        title: fallbackTitle,
-        message: payloadMessage,
-        debugMessage: JSON.stringify(error.toJSON?.() ?? error),
-      };
-    }
-
-    return {
-      title: fallbackTitle,
-      message: `Request failed${status ? ` with status ${status}` : ""}.`,
-      debugMessage: JSON.stringify(error.toJSON?.() ?? error),
-    };
-  }
-
-  if (error instanceof Error) {
-    return {
-      title: fallbackTitle,
-      message: error.message,
-      debugMessage: error.stack ?? error.message,
-    };
-  }
-
-  return fallback;
 }
 
 function toSsoEditable(settings: SsoConfiguration): EditableSsoConfiguration {
@@ -984,11 +646,11 @@ function removeOidcProvider(id: string) {
       :title="errorBanner.title"
       :message="errorBanner.message"
       @close="resetError" />
-    <h1>System Settings</h1>
+    <h1>Single Sign On</h1>
 
     <section class="card">
       <header>
-        <h2>Single Sign-On</h2>
+        <h2>Single Sign On</h2>
         <p>
           Configure how Pkgly integrates with an upstream SSO proxy. Changes apply immediately
           and will affect the login screen.
@@ -1502,269 +1164,17 @@ function removeOidcProvider(id: string) {
       </form>
     </section>
 
-    <section class="card">
-      <header>
-        <h2>Package Webhooks</h2>
-        <p>
-          Send outbound notifications when packages are published or deleted. Deliveries are
-          asynchronous and retried automatically.
-        </p>
-      </header>
-      <SpinnerElement v-if="webhooksLoading" />
-      <div
-        v-else
-        class="webhookSection">
-        <div class="webhookList">
-          <header class="providerSection__header">
-            <div class="providerSection__title">
-              <h3>Configured webhooks</h3>
-              <p class="hint">Header values stay write-only after save.</p>
-            </div>
-            <v-btn
-              variant="outlined"
-              color="primary"
-              prepend-icon="mdi-plus"
-              @click="startNewWebhook">
-              New webhook
-            </v-btn>
-          </header>
-
-          <div
-            v-if="webhooks.length === 0"
-            class="emptyState">
-            No package webhooks configured yet.
-          </div>
-
-          <button
-            v-for="webhook in webhooks"
-            :key="webhook.id"
-            type="button"
-            class="webhookListItem"
-            :class="{ 'webhookListItem--active': webhook.id === webhookForm.id }"
-            @click="selectWebhook(webhook)">
-            <span class="webhookListItem__name">{{ webhook.name }}</span>
-            <span class="webhookListItem__meta">
-              {{ webhook.enabled ? "Enabled" : "Disabled" }} ·
-              {{ webhookStatusLabel(webhook.last_delivery_status) }}
-            </span>
-          </button>
-        </div>
-
-        <form
-          class="webhookForm"
-          @submit.prevent="saveWebhookSettings">
-          <div class="grid">
-            <TextInput
-              id="webhook-name"
-              v-model="webhookForm.name"
-              autocomplete="off"
-              required>
-              Webhook name
-            </TextInput>
-
-            <TextInput
-              id="webhook-target-url"
-              v-model="webhookForm.target_url"
-              autocomplete="off"
-              placeholder="https://example.com/webhooks/pkgly"
-              required>
-              Target URL
-            </TextInput>
-          </div>
-
-          <SwitchInput
-            id="webhook-enabled"
-            v-model="webhookForm.enabled">
-            Enable webhook
-            <template #comment>
-              Disabled webhooks remain saved but stop receiving new delivery jobs.
-            </template>
-          </SwitchInput>
-
-          <div class="eventPicker">
-            <label class="eventPicker__option">
-              <input
-                :checked="webhookForm.events.includes('package.published')"
-                type="checkbox"
-                @change="onWebhookEventToggle('package.published', $event)">
-              <span>package.published</span>
-            </label>
-            <label class="eventPicker__option">
-              <input
-                :checked="webhookForm.events.includes('package.deleted')"
-                type="checkbox"
-                @change="onWebhookEventToggle('package.deleted', $event)">
-              <span>package.deleted</span>
-            </label>
-          </div>
-
-          <div class="providerSection">
-            <header class="providerSection__header">
-              <div class="providerSection__title">
-                <h3>Custom headers</h3>
-                <p class="hint">Leave an existing value blank to keep it unchanged.</p>
-              </div>
-              <v-btn
-                variant="outlined"
-                color="primary"
-                prepend-icon="mdi-plus"
-                @click.prevent="addWebhookHeader">
-                Add header
-              </v-btn>
-            </header>
-
-            <div
-              v-if="webhookForm.headers.length === 0"
-              class="emptyState">
-              No custom headers configured.
-            </div>
-
-            <div
-              v-for="header in webhookForm.headers"
-              :key="header.id"
-              class="mappingRow">
-              <TextInput
-                :id="`webhook-header-name-${header.id}`"
-                v-model="header.name"
-                autocomplete="off"
-                required>
-                Header name
-              </TextInput>
-              <PasswordInput
-                :id="`webhook-header-value-${header.id}`"
-                v-model="header.value"
-                autocomplete="off"
-                :placeholder="header.configured ? 'Leave blank to keep existing' : 'Header value'">
-                Header value
-              </PasswordInput>
-              <v-btn
-                variant="text"
-                color="error"
-                prepend-icon="mdi-delete"
-                @click.prevent="removeWebhookHeader(header.id)">
-                Remove
-              </v-btn>
-            </div>
-          </div>
-
-          <div
-            v-if="isEditingWebhook"
-            class="webhookStatus">
-            <strong>Last delivery:</strong>
-            {{ webhookStatusLabel(webhooks.find((item) => item.id === webhookForm.id)?.last_delivery_status) }}
-            <span v-if="webhooks.find((item) => item.id === webhookForm.id)?.last_http_status">
-              · HTTP {{ webhooks.find((item) => item.id === webhookForm.id)?.last_http_status }}
-            </span>
-            <span v-if="webhooks.find((item) => item.id === webhookForm.id)?.last_delivery_at">
-              · {{ webhooks.find((item) => item.id === webhookForm.id)?.last_delivery_at }}
-            </span>
-            <span v-if="webhooks.find((item) => item.id === webhookForm.id)?.last_error">
-              · {{ webhooks.find((item) => item.id === webhookForm.id)?.last_error }}
-            </span>
-          </div>
-
-          <footer class="actions">
-            <SubmitButton
-              :block="false"
-              :disabled="!hasWebhookChanges || webhooksSaving"
-              :loading="webhooksSaving"
-              prepend-icon="mdi-content-save"
-              title="Save webhook">
-              Save
-            </SubmitButton>
-            <span class="actions__spacer" />
-            <v-btn
-              v-if="webhookForm.id"
-              variant="text"
-              color="error"
-              :disabled="webhooksSaving || webhooksDeletingId === webhookForm.id"
-              @click="deleteWebhook(webhookForm.id)">
-              Delete
-            </v-btn>
-            <v-btn
-              variant="outlined"
-              color="primary"
-              :disabled="webhooksSaving"
-              @click="resetWebhookSettings">
-              Reset
-            </v-btn>
-          </footer>
-        </form>
-      </div>
-    </section>
   </main>
 </template>
 
 <style scoped lang="scss">
-.systemSettings {
-  max-width: 960px;
-  margin: 0 auto;
-  padding: 2rem 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1.75rem;
-  color: var(--nr-text-primary);
-
-  h1 {
-    margin-bottom: 0.5rem;
-    text-align: center;
-  }
-}
-
-.card {
-  background: var(--nr-surface);
-  border: 1px solid var(--nr-border-color);
-  border-radius: var(--nr-radius-lg);
-  padding: 1.75rem;
-  box-shadow: var(--nr-shadow-2);
-  display: flex;
-  flex-direction: column;
-  gap: 1.5rem;
-
-  header {
-    display: flex;
-    flex-direction: column;
-    gap: 0.5rem;
-
-    p {
-      margin: 0;
-      color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
-    }
-  }
-}
+@use "./systemSettings.scss";
 
 .ssoForm,
 .oauthForm {
   display: flex;
   flex-direction: column;
   gap: 1.5rem;
-}
-
-.grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 1rem 1.5rem;
-}
-
-.actions {
-  display: flex;
-  gap: 1rem;
-  align-items: center;
-  justify-content: flex-end;
-}
-
-.actions__spacer {
-  flex: 1 1 auto;
-}
-
-.providerSection {
-  border: 1px solid var(--nr-border-color);
-  border-radius: var(--nr-radius-lg);
-  padding: 1rem;
-  display: flex;
-  flex-direction: column;
-  gap: 1rem;
-  background-color: var(--nr-surface-variant);
 }
 
 .oidcProvider {
@@ -1792,22 +1202,6 @@ function removeOidcProvider(id: string) {
   display: flex;
   justify-content: flex-end;
   margin-top: 0.5rem;
-}
-
-.providerSection__header {
-  display: flex;
-  flex-direction: column;
-  gap: 0.5rem;
-}
-
-.providerSection__title {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-
-  h3 {
-    margin: 0;
-  }
 }
 
 .providerSection__toggle {
@@ -1852,12 +1246,6 @@ function removeOidcProvider(id: string) {
   }
 }
 
-.hint {
-  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
-  font-size: 0.9rem;
-  margin: 0;
-}
-
 .roleMappings {
   display: flex;
   flex-direction: column;
@@ -1872,44 +1260,6 @@ function removeOidcProvider(id: string) {
       margin: 0;
     }
   }
-
-  .emptyState {
-    padding: 0.75rem 1rem;
-    border-radius: var(--nr-radius-md);
-    border: 1px dashed var(--nr-border-color);
-    background: var(--nr-surface);
-    color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
-  }
-}
-
-.mappingRow {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 1rem;
-  align-items: center;
-
-  select {
-    width: 100%;
-    padding: 0.75rem;
-    border-radius: var(--nr-radius-md);
-    border: 1px solid var(--nr-input-border);
-    background: var(--nr-input-background);
-    color: var(--nr-text-primary);
-
-    &:hover {
-      border-color: var(--nr-input-border-hover);
-    }
-
-    &:focus {
-      outline: none;
-      border: 1px solid var(--nr-input-border-hover);
-      box-shadow: var(--nr-focus-ring);
-    }
-  }
-}
-
-.providerSection .grid {
-  margin-top: 0.5rem;
 }
 
 .roles-field {
@@ -1918,85 +1268,11 @@ function removeOidcProvider(id: string) {
   align-items: center;
 }
 
-.mappingRow .v-btn {
-  align-self: flex-start;
-}
-
 .group-mappings > .v-btn {
   align-self: flex-start;
 }
 
-.actions > .v-btn {
-  min-width: 160px;
-}
-
-.webhookSection {
-  display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
-  gap: 1.5rem;
-}
-
-.webhookList {
-  display: flex;
-  flex-direction: column;
-  gap: 0.75rem;
-}
-
-.webhookListItem {
-  text-align: left;
-  display: flex;
-  flex-direction: column;
-  gap: 0.25rem;
-  padding: 0.9rem 1rem;
-  border-radius: var(--nr-radius-md);
-  border: 1px solid var(--nr-border-color);
-  background: var(--nr-surface);
-  color: var(--nr-text-primary);
-}
-
-.webhookListItem--active {
-  border-color: var(--nr-input-border-hover);
-  box-shadow: var(--nr-focus-ring);
-}
-
-.webhookListItem__name {
-  font-weight: 600;
-}
-
-.webhookListItem__meta,
-.webhookStatus {
-  color: var(--nr-text-secondary, rgba(0, 0, 0, 0.6));
-  font-size: 0.92rem;
-}
-
-.webhookForm {
-  display: flex;
-  flex-direction: column;
-  gap: 1.25rem;
-}
-
-.eventPicker {
-  display: flex;
-  gap: 1rem;
-  flex-wrap: wrap;
-}
-
-.eventPicker__option {
-  display: inline-flex;
-  gap: 0.5rem;
-  align-items: center;
-}
-
 @media (max-width: 720px) {
-  .webhookSection {
-    grid-template-columns: 1fr;
-  }
-
-  .actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
   .roles-field {
     flex-direction: column;
     align-items: stretch;
