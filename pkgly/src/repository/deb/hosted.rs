@@ -15,6 +15,7 @@ use sha1::Sha1;
 use sha2::{Digest, Sha256};
 use sqlx::types::Json;
 use tokio::task::spawn_blocking;
+use tracing::warn;
 use uuid::Uuid;
 use xz2::write::XzEncoder;
 
@@ -24,7 +25,10 @@ use super::{
     package::parse_deb_package,
 };
 use crate::{
-    app::Pkgly,
+    app::{
+        Pkgly,
+        webhooks::{self, PackageWebhookActor, WebhookEventType},
+    },
     repository::{
         RepoResponse, Repository, RepositoryFactoryError, RepositoryRequest,
         utils::{RepositoryExt, can_read_repository_with_auth},
@@ -212,6 +216,18 @@ impl DebHostedRepository {
             parsed,
         )
         .await?;
+        if let Err(err) = webhooks::enqueue_package_path_event(
+            &self.site(),
+            self.repository_id(),
+            WebhookEventType::PackagePublished,
+            storage_path.to_string(),
+            PackageWebhookActor::from_user(user),
+            false,
+        )
+        .await
+        {
+            warn!(error = %err, "Failed to enqueue deb publish webhook");
+        }
 
         Ok(RepoResponse::Other(ResponseBuilder::created().empty()))
     }
@@ -617,6 +633,9 @@ impl Repository for DebHostedRepository {
         async move { this.handle_upload(request).await }
     }
 }
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug)]
 struct PackagesIndex {

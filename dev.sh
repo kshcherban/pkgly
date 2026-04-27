@@ -7,6 +7,8 @@ Usage: ./dev.sh [options]
 Options:
   -b              Skip frontend build
   --release, -r   Build backend in release mode
+  --stop          Stop and remove containers
+  --status        Show container status
   -h, --help      Show this help
 EOF
 }
@@ -14,6 +16,8 @@ EOF
 # Parse command line arguments
 SKIP_FRONTEND=false
 RELEASE=false
+STOP=false
+STATUS=false
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -b)
@@ -22,6 +26,14 @@ while [[ $# -gt 0 ]]; do
       ;;
     --release|-r)
       RELEASE=true
+      shift
+      ;;
+    --stop)
+      STOP=true
+      shift
+      ;;
+    --status)
+      STATUS=true
       shift
       ;;
     -h|--help)
@@ -36,8 +48,17 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
-
 set -ex
+
+if [[ "$STOP" = true ]]; then
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml down
+  exit 0
+fi
+
+if [[ "$STATUS" = true ]]; then
+  docker compose -f docker-compose.yml -f docker-compose.dev.yml ps
+  exit 0
+fi
 
 # Build frontend unless -b flag is provided
 if [[ "$SKIP_FRONTEND" = false ]]; then

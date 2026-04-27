@@ -1358,10 +1358,19 @@ async fn delete_version_records_by_path_skips_executor_when_empty() {
 
 mod catalog_db_tests {
     use super::*;
+    use crate::app::{
+        authentication::session::SessionManagerConfig,
+        config::{Mode, SecuritySettings, SiteSetting},
+        webhooks::{UpsertWebhookInput, WebhookEventType, WebhookHeaderInput, create_webhook},
+    };
     use crate::repository::NewRepository;
+    use crate::repository::deb::{DebHostedConfig, DebRepositoryConfig, DebRepositoryConfigType};
     use crate::test_support::DB_TEST_LOCK;
+    use ahash::HashMap;
+    use nr_core::database::entities::user::auth_token::AuthToken;
+    use nr_core::user::{Email, Username, permissions::RepositoryActions};
+    use nr_core::{database::DatabaseConfig, repository::config::RepositoryConfigType};
     use sqlx::{PgPool, postgres::PgPoolOptions};
-    use std::collections::HashMap;
     use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
 
     use nr_core::{
@@ -1375,6 +1384,7 @@ mod catalog_db_tests {
 
     struct TestDb {
         pool: PgPool,
+        port: u16,
         _container: Container<'static, GenericImage>,
         _docker: &'static Cli,
     }
@@ -1401,6 +1411,7 @@ mod catalog_db_tests {
                 Ok(pool) => {
                     return TestDb {
                         pool,
+                        port,
                         _container: container,
                         _docker: docker,
                     };
@@ -1452,6 +1463,26 @@ mod catalog_db_tests {
             .id
     }
 
+    async fn insert_storage_at(pool: &PgPool, path: &std::path::Path) -> Uuid {
+        let storage_name = StorageName::new("primary".to_string()).expect("storage name");
+        let storage = NewDBStorage::new(
+            "Local".into(),
+            storage_name,
+            serde_json::json!({
+                "type": "Local",
+                "settings": {
+                    "path": path,
+                },
+            }),
+        );
+        storage
+            .insert(pool)
+            .await
+            .expect("insert storage")
+            .expect("storage row")
+            .id
+    }
+
     async fn insert_repository(pool: &PgPool, storage_id: Uuid) -> Uuid {
         let repo = NewRepository {
             name: "maven-proxy-test".into(),
@@ -1489,6 +1520,83 @@ mod catalog_db_tests {
             .await
             .expect("insert npm repository")
             .id
+    }
+
+    async fn insert_deb_repository(pool: &PgPool, storage_id: Uuid) -> Uuid {
+        let mut configs = HashMap::with_hasher(Default::default());
+        configs.insert(
+            DebRepositoryConfigType::get_type_static().to_string(),
+            serde_json::to_value(DebRepositoryConfig::Hosted(DebHostedConfig::default()))
+                .expect("serialize deb config"),
+        );
+        let repo = NewRepository {
+            name: "deb-hosted-test".into(),
+            uuid: Uuid::new_v4(),
+            repository_type: "deb".into(),
+            configs,
+        };
+        repo.insert(storage_id, pool)
+            .await
+            .expect("insert deb repository")
+            .id
+    }
+
+    async fn build_site(db: &TestDb, root: &std::path::Path) -> Pkgly {
+        Pkgly::new(
+            Mode::Debug,
+            SiteSetting::default(),
+            SecuritySettings::default(),
+            SessionManagerConfig {
+                database_location: root.join("sessions.redb"),
+                ..Default::default()
+            },
+            crate::repository::StagingConfig {
+                staging_dir: root.join("staging"),
+                ..Default::default()
+            },
+            None,
+            DatabaseConfig {
+                user: "postgres".into(),
+                password: "password".into(),
+                database: "postgres".into(),
+                host: "127.0.0.1".into(),
+                port: Some(db.port),
+            },
+            Some(root.join("storages")),
+        )
+        .await
+        .expect("create site")
+    }
+
+    fn sample_auth() -> Authentication {
+        let fixed_time =
+            chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
+        let token = AuthToken {
+            id: 1,
+            user_id: 1,
+            name: Some("token".into()),
+            description: None,
+            token: "token".into(),
+            active: true,
+            source: "test".into(),
+            expires_at: None,
+            created_at: fixed_time,
+        };
+        let user = nr_core::database::entities::user::UserSafeData {
+            id: 1,
+            name: "Test Admin".into(),
+            username: Username::new("test_admin".into()).expect("username"),
+            email: Email::new("admin@example.com".into()).expect("email"),
+            require_password_change: false,
+            active: true,
+            admin: true,
+            user_manager: false,
+            system_manager: true,
+            default_repository_actions: vec![RepositoryActions::Read, RepositoryActions::Edit],
+            updated_at: fixed_time,
+            created_at: fixed_time,
+        };
+        Authentication::AuthToken(token, user)
     }
 
     async fn insert_maven_version(
@@ -1548,6 +1656,85 @@ mod catalog_db_tests {
             extra: VersionData::default(),
         };
         new_version.insert(pool).await.expect("insert version");
+    }
+
+    #[tokio::test]
+    async fn deb_package_delete_enqueues_webhook_before_catalog_row_is_removed() {
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        reset_database(&db).await;
+        let root = tempfile::tempdir().expect("tempdir");
+        let storage_id = insert_storage_at(db.pool(), root.path()).await;
+        let repository_id = insert_deb_repository(db.pool(), storage_id).await;
+        let package_path = "pool/main/s/sample/sample_1.0.0_amd64.deb";
+
+        insert_maven_version(db.pool(), repository_id, "sample", "1.0.0", package_path).await;
+        create_webhook(
+            db.pool(),
+            UpsertWebhookInput {
+                name: "deb deletes".into(),
+                enabled: true,
+                target_url: "http://127.0.0.1:9/webhook".into(),
+                events: vec![WebhookEventType::PackageDeleted],
+                headers: Vec::<WebhookHeaderInput>::new(),
+            },
+        )
+        .await
+        .expect("create webhook");
+
+        let site = build_site(&db, root.path()).await;
+        let repository = site
+            .get_repository(repository_id)
+            .expect("repository should be loaded");
+        repository
+            .get_storage()
+            .save_file(
+                repository_id,
+                FileContent::from(b"deb bytes".as_slice()),
+                &nr_core::storage::StoragePath::from(package_path),
+            )
+            .await
+            .expect("save package");
+
+        let response = super::delete_cached_packages(
+            State(site.clone()),
+            sample_auth(),
+            Path(repository_id),
+            Json(PackageDeleteRequest {
+                paths: vec![package_path.to_string()],
+            }),
+        )
+        .await
+        .expect("delete succeeds");
+
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let payloads: Vec<serde_json::Value> = sqlx::query_scalar(
+            r#"
+            SELECT payload
+            FROM webhook_deliveries
+            WHERE event_type = 'package.deleted'
+            "#,
+        )
+        .fetch_all(db.pool())
+        .await
+        .expect("fetch deliveries");
+        assert_eq!(payloads.len(), 1);
+        assert_eq!(payloads[0]["data"]["repository"]["format"], "deb");
+        assert_eq!(payloads[0]["data"]["package"]["name"], "sample");
+        assert_eq!(payloads[0]["data"]["package"]["version"], "1.0.0");
+        assert_eq!(
+            payloads[0]["data"]["package"]["canonical_path"],
+            package_path
+        );
+
+        let remaining_versions: i64 =
+            sqlx::query_scalar("SELECT COUNT(*) FROM project_versions WHERE repository_id = $1")
+                .bind(repository_id)
+                .fetch_one(db.pool())
+                .await
+                .expect("count versions");
+        assert_eq!(remaining_versions, 0);
+        site.close().await;
     }
 
     async fn insert_proxy_version(
