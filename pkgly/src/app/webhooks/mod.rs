@@ -1,7 +1,7 @@
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
-    time::Duration,
+    time::{Duration, Instant},
 };
 
 use anyhow::{Context, anyhow};
@@ -21,12 +21,13 @@ use url::Url;
 use utoipa::ToSchema;
 use uuid::Uuid;
 
-use crate::app::Pkgly;
+use crate::{app::Pkgly, utils::upstream::sanitize_url_for_logging};
 
 const DELIVERY_POLL_INTERVAL: Duration = Duration::from_secs(30);
 const DELIVERY_CLAIM_TTL: Duration = Duration::from_secs(300);
 const DELIVERY_TIMEOUT: Duration = Duration::from_secs(10);
 const MAX_DELIVERY_ATTEMPTS: i32 = 5;
+const WEBHOOK_DELIVERY_LOG_TARGET: &str = "pkgly::webhook_delivery";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize, ToSchema)]
 pub enum WebhookEventType {
@@ -920,6 +921,10 @@ async fn process_due_deliveries(database: &PgPool, client: &Client) -> anyhow::R
 struct ClaimedDelivery {
     id: i64,
     claim_token: Uuid,
+    webhook_id: Option<Uuid>,
+    webhook_name: String,
+    event_type: String,
+    subscription_key: String,
     target_url: String,
     headers: BTreeMap<String, String>,
     payload: Value,
@@ -952,7 +957,17 @@ async fn claim_next_delivery(database: &PgPool) -> anyhow::Result<Option<Claimed
                 updated_at = NOW()
             FROM candidate
             WHERE d.id = candidate.id
-            RETURNING d.id, d.claim_token, d.target_url, d.headers, d.payload, d.attempts
+            RETURNING
+                d.id,
+                d.claim_token,
+                d.webhook_id,
+                d.webhook_name,
+                d.event_type,
+                d.subscription_key,
+                d.target_url,
+                d.headers,
+                d.payload,
+                d.attempts
             "#
         ),
     )
@@ -965,6 +980,10 @@ async fn claim_next_delivery(database: &PgPool) -> anyhow::Result<Option<Claimed
         Ok(ClaimedDelivery {
             id: row.try_get("id")?,
             claim_token: row.try_get("claim_token")?,
+            webhook_id: row.try_get("webhook_id")?,
+            webhook_name: row.try_get("webhook_name")?,
+            event_type: row.try_get("event_type")?,
+            subscription_key: row.try_get("subscription_key")?,
             target_url: row.try_get("target_url")?,
             headers: parse_headers(row.try_get::<Value, _>("headers")?)?,
             payload: row.try_get("payload")?,
@@ -995,15 +1014,206 @@ enum DeliveryAttemptOutcome {
 }
 
 async fn deliver_once(client: &Client, delivery: &ClaimedDelivery) -> DeliveryAttemptOutcome {
+    let attempt_number = delivery.attempts + 1;
+    log_webhook_delivery_attempt_started(delivery, attempt_number);
+    let started_at = Instant::now();
     let mut request = client.post(&delivery.target_url).json(&delivery.payload);
     for (name, value) in &delivery.headers {
         request = request.header(name, value);
     }
 
-    match request.send().await {
-        Ok(response) => classify_http_response(delivery.attempts + 1, response.status().as_u16()),
-        Err(err) => classify_transport_error(delivery.attempts + 1, err),
+    let outcome = match request.send().await {
+        Ok(response) => classify_http_response(attempt_number, response.status().as_u16()),
+        Err(err) => classify_transport_error(attempt_number, err),
+    };
+    log_webhook_delivery_outcome(delivery, &outcome, started_at.elapsed());
+    outcome
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WebhookTargetLogSummary {
+    target_url: String,
+    host: Option<String>,
+    port: Option<i64>,
+}
+
+impl WebhookTargetLogSummary {
+    fn from_target_url(target_url: &str) -> Self {
+        let Ok(parsed) = Url::parse(target_url) else {
+            return Self {
+                target_url: "<invalid url>".to_string(),
+                host: None,
+                port: None,
+            };
+        };
+
+        Self {
+            target_url: sanitize_url_for_logging(&parsed),
+            host: parsed.host_str().map(str::to_string),
+            port: parsed.port_or_known_default().map(i64::from),
+        }
     }
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct WebhookPayloadLogSummary {
+    event_id: Option<String>,
+    repository_id: Option<String>,
+    repository_name: Option<String>,
+    repository_storage_name: Option<String>,
+    repository_format: Option<String>,
+    package_key: Option<String>,
+    package_name: Option<String>,
+    package_version: Option<String>,
+    package_canonical_path: Option<String>,
+}
+
+impl WebhookPayloadLogSummary {
+    fn from_payload(payload: &Value) -> Self {
+        Self {
+            event_id: log_scalar(payload.get("event_id")),
+            repository_id: log_scalar(payload.pointer("/data/repository/id")),
+            repository_name: log_scalar(payload.pointer("/data/repository/name")),
+            repository_storage_name: log_scalar(payload.pointer("/data/repository/storage_name")),
+            repository_format: log_scalar(payload.pointer("/data/repository/format")),
+            package_key: log_scalar(payload.pointer("/data/package/key")),
+            package_name: log_scalar(payload.pointer("/data/package/name")),
+            package_version: log_scalar(payload.pointer("/data/package/version")),
+            package_canonical_path: log_scalar(payload.pointer("/data/package/canonical_path")),
+        }
+    }
+}
+
+fn log_scalar(value: Option<&Value>) -> Option<String> {
+    match value {
+        Some(Value::String(value)) => Some(value.clone()),
+        Some(Value::Number(value)) => Some(value.to_string()),
+        Some(Value::Bool(value)) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn webhook_delivery_header_names_for_logging(headers: &BTreeMap<String, String>) -> Vec<String> {
+    headers.keys().cloned().collect()
+}
+
+fn log_webhook_delivery_attempt_started(delivery: &ClaimedDelivery, attempt_number: i32) {
+    let target = WebhookTargetLogSummary::from_target_url(&delivery.target_url);
+    let payload = WebhookPayloadLogSummary::from_payload(&delivery.payload);
+    let header_names = webhook_delivery_header_names_for_logging(&delivery.headers);
+    let webhook_id = delivery.webhook_id.map(|value| value.to_string());
+
+    info!(
+        target: WEBHOOK_DELIVERY_LOG_TARGET,
+        delivery_id = delivery.id,
+        webhook_id = webhook_id.as_deref(),
+        webhook_name = %delivery.webhook_name,
+        event_type = %delivery.event_type,
+        subscription_key = %delivery.subscription_key,
+        attempt_number = attempt_number,
+        target_url = %target.target_url,
+        server.address = target.host.as_deref(),
+        server.port = target.port,
+        header_names = ?header_names,
+        payload.event_id = payload.event_id.as_deref(),
+        payload.repository_id = payload.repository_id.as_deref(),
+        payload.repository_name = payload.repository_name.as_deref(),
+        payload.repository_storage_name = payload.repository_storage_name.as_deref(),
+        payload.repository_format = payload.repository_format.as_deref(),
+        payload.package_key = payload.package_key.as_deref(),
+        payload.package_name = payload.package_name.as_deref(),
+        payload.package_version = payload.package_version.as_deref(),
+        payload.package_canonical_path = payload.package_canonical_path.as_deref(),
+        "Webhook delivery attempt started"
+    );
+}
+
+fn log_webhook_delivery_outcome(
+    delivery: &ClaimedDelivery,
+    outcome: &DeliveryAttemptOutcome,
+    duration: Duration,
+) {
+    match outcome {
+        DeliveryAttemptOutcome::Delivered { http_status } => {
+            log_webhook_delivery_success(delivery, *http_status, duration);
+        }
+        DeliveryAttemptOutcome::Retryable {
+            http_status,
+            error,
+            next_attempt_at,
+        } => {
+            log_webhook_delivery_retry(delivery, *http_status, error, *next_attempt_at, duration);
+        }
+        DeliveryAttemptOutcome::Failed { http_status, error } => {
+            log_webhook_delivery_failure(delivery, *http_status, error, duration);
+        }
+    }
+}
+
+fn log_webhook_delivery_success(
+    delivery: &ClaimedDelivery,
+    http_status: Option<i32>,
+    duration: Duration,
+) {
+    let webhook_id = delivery.webhook_id.map(|value| value.to_string());
+    info!(
+        target: WEBHOOK_DELIVERY_LOG_TARGET,
+        delivery_id = delivery.id,
+        webhook_id = webhook_id.as_deref(),
+        webhook_name = %delivery.webhook_name,
+        event_type = %delivery.event_type,
+        subscription_key = %delivery.subscription_key,
+        attempt_number = delivery.attempts + 1,
+        http.response.status_code = http_status,
+        duration_ms = duration.as_millis() as i64,
+        "Webhook delivery succeeded"
+    );
+}
+
+fn log_webhook_delivery_retry(
+    delivery: &ClaimedDelivery,
+    http_status: Option<i32>,
+    error: &str,
+    next_attempt_at: DateTime<Utc>,
+    duration: Duration,
+) {
+    let webhook_id = delivery.webhook_id.map(|value| value.to_string());
+    warn!(
+        target: WEBHOOK_DELIVERY_LOG_TARGET,
+        delivery_id = delivery.id,
+        webhook_id = webhook_id.as_deref(),
+        webhook_name = %delivery.webhook_name,
+        event_type = %delivery.event_type,
+        subscription_key = %delivery.subscription_key,
+        attempt_number = delivery.attempts + 1,
+        http.response.status_code = http_status,
+        error = %error,
+        next_attempt_at = %next_attempt_at,
+        duration_ms = duration.as_millis() as i64,
+        "Webhook delivery failed; retry scheduled"
+    );
+}
+
+fn log_webhook_delivery_failure(
+    delivery: &ClaimedDelivery,
+    http_status: Option<i32>,
+    error: &str,
+    duration: Duration,
+) {
+    let webhook_id = delivery.webhook_id.map(|value| value.to_string());
+    warn!(
+        target: WEBHOOK_DELIVERY_LOG_TARGET,
+        delivery_id = delivery.id,
+        webhook_id = webhook_id.as_deref(),
+        webhook_name = %delivery.webhook_name,
+        event_type = %delivery.event_type,
+        subscription_key = %delivery.subscription_key,
+        attempt_number = delivery.attempts + 1,
+        http.response.status_code = http_status,
+        error = %error,
+        duration_ms = duration.as_millis() as i64,
+        "Webhook delivery failed permanently"
+    );
 }
 
 fn classify_http_response(attempt_number: i32, status: u16) -> DeliveryAttemptOutcome {
