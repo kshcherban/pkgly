@@ -45,6 +45,7 @@ Finally Restart Pkgly
 
 - [Configuring S3 Storage](./s3.md) — steps for attaching Pkgly to an S3 or S3-compatible bucket.
 - [Package Webhooks](./webhooks.md) — configure outbound publish/delete notifications and delivery retries.
+- [Package Retention](./retention.md) — configure per-repository cleanup for old package files.
 
 ## Enabling SSO Login
 Pkgly can delegate authentication to an upstream SSO provider (Cloudflare Access, Okta, Auth0, etc.) that issues signed JWT/ID tokens. Configure the security section in `cfg/pkgly.toml` to enable the feature:

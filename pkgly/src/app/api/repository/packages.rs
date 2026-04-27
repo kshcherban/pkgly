@@ -4196,45 +4196,12 @@ pub struct PackageDeleteResponse {
     pub rejected: Vec<String>,
 }
 
-#[utoipa::path(
-    delete,
-    path = "/{repository_id}/packages",
-    request_body = PackageDeleteRequest,
-    params(
-        ("repository_id" = Uuid, Path, description = "The Repository ID"),
-    ),
-    responses(
-        (status = 200, description = "Deleted cached packages", body = PackageDeleteResponse),
-        (status = 400, description = "Invalid request"),
-        (status = 403, description = "Missing permission"),
-        (status = 404, description = "Repository not found"),
-    )
-)]
-#[instrument(
-    skip(site, auth, request),
-    fields(repository_id = %repository_id, user = %auth.id, path_count = request.paths.len())
-)]
-pub async fn delete_cached_packages(
-    State(site): State<Pkgly>,
-    auth: Authentication,
-    Path(repository_id): Path<Uuid>,
-    Json(request): Json<PackageDeleteRequest>,
-) -> Result<Response, InternalError> {
-    if request.paths.is_empty() {
-        return Ok(ResponseBuilder::bad_request().body("paths cannot be empty".to_string()));
-    }
-
-    let Some(repository) = site.get_repository(repository_id) else {
-        return Ok(RepositoryNotFound::Uuid(repository_id).into_response());
-    };
-
-    if !auth
-        .has_action(RepositoryActions::Edit, repository.id(), site.as_ref())
-        .await?
-    {
-        return Ok(MissingPermission::EditRepository(repository.id()).into_response());
-    }
-
+pub async fn delete_cached_package_paths(
+    site: &Pkgly,
+    repository: DynRepository,
+    paths: &[String],
+    actor: PackageWebhookActor,
+) -> Result<PackageDeleteResponse, InternalError> {
     let strategy = package_strategy(&repository);
     let helm_repository = if let PackageStrategy::Helm = strategy {
         match repository.clone() {
@@ -4279,13 +4246,13 @@ pub async fn delete_cached_packages(
     let mut catalog_targets: HashSet<String> = HashSet::new();
     let mut delete_webhook_snapshots: std::collections::HashMap<String, PackageWebhookSnapshot> =
         std::collections::HashMap::new();
-    for path in &request.paths {
+    for path in paths {
         if let Some(snapshot) = webhooks::build_package_event_snapshot(
-            &site,
+            site,
             repository.id(),
             WebhookEventType::PackageDeleted,
             path.clone(),
-            PackageWebhookActor::from_user(&auth),
+            actor.clone(),
             true,
         )
         .await
@@ -4303,17 +4270,13 @@ pub async fn delete_cached_packages(
         PackageStrategy::DockerHosted | PackageStrategy::DockerProxy
     ) {
         let docker_indexer = docker_proxy.as_ref().map(|proxy| proxy.indexer().clone());
-        let batch = collect_docker_deletions_batch(
-            &storage,
-            repository.id(),
-            &request.paths,
-            docker_indexer,
-        )
-        .await
-        .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
+        let batch =
+            collect_docker_deletions_batch(&storage, repository.id(), paths, docker_indexer)
+                .await
+                .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
 
         debug!(
-            paths = request.paths.len(),
+            paths = paths.len(),
             deleted_packages = batch.deleted_packages,
             deleted_objects = batch.deleted_objects,
             missing = batch.missing.len(),
@@ -4331,24 +4294,24 @@ pub async fn delete_cached_packages(
 
         if deleted_objects > 0 {
             deleted += batch_deleted_packages;
-            for path in request.paths.iter() {
+            for path in paths.iter() {
                 deleted_paths.insert(path.clone());
             }
         } else {
-            missing.extend(request.paths.clone());
+            missing.extend(paths.iter().cloned());
         }
 
         missing.extend(batch_missing);
         rejected.extend(batch_rejected);
     } else {
-        for path in request.paths.iter() {
+        for path in paths.iter() {
             if !is_valid_cache_path(path, strategy) {
                 rejected.push(path.clone());
                 continue;
             }
             if let PackageStrategy::Helm = strategy {
                 if let Some(hosted) = helm_repository.as_ref() {
-                    match delete_helm_package(&site, hosted, path).await {
+                    match delete_helm_package(site, hosted, path).await {
                         Ok(true) => {
                             deleted += 1;
                             deleted_paths.insert(path.clone());
@@ -4452,18 +4415,66 @@ pub async fn delete_cached_packages(
         let _ = DBPackageFile::soft_delete_by_paths(&site.database, repository.id(), &paths).await;
         for path in paths {
             if let Some(snapshot) = delete_webhook_snapshots.remove(&path) {
-                if let Err(err) = webhooks::enqueue_snapshot(&site, snapshot).await {
+                if let Err(err) = webhooks::enqueue_snapshot(site, snapshot).await {
                     warn!(error = %err, path, "Failed to enqueue package delete webhook");
                 }
             }
         }
     }
 
-    let response = PackageDeleteResponse {
+    Ok(PackageDeleteResponse {
         deleted,
         missing,
         rejected,
+    })
+}
+
+#[utoipa::path(
+    delete,
+    path = "/{repository_id}/packages",
+    request_body = PackageDeleteRequest,
+    params(
+        ("repository_id" = Uuid, Path, description = "The Repository ID"),
+    ),
+    responses(
+        (status = 200, description = "Deleted cached packages", body = PackageDeleteResponse),
+        (status = 400, description = "Invalid request"),
+        (status = 403, description = "Missing permission"),
+        (status = 404, description = "Repository not found"),
+    )
+)]
+#[instrument(
+    skip(site, auth, request),
+    fields(repository_id = %repository_id, user = %auth.id, path_count = request.paths.len())
+)]
+pub async fn delete_cached_packages(
+    State(site): State<Pkgly>,
+    auth: Authentication,
+    Path(repository_id): Path<Uuid>,
+    Json(request): Json<PackageDeleteRequest>,
+) -> Result<Response, InternalError> {
+    if request.paths.is_empty() {
+        return Ok(ResponseBuilder::bad_request().body("paths cannot be empty".to_string()));
+    }
+
+    let Some(repository) = site.get_repository(repository_id) else {
+        return Ok(RepositoryNotFound::Uuid(repository_id).into_response());
     };
+
+    if !auth
+        .has_action(RepositoryActions::Edit, repository.id(), site.as_ref())
+        .await?
+    {
+        return Ok(MissingPermission::EditRepository(repository.id()).into_response());
+    }
+
+    let response = delete_cached_package_paths(
+        &site,
+        repository,
+        &request.paths,
+        PackageWebhookActor::from_user(&auth),
+    )
+    .await?;
     Ok(ResponseBuilder::ok().json(&response))
 }
 

@@ -42,6 +42,7 @@ use crate::{
         php::{PhpRepositoryConfigType, PhpRepositoryType},
         python::{PythonRepositoryConfigType, PythonRepositoryType},
         repo_tracing::RepositoryMetricsMeter,
+        retention::config::PackageRetentionConfigType,
         ruby::{RubyRepositoryConfigType, RubyRepositoryType},
     },
     utils::ip_addr::HasForwardedHeader,
@@ -909,6 +910,7 @@ pub static REPOSITORY_CONFIG_TYPES: &[&dyn RepositoryConfigType] = &[
     &DebRepositoryConfigType,
     &RubyRepositoryConfigType,
     &RepositoryAuthConfigType,
+    &PackageRetentionConfigType,
 ];
 
 pub static REPOSITORY_TYPES: &[&dyn RepositoryType] = &[

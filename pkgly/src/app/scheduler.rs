@@ -28,6 +28,22 @@ pub fn start_background_scheduler(site: Pkgly) -> JoinHandle<()> {
                     warn!(error = %err, "Background scheduler tick failed");
                 }
             }
+
+            match crate::repository::retention::scheduler::package_retention_scheduler_tick(
+                site.clone(),
+                now,
+            )
+            .await
+            {
+                Ok(summary) => {
+                    if summary.started > 0 || summary.skipped_running > 0 || summary.failed > 0 {
+                        info!(?summary, "Package retention scheduler tick completed");
+                    }
+                }
+                Err(err) => {
+                    warn!(error = %err, "Package retention scheduler tick failed");
+                }
+            }
         }
     })
 }

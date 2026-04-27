@@ -12,6 +12,7 @@ import NugetConfig from "@/components/nr/repository/types/nuget/NugetConfig.vue"
 
 import type { Component } from "vue";
 import RepositoryAuthConfig from "@/components/admin/repository/configs/RepositoryAuthConfig.vue";
+import PackageRetentionConfig from "@/components/admin/repository/configs/PackageRetentionConfig.vue";
 
 import { MavenFrontendDefinition } from "@/components/nr/repository/types/maven/maven";
 import { PythonFrontendDefinition } from "@/components/nr/repository/types/python/python";
@@ -87,6 +88,11 @@ export const configTypes: ConfigType[] = [
     name: "auth",
     title: "Repository Authentication",
     component: RepositoryAuthConfig,
+  },
+  {
+    name: "package_retention",
+    title: "Package Retention",
+    component: PackageRetentionConfig,
   },
   {
     name: "npm",

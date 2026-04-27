@@ -41,6 +41,7 @@ pub mod ruby;
 pub mod r#virtual;
 pub use auth_config::*;
 pub mod proxy_indexing;
+pub mod retention;
 pub use proxy_indexing::{DatabaseProxyIndexer, ProxyIndexing, ProxyIndexingError};
 mod repo_type;
 pub use repo_type::*;

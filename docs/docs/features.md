@@ -30,6 +30,7 @@ without guesswork.
 | SSO Support | Yes | Optional SSO proxy integration with auto-provisioned users when enabled in security settings ([docs](./sso/index.md)). |
 | Package Webhooks | Yes | Admin-managed outbound webhooks for `package.published` and `package.deleted`, backed by a durable retry queue and write-only custom headers. |
 | S3 Disk Cache | Yes | Configurable on-disk LRU cache keeps hot artifacts locally; knobs for path, byte cap, and entry cap are exposed in the Admin UI. |
+| Package Retention | Yes | Disabled-by-default per-repository cleanup for hosted and proxy repositories, using the package catalog and the same deletion path as manual package deletes ([docs](./sysAdmin/retention.md)). |
 
 Use this page as the single source of truth when deciding which repository modes to enable or when
 planning migrations from other managers (Nexus, StrongBox, Reposilite, etc.). If a capability is

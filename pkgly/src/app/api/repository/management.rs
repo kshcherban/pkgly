@@ -11,7 +11,7 @@ use nr_core::{
         repository::{DBRepository, GenericDBRepositoryConfig},
         storage::{DBStorage, StorageDBType},
     },
-    repository::Visibility,
+    repository::{Visibility, config::RepositoryConfigType},
     storage::StorageName,
     user::permissions::{HasPermissions, RepositoryActions},
 };
@@ -30,10 +30,81 @@ use crate::{
         responses::{InvalidRepositoryConfig, MissingPermission, RepositoryNotFound},
     },
     error::InternalError,
-    repository::{DynRepository, Repository},
+    repository::{
+        DynRepository, Repository,
+        retention::{config::PackageRetentionConfigType, is_virtual_repository},
+    },
     utils::{ResponseBuilder, conflict::ConflictResponse},
 };
 use nr_storage::Storage;
+
+fn repository_supports_config(repository: &DynRepository, config_key: &str) -> bool {
+    repository_supported_config_types(repository).contains(&config_key)
+}
+
+fn repository_supported_config_types(repository: &DynRepository) -> Vec<&str> {
+    let mut config_types = repository.config_types();
+    let retention_key = PackageRetentionConfigType::get_type_static();
+    if !is_virtual_repository(repository) && !config_types.contains(&retention_key) {
+        config_types.push(retention_key);
+    }
+    config_types
+}
+
+fn unsupported_config_response(repository: &DynRepository, config_key: String) -> Response {
+    InvalidRepositoryConfig::RepositoryTypeDoesntSupportConfig {
+        repository_type: repository.get_type().to_owned(),
+        config_key,
+    }
+    .into_response()
+}
+
+fn creation_request_is_virtual(repository_type: &str, configs: &HashMap<String, Value>) -> bool {
+    let repository_type = repository_type.to_lowercase();
+    if !matches!(repository_type.as_str(), "npm" | "python" | "nuget") {
+        return false;
+    }
+    configs
+        .get(repository_type.as_str())
+        .and_then(|value| value.get("type"))
+        .and_then(Value::as_str)
+        .map(|value| value.eq_ignore_ascii_case("virtual"))
+        .unwrap_or(false)
+}
+
+fn validate_create_time_package_retention_config(
+    site: &Pkgly,
+    repository_type: &str,
+    configs: &HashMap<String, Value>,
+) -> Option<Response> {
+    let retention_key = PackageRetentionConfigType::get_type_static();
+    let config = configs.get(retention_key)?;
+    if creation_request_is_virtual(repository_type, configs) {
+        return Some(
+            InvalidRepositoryConfig::RepositoryTypeDoesntSupportConfig {
+                repository_type: repository_type.to_string(),
+                config_key: retention_key.to_string(),
+            }
+            .into_response(),
+        );
+    }
+    let Some(config_type) = site.get_repository_config_type(retention_key) else {
+        return Some(ResponseBuilder::internal_server_error().body(format!(
+            "Missing repository config type registration for key {}",
+            retention_key
+        )));
+    };
+    if let Err(error) = config_type.validate_config(config.clone()) {
+        return Some(
+            InvalidRepositoryConfig::InvalidConfig {
+                config_key: retention_key.to_string(),
+                error,
+            }
+            .into_response(),
+        );
+    }
+    None
+}
 pub fn management_routes() -> Router<Pkgly> {
     Router::new()
         .route("/{repository_id}/configs", get(get_configs_for_repository))
@@ -197,6 +268,12 @@ pub async fn new_repository(
         }
     }
 
+    if let Some(response) =
+        validate_create_time_package_retention_config(&site, &repository_type, &configs)
+    {
+        return Ok(response);
+    }
+
     let repository = repository_factory
         .create_new(name, uuid, configs, loaded_storage.clone())
         .await;
@@ -249,7 +326,7 @@ pub async fn get_configs_for_repository(
         return Ok(RepositoryNotFound::Uuid(repository).into_response());
     };
 
-    let config_types = repository.config_types();
+    let config_types = repository_supported_config_types(&repository);
     debug!(configs = ?config_types, "Repository config types");
     Ok(ResponseBuilder::ok().json(&config_types))
 }
@@ -280,10 +357,16 @@ pub async fn get_config(
     Query(params): Query<GetConfigParams>,
     Path((repository, config)): Path<(Uuid, String)>,
 ) -> Result<Response, InternalError> {
-    let repository_visibility = Visibility::Private;
     let Some(config_type) = site.get_repository_config_type(&config) else {
         return Ok(InvalidRepositoryConfig::InvalidConfigType(config).into_response());
     };
+    let Some(repository_value) = site.get_repository(repository) else {
+        return Ok(RepositoryNotFound::Uuid(repository).into_response());
+    };
+    if !repository_supports_config(&repository_value, &config) {
+        return Ok(unsupported_config_response(&repository_value, config));
+    }
+    let repository_visibility = repository_value.visibility();
     let config =
         match GenericDBRepositoryConfig::get_config(repository, &config, site.as_ref()).await? {
             Some(config) => config.value.0,
@@ -557,13 +640,8 @@ pub async fn update_config(
         return Ok(ResponseBuilder::internal_server_error()
             .body("Repository Exists. But it is not loaded. Illegal State"));
     };
-    if !repository.config_types().contains(&config_key.as_str()) {
-        let repository = repository.get_type();
-        return Ok(InvalidRepositoryConfig::RepositoryTypeDoesntSupportConfig {
-            repository_type: repository.to_owned(),
-            config_key,
-        }
-        .into_response());
+    if !repository_supports_config(&repository, &config_key) {
+        return Ok(unsupported_config_response(&repository, config_key));
     }
     match GenericDBRepositoryConfig::get_config(repository.id(), &config_key, site.as_ref()).await?
     {

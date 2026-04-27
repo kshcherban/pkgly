@@ -82,6 +82,7 @@ function sysAdminBar() {
         { text: "Quickstart", link: "/quickstart" },
         { text: "Maintenance", link: "/sysAdmin/maintenance" },
         { text: "Configuring S3 Storage", link: "/sysAdmin/s3" },
+        { text: "Retention Policies", link: "/sysAdmin/retention" },
       ],
     },
   ];

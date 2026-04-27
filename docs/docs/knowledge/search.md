@@ -101,6 +101,9 @@ When deleting packages:
 2. Storage objects are removed next; failures queue retries (proxy caches) or surface as API errors (hosted).
 3. A background reconciliation task (planned) will watch for orphaned rows.
 
+### Retention
+Per-repository package retention depends on `package_files` for candidate selection. It groups by `package_files.package`, ranks newest files by `modified_at DESC, id DESC`, and sends selected paths through the same internal deletion path as manual package deletes.
+
 ## 5. Metrics & Benchmarks
 
 Exported via OpenTelemetry (`pkgly/src/search/query.rs`):

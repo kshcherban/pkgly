@@ -244,6 +244,52 @@ impl DBPackageFile {
 
         Ok((total as usize, rows))
     }
+
+    pub async fn retention_candidates(
+        database: &PgPool,
+        repository_id: Uuid,
+        cutoff: DateTime<FixedOffset>,
+        keep_latest_per_package: i64,
+    ) -> Result<Vec<Self>, sqlx::Error> {
+        sqlx::query_as(
+            r#"
+            SELECT
+                id,
+                repository_id,
+                project_id,
+                project_version_id,
+                package,
+                name,
+                path,
+                size_bytes,
+                content_digest,
+                upstream_digest,
+                modified_at,
+                created_at,
+                updated_at,
+                deleted_at
+            FROM (
+                SELECT
+                    package_files.*,
+                    ROW_NUMBER() OVER (
+                        PARTITION BY package
+                        ORDER BY modified_at DESC, id DESC
+                    ) AS package_rank
+                FROM package_files
+                WHERE repository_id = $1
+                  AND deleted_at IS NULL
+            ) ranked
+            WHERE modified_at < $2
+              AND package_rank > $3
+            ORDER BY package ASC, modified_at ASC, id ASC
+            "#,
+        )
+        .bind(repository_id)
+        .bind(cutoff)
+        .bind(keep_latest_per_package.max(0))
+        .fetch_all(database)
+        .await
+    }
 }
 
 fn normalize_search_term(value: Option<&str>) -> Option<String> {
