@@ -1,3 +1,5 @@
+// ABOUTME: Tests the repository administration view tab layout and config wiring.
+// ABOUTME: Uses component stubs to verify repository metadata and dynamic config props.
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 import { defineComponent } from "vue";
@@ -197,6 +199,27 @@ function mockRubyHttpSequence() {
   });
 }
 
+function mockRetentionHttpSequence() {
+  http.get.mockImplementation((url: string) => {
+    if (url === "/api/repository/repo-123") {
+      return Promise.resolve({ data: repositoryResponse });
+    }
+    if (url === "/api/repository/repo-123/configs") {
+      return Promise.resolve({ data: ["package_retention"] });
+    }
+    if (url === "/api/repository/repo-123/config/docker") {
+      return Promise.resolve({ data: { type: "Proxy", config: { upstream_url: "https://registry-1.docker.io" } } });
+    }
+    if (url === "/api/repository/config/package_retention/description") {
+      return Promise.resolve({ data: { name: "Package Retention", description: "Retention settings" } });
+    }
+    if (url === "/api/storage/storage-123") {
+      return Promise.resolve({ data: s3StorageResponse });
+    }
+    return Promise.reject(new Error(`Unhandled URL ${url}`));
+  });
+}
+
 describe("ViewRepositoryView", () => {
   let pinia: Pinia;
 
@@ -334,5 +357,36 @@ describe("ViewRepositoryView", () => {
     const packagesTab = tabs.find((tab) => tab.attributes("data-value") === "packages");
     expect(packagesTab, "Packages tab should be visible for Ruby repositories").toBeDefined();
     expect(wrapper.find("[data-testid='packages-tab']").exists()).toBe(true);
+  });
+
+  it("renders package retention with the repository id", async () => {
+    mockRetentionHttpSequence();
+    const ViewRepositoryView = (await import("@/views/admin/repository/ViewRepositoryView.vue")).default;
+
+    const wrapper = mount(ViewRepositoryView, {
+      global: {
+        plugins: [pinia],
+        stubs: {
+          BasicRepositoryInfo: BasicRepositoryInfoStub,
+          RepositoryPackagesTab: RepositoryPackagesTabStub,
+          FallBackEditor: DynamicConfigStub,
+          PackageRetentionConfig: DynamicConfigStub,
+          "v-container": VContainerStub,
+          "v-card": VCardStub,
+          "v-tabs": VTabsStub,
+          "v-tab": VTabStub,
+          "v-divider": VDividerStub,
+          "v-window": VWindowStub,
+          "v-window-item": VWindowItemStub,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const tabs = wrapper.findAll(".v-tab");
+    const retentionTab = tabs.find((tab) => tab.attributes("data-value") === "package_retention");
+    expect(retentionTab, "Package Retention tab should be visible").toBeDefined();
+    expect(wrapper.find("[data-testid='config-stub']").text()).toContain("config for repo-123");
   });
 });
