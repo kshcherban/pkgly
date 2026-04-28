@@ -42,6 +42,7 @@ rand = "0.9"
 nr-core = { path = "crates/core" }
 nr-macros = { path = "crates/macros" }
 nr-storage = { path = "crates/storage" }
+nr-api = { path = "crates/nr-api" }
 # Rust Utilities
 futures = "0.3"
 derive_more = { version = "2.0", features = [
@@ -117,7 +118,7 @@ features = [
 ]
 [workspace.dependencies.reqwest]
 version = "0.12"
-features = ["stream", "http2", "json", "rustls-tls"]
+features = ["stream", "http2", "json", "multipart", "rustls-tls"]
 default-features = false
 
 [workspace.lints.rust]

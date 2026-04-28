@@ -24,6 +24,11 @@ export default defineConfig({
         activeMatch: "^/repositoryTypes/",
       },
       {
+        text: "CLI",
+        link: "/cli/",
+        activeMatch: "^/cli/",
+      },
+      {
         text: "SSO",
         link: "/sso/",
         activeMatch: "^/sso/",
@@ -41,6 +46,7 @@ export default defineConfig({
       "/sysAdmin/": sysAdminBar(),
       "/knowledge/": knowledgeBaseBar(),
       "/repositoryTypes/": repositoryTypesBar(),
+      "/cli/": cliBar(),
     },
   },
 });
@@ -53,9 +59,19 @@ function generalInfo() {
         { text: "What is Pkgly?", link: "/" },
         { text: "Quickstart", link: "/quickstart" },
         { text: "Features", link: "/features" },
+        { text: "CLI", link: "/cli/" },
         { text: "Contributing", link: "/contributing" },
         { text: "Single Sign-On", link: "/sso/" },
       ],
+    },
+  ];
+}
+
+function cliBar() {
+  return [
+    {
+      text: "Pkgly CLI",
+      items: [{ text: "Overview", link: "/cli/" }],
     },
   ];
 }

@@ -17,6 +17,7 @@ tracing.workspace = true
 reqwest.workspace = true
 futures.workspace = true
 bytes.workspace = true
+url.workspace = true
 [dev-dependencies]
 tokio.workspace = true
 anyhow = "1"
