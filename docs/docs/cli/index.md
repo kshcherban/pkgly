@@ -69,10 +69,10 @@ pkglyctl auth set-token "$PKGLY_TOKEN"
 Create and store a token through the server login flow:
 
 ```bash
-pkglyctl --base-url http://localhost:8888 auth login --username admin --password "$PKGLY_PASSWORD"
+pkglyctl --base-url http://localhost:8888 auth login --username admin
 ```
 
-`auth login` uses the password only to create a short-lived session and request an API token. The password is not stored.
+`auth login` prompts for the password without echoing it, then uses the password only to create a short-lived session and request an API token. The password is not stored. For scripts, pass `--password "$PKGLY_PASSWORD"`.
 
 Check the current identity:
 
@@ -133,16 +133,20 @@ pkglyctl repo delete test-storage/maven-releases --yes
 ```bash
 pkglyctl storage list
 pkglyctl storage get 00000000-0000-0000-0000-000000000001
-pkglyctl storage create-local test-storage /var/lib/pkgly/storage
+pkglyctl storage create --type local test-storage /var/lib/pkgly/storage
 ```
+
+Only `--type local` is currently supported for storage creation.
 
 ## Packages
 
-List and search package catalog entries:
+List package names and versions, search package catalog entries, and describe a package:
 
 ```bash
 pkglyctl package list test-storage/maven-releases
+pkglyctl package list --no-header test-storage/maven-releases
 pkglyctl package search "app"
+pkglyctl package describe test-storage/maven-releases app 1.0.0
 ```
 
 Download an artifact through the repository route:

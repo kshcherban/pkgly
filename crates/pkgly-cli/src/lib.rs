@@ -1,3 +1,5 @@
+// ABOUTME: Provides the pkglyctl command runner and command-specific API calls.
+// ABOUTME: Resolves CLI configuration, authentication, and repository operations.
 pub mod cli;
 pub mod config;
 pub mod native;
@@ -5,14 +7,15 @@ pub mod output;
 pub mod repo_ref;
 
 use std::io::{IsTerminal, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 
 use bytes::Bytes;
 use clap::Parser;
 use config::{ConfigFile, ConfigOverrides, EnvConfig, ResolvedConfig};
+use inquire::Password;
 use nr_api::{
     Client, ClientConfig, CreateRepositoryRequest, CreateStorageRequest, CreateTokenRequest,
-    PackageListQuery,
+    PackageFileEntry, PackageListQuery, PackageListResponse,
 };
 use output::{OutputFormat, render_json_pretty};
 use repo_ref::RepositoryRef;
@@ -39,6 +42,8 @@ pub enum CliError {
     Json(#[from] serde_json::Error),
     #[error(transparent)]
     Uuid(#[from] uuid::Error),
+    #[error(transparent)]
+    Inquire(#[from] inquire::InquireError),
     #[error("{0}")]
     Message(String),
 }
@@ -52,6 +57,19 @@ pub async fn run_from_args() -> Result<i32, CliError> {
 }
 
 pub async fn run<W: Write>(cli: Cli, env: EnvConfig, writer: &mut W) -> Result<i32, CliError> {
+    run_with_password_prompt(cli, env, writer, prompt_password).await
+}
+
+pub async fn run_with_password_prompt<W, P>(
+    cli: Cli,
+    env: EnvConfig,
+    writer: &mut W,
+    mut password_prompt: P,
+) -> Result<i32, CliError>
+where
+    W: Write,
+    P: FnMut() -> Result<String, CliError>,
+{
     let overrides = ConfigOverrides::from_global(&cli.global);
     let config_path = config::config_path(&overrides, &env);
     let mut config_file = ConfigFile::load_or_default(&config_path)?;
@@ -61,12 +79,15 @@ pub async fn run<W: Write>(cli: Cli, env: EnvConfig, writer: &mut W) -> Result<i
         Commands::Auth(command) => {
             handle_auth(
                 command,
-                &mut config_file,
-                &config_path,
-                &overrides,
-                &env,
-                output,
-                writer,
+                AuthContext {
+                    config_file: &mut config_file,
+                    config_path: &config_path,
+                    overrides: &overrides,
+                    env: &env,
+                    output,
+                    writer,
+                    password_prompt: &mut password_prompt,
+                },
             )
             .await?;
         }
@@ -89,33 +110,41 @@ pub async fn run<W: Write>(cli: Cli, env: EnvConfig, writer: &mut W) -> Result<i
     Ok(0)
 }
 
-async fn handle_auth<W: Write>(
-    command: AuthCommands,
-    config_file: &mut ConfigFile,
-    config_path: &std::path::Path,
-    overrides: &ConfigOverrides,
-    env: &EnvConfig,
+struct AuthContext<'a, W, P> {
+    config_file: &'a mut ConfigFile,
+    config_path: &'a Path,
+    overrides: &'a ConfigOverrides,
+    env: &'a EnvConfig,
     output: OutputFormat,
-    writer: &mut W,
-) -> Result<(), CliError> {
+    writer: &'a mut W,
+    password_prompt: &'a mut P,
+}
+
+async fn handle_auth<W: Write, P>(
+    command: AuthCommands,
+    context: AuthContext<'_, W, P>,
+) -> Result<(), CliError>
+where
+    P: FnMut() -> Result<String, CliError>,
+{
     match command {
         AuthCommands::Login {
             username,
             password,
             token_name,
         } => {
-            let partial = ResolvedConfig::resolve(config_file, overrides, env)?;
+            let partial =
+                ResolvedConfig::resolve(context.config_file, context.overrides, context.env)?;
             let base_url = partial.require_base_url()?;
             let client = Client::new(ClientConfig {
-                base_url,
+                base_url: base_url.clone(),
                 token: None,
                 user_agent: Some("pkglyctl".to_string()),
             })?;
-            let password = password.ok_or_else(|| {
-                CliError::Message(
-                    "auth login requires --password for non-interactive v1".to_string(),
-                )
-            })?;
+            let password = match password {
+                Some(value) => value,
+                None => (context.password_prompt)()?,
+            };
             let session = client.login(&username, &password).await?;
             let token = client
                 .create_token_with_session(
@@ -137,46 +166,65 @@ async fn handle_auth<W: Write>(
                 .profile
                 .clone()
                 .unwrap_or_else(|| "local".to_string());
-            config_file.upsert_profile_token(&profile_name, token.token);
-            config_file.active_profile = Some(profile_name);
-            config_file.save(config_path)?;
-            writeln!(writer, "login complete")?;
+            let profile = context
+                .config_file
+                .profiles
+                .entry(profile_name.clone())
+                .or_default();
+            profile.base_url = Some(base_url);
+            profile.token = Some(token.token);
+            context.config_file.active_profile = Some(profile_name);
+            context.config_file.save(context.config_path)?;
+            writeln!(context.writer, "login complete")?;
         }
         AuthCommands::SetToken { token, profile } => {
             let profile_name = profile
-                .or_else(|| config_file.active_profile.clone())
+                .or_else(|| context.config_file.active_profile.clone())
                 .unwrap_or_else(|| "local".to_string());
-            config_file.upsert_profile_token(&profile_name, token);
-            if config_file.active_profile.is_none() {
-                config_file.active_profile = Some(profile_name);
+            context
+                .config_file
+                .upsert_profile_token(&profile_name, token);
+            if context.config_file.active_profile.is_none() {
+                context.config_file.active_profile = Some(profile_name);
             }
-            config_file.save(config_path)?;
-            writeln!(writer, "token saved")?;
+            context.config_file.save(context.config_path)?;
+            writeln!(context.writer, "token saved")?;
         }
         AuthCommands::Whoami => {
             let resolved =
-                ResolvedConfig::resolve(config_file, overrides, env)?.require_complete()?;
+                ResolvedConfig::resolve(context.config_file, context.overrides, context.env)?
+                    .require_complete()?;
             let client = client_from_resolved(&resolved)?;
             let me = client.whoami().await?;
             write!(
-                writer,
+                context.writer,
                 "{}",
-                output.render_value(&serde_json::to_value(me)?)?
+                context.output.render_value(&serde_json::to_value(me)?)?
             )?;
         }
         AuthCommands::Logout => {
-            let profile = ResolvedConfig::resolve(config_file, overrides, env)?
-                .profile
-                .or_else(|| config_file.active_profile.clone())
-                .ok_or_else(|| CliError::Message("no active profile".to_string()))?;
-            if let Some(entry) = config_file.profiles.get_mut(&profile) {
+            let profile =
+                ResolvedConfig::resolve(context.config_file, context.overrides, context.env)?
+                    .profile
+                    .or_else(|| context.config_file.active_profile.clone())
+                    .ok_or_else(|| CliError::Message("no active profile".to_string()))?;
+            if let Some(entry) = context.config_file.profiles.get_mut(&profile) {
                 entry.token = None;
             }
-            config_file.save(config_path)?;
-            writeln!(writer, "token removed")?;
+            context.config_file.save(context.config_path)?;
+            writeln!(context.writer, "token removed")?;
         }
     }
     Ok(())
+}
+
+fn prompt_password() -> Result<String, CliError> {
+    if !std::io::stdin().is_terminal() {
+        return Err(CliError::Message(
+            "auth login requires --password when stdin is not interactive".to_string(),
+        ));
+    }
+    Ok(Password::new("Password").without_confirmation().prompt()?)
 }
 
 fn handle_profile<W: Write>(
@@ -274,10 +322,19 @@ async fn handle_storage<W: Write>(
                 output.render_value(&serde_json::to_value(storage)?)?
             )?;
         }
-        StorageCommands::CreateLocal { name, path } => {
+        StorageCommands::Create {
+            storage_type,
+            name,
+            path,
+        } => {
+            if storage_type != "local" {
+                return Err(CliError::Message(
+                    "only local storage is supported at the moment".to_string(),
+                ));
+            }
             let storage = client
                 .create_storage(
-                    "local",
+                    &storage_type,
                     &CreateStorageRequest {
                         name,
                         config: json!({"type": "Local", "settings": {"path": path}}),
@@ -411,26 +468,33 @@ async fn handle_package<W: Write>(
     match command {
         PackageCommands::List {
             repository,
-            page,
-            per_page,
             query,
+            no_header,
+        } => {
+            let id = resolve_repository_ref(client, &repository).await?;
+            let packages = list_all_package_entries(client, id, query).await?;
+            let rows = package_summary_rows(&packages);
+            let rendered = if no_header && output == OutputFormat::Table {
+                render_rows_without_header(&rows)
+            } else {
+                output.render_rows(&["Package", "Version", "Blob", "Size", "Modified"], &rows)
+            };
+            write!(writer, "{rendered}")?;
+        }
+        PackageCommands::Describe {
+            repository,
+            package,
+            version,
         } => {
             let id = resolve_repository_ref(client, &repository).await?;
             let packages = client
-                .list_packages(
-                    id,
-                    &PackageListQuery {
-                        page,
-                        per_page,
-                        q: query,
-                        ..PackageListQuery::default()
-                    },
-                )
+                .list_packages(id, &package_list_query(Some(package.clone())))
                 .await?;
+            let selected = select_package_entry(&packages.items, &package, version.as_deref())?;
             write!(
                 writer,
                 "{}",
-                output.render_value(&serde_json::to_value(packages)?)?
+                output.render_value(&package_entry_display_value(&selected)?)?
             )?;
         }
         PackageCommands::Search { query, limit } => {
@@ -488,6 +552,115 @@ async fn handle_package<W: Write>(
         }
     }
     Ok(())
+}
+
+fn package_list_query(query: Option<String>) -> PackageListQuery {
+    package_page_query(1, query)
+}
+
+fn package_page_query(page: usize, query: Option<String>) -> PackageListQuery {
+    PackageListQuery {
+        page,
+        per_page: 1000,
+        q: query,
+        ..PackageListQuery::default()
+    }
+}
+
+async fn list_all_package_entries(
+    client: &Client,
+    repository_id: Uuid,
+    query: Option<String>,
+) -> Result<Vec<PackageFileEntry>, CliError> {
+    let mut page = 1;
+    let mut items = Vec::new();
+
+    loop {
+        let response = client
+            .list_packages(repository_id, &package_page_query(page, query.clone()))
+            .await?;
+        let done = package_listing_is_complete(&response, items.len());
+        let page_was_empty = response.items.is_empty();
+        items.extend(response.items);
+        if done || page_was_empty {
+            break;
+        }
+        page += 1;
+    }
+
+    Ok(items)
+}
+
+fn package_listing_is_complete(response: &PackageListResponse, previous_count: usize) -> bool {
+    previous_count + response.items.len() >= response.total_packages
+}
+
+fn package_summary_rows(items: &[PackageFileEntry]) -> Vec<Vec<String>> {
+    let mut rows = Vec::new();
+    for item in items {
+        let row = vec![
+            item.package.clone(),
+            item.name.clone(),
+            item.blob_digest.clone().unwrap_or_default(),
+            format_bytes(item.size),
+            item.modified.to_rfc3339(),
+        ];
+        if !rows.contains(&row) {
+            rows.push(row);
+        }
+    }
+    rows
+}
+
+fn render_rows_without_header(rows: &[Vec<String>]) -> String {
+    let mut output = String::new();
+    for row in rows {
+        output.push_str(&row.join("  "));
+        output.push('\n');
+    }
+    output
+}
+
+fn package_entry_display_value(entry: &PackageFileEntry) -> Result<Value, serde_json::Error> {
+    let mut value = serde_json::to_value(entry)?;
+    if let Value::Object(object) = &mut value {
+        object.insert("size".to_string(), Value::String(format_bytes(entry.size)));
+    }
+    Ok(value)
+}
+
+fn format_bytes(bytes: u64) -> String {
+    const UNITS: [&str; 6] = ["B", "KiB", "MiB", "GiB", "TiB", "PiB"];
+    if bytes < 1024 {
+        return format!("{bytes} B");
+    }
+
+    let mut size = bytes as f64;
+    let mut unit = 0;
+    while size >= 1024.0 && unit + 1 < UNITS.len() {
+        size /= 1024.0;
+        unit += 1;
+    }
+    format!("{size:.1} {}", UNITS[unit])
+}
+
+fn select_package_entry(
+    items: &[PackageFileEntry],
+    package: &str,
+    version: Option<&str>,
+) -> Result<PackageFileEntry, CliError> {
+    items
+        .iter()
+        .find(|item| {
+            item.package == package && version.map(|value| item.name == value).unwrap_or(true)
+        })
+        .cloned()
+        .ok_or_else(|| {
+            let target = version
+                .map(|value| format!("{package} {value}"))
+                .unwrap_or_else(|| package.to_string());
+            CliError::Message(format!("package `{target}` not found"))
+        })
 }
 
 async fn handle_upload(command: PackageUploadCommands, client: &Client) -> Result<(), CliError> {

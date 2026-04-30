@@ -1,0 +1,214 @@
+name: Publish release
+
+on:
+  push:
+    tags:
+      - v*
+  workflow_run:
+    workflows:
+      - Publish Docker image
+    types:
+      - completed
+    branches:
+      - main
+
+concurrency:
+  group: release-${{ github.event.workflow_run.head_sha || github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  actions: read
+  contents: write
+  packages: write
+
+env:
+  IMAGE_NAME: ghcr.io/kshcherban/pkgly
+
+jobs:
+  release:
+    name: Publish GitHub release
+    runs-on: ubuntu-24.04
+    if: github.event_name == 'push' || github.event.workflow_run.conclusion == 'success'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Resolve release context
+        id: release-context
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          WORKFLOW_RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          git fetch --tags origin
+          git fetch origin main
+
+          if [ "$EVENT_NAME" = "workflow_run" ]; then
+            commit_sha="$WORKFLOW_RUN_HEAD_SHA"
+            build_run_id="$WORKFLOW_RUN_ID"
+            release_tags="$(git tag --points-at "$commit_sha" --list 'v*' | sort -V | tr '\n' ' ')"
+            if [ -z "$release_tags" ]; then
+              echo "No v* tags point at ${commit_sha}; nothing to release"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            commit_sha="$(git rev-list -n 1 "$GITHUB_REF_NAME")"
+            release_tags="$GITHUB_REF_NAME"
+            runs="$(gh run list \
+              --workflow docker-image.yml \
+              --branch main \
+              --commit "$commit_sha" \
+              --event push \
+              --status success \
+              --json databaseId,headSha,conclusion,event,status,createdAt \
+              --limit 20)"
+            build_run_id="$(echo "$runs" | jq -r --arg sha "$commit_sha" '[.[] | select(.headSha == $sha and .conclusion == "success" and .event == "push" and .status == "completed")] | sort_by(.createdAt) | reverse | .[0].databaseId // empty')"
+            if [ -z "$build_run_id" ]; then
+              echo "No completed successful docker-image.yml run found for ${commit_sha}; workflow_run will publish after the build finishes"
+              echo "should_release=false" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+
+          if ! git merge-base --is-ancestor "$commit_sha" origin/main; then
+            echo "Commit ${commit_sha} is not reachable from origin/main" >&2
+            exit 1
+          fi
+
+          echo "should_release=true" >> "$GITHUB_OUTPUT"
+          echo "commit_sha=$commit_sha" >> "$GITHUB_OUTPUT"
+          echo "build_run_id=$build_run_id" >> "$GITHUB_OUTPUT"
+          echo "release_tags=$release_tags" >> "$GITHUB_OUTPUT"
+
+      - name: Download pkgly linux amd64
+        if: steps.release-context.outputs.should_release == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: pkgly-linux-amd64-${{ steps.release-context.outputs.commit_sha }}
+          path: artifacts
+          run-id: ${{ steps.release-context.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pkgly linux arm64
+        if: steps.release-context.outputs.should_release == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: pkgly-linux-arm64-${{ steps.release-context.outputs.commit_sha }}
+          path: artifacts
+          run-id: ${{ steps.release-context.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pkglyctl linux amd64
+        if: steps.release-context.outputs.should_release == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: pkglyctl-linux-amd64-${{ steps.release-context.outputs.commit_sha }}
+          path: artifacts
+          run-id: ${{ steps.release-context.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pkglyctl linux arm64
+        if: steps.release-context.outputs.should_release == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: pkglyctl-linux-arm64-${{ steps.release-context.outputs.commit_sha }}
+          path: artifacts
+          run-id: ${{ steps.release-context.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download pkglyctl macos arm64
+        if: steps.release-context.outputs.should_release == 'true'
+        uses: actions/download-artifact@v8
+        with:
+          name: pkglyctl-macos-arm64-${{ steps.release-context.outputs.commit_sha }}
+          path: artifacts
+          run-id: ${{ steps.release-context.outputs.build_run_id }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare release assets
+        if: steps.release-context.outputs.should_release == 'true'
+        env:
+          COMMIT_SHA: ${{ steps.release-context.outputs.commit_sha }}
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          for asset in \
+            pkgly-linux-amd64 \
+            pkgly-linux-arm64 \
+            pkglyctl-linux-amd64 \
+            pkglyctl-linux-arm64 \
+            pkglyctl-macos-arm64
+          do
+            cp "artifacts/${asset}-${COMMIT_SHA}" "release-assets/${asset}"
+            chmod 755 "release-assets/${asset}"
+          done
+          cd release-assets
+          sha256sum \
+            pkgly-linux-amd64 \
+            pkgly-linux-arm64 \
+            pkglyctl-linux-amd64 \
+            pkglyctl-linux-arm64 \
+            pkglyctl-macos-arm64 \
+            > checksums.txt
+
+      - name: Promote Docker image tag
+        if: steps.release-context.outputs.should_release == 'true'
+        env:
+          COMMIT_SHA: ${{ steps.release-context.outputs.commit_sha }}
+          RELEASE_TAGS: ${{ steps.release-context.outputs.release_tags }}
+        run: |
+          set -euo pipefail
+          docker buildx imagetools inspect "${IMAGE_NAME}:${COMMIT_SHA}" >/dev/null
+          for release_tag in $RELEASE_TAGS; do
+            docker buildx imagetools create \
+              --tag "${IMAGE_NAME}:${release_tag}" \
+              "${IMAGE_NAME}:${COMMIT_SHA}"
+          done
+
+      - name: Publish GitHub release
+        if: steps.release-context.outputs.should_release == 'true'
+        env:
+          COMMIT_SHA: ${{ steps.release-context.outputs.commit_sha }}
+          RELEASE_TAGS: ${{ steps.release-context.outputs.release_tags }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          files=(
+            release-assets/pkgly-linux-amd64
+            release-assets/pkgly-linux-arm64
+            release-assets/pkglyctl-linux-amd64
+            release-assets/pkglyctl-linux-arm64
+            release-assets/pkglyctl-macos-arm64
+            release-assets/checksums.txt
+          )
+          for release_tag in $RELEASE_TAGS; do
+            if gh release view "$release_tag" >/dev/null 2>&1; then
+              gh release upload "$release_tag" "${files[@]}" --clobber
+              continue
+            fi
+
+            if ! gh release create "$release_tag" "${files[@]}" \
+              --target "$COMMIT_SHA" \
+              --verify-tag \
+              --generate-notes
+            then
+              gh release view "$release_tag" >/dev/null
+              gh release upload "$release_tag" "${files[@]}" --clobber
+            fi
+          done

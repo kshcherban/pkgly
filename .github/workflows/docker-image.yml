@@ -36,17 +36,17 @@ jobs:
         uses: actions/checkout@v6
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push image
-        uses: docker/build-push-action@v7
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
         with:
           context: .
           file: ./Dockerfile
@@ -59,17 +59,101 @@ jobs:
           cache-from: type=gha,scope=pkgly-${{ matrix.arch }}
           cache-to: type=gha,mode=max,scope=pkgly-${{ matrix.arch }}
 
+  extract-binaries:
+    name: Extract pkgly binary (${{ matrix.arch }})
+    runs-on: ${{ matrix.runner }}
+    needs: build
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            runner: ubuntu-24.04
+          - arch: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract binary from image
+        run: |
+          set -euo pipefail
+          image="${IMAGE_NAME}:latest-${GITHUB_SHA}-${{ matrix.arch }}"
+          binary="pkgly-linux-${{ matrix.arch }}-${GITHUB_SHA}"
+          docker pull "$image"
+          container_id="$(docker create "$image")"
+          docker cp "$container_id:/app/pkgly" "$binary"
+          docker rm "$container_id"
+          chmod 755 "$binary"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: pkgly-linux-${{ matrix.arch }}-${{ github.sha }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
+  pkglyctl:
+    name: Build pkglyctl ${{ matrix.target }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - target: linux-amd64
+            runner: ubuntu-24.04
+            binary: pkglyctl-linux-amd64
+          - target: linux-arm64
+            runner: ubuntu-24.04-arm
+            binary: pkglyctl-linux-arm64
+          - target: macos-arm64
+            runner: macos-15
+            binary: pkglyctl-macos-arm64
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch
+
+      - name: Build pkglyctl
+        run: cargo build --release -p pkgly-cli --bin pkglyctl
+
+      - name: Prepare binary artifact
+        run: |
+          set -euo pipefail
+          strip target/release/pkglyctl
+          cp target/release/pkglyctl "${{ matrix.binary }}-${GITHUB_SHA}"
+          chmod 755 "${{ matrix.binary }}-${GITHUB_SHA}"
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ matrix.binary }}-${{ github.sha }}
+          archive: false
+          if-no-files-found: error
+          retention-days: 14
+
   manifest:
     name: Publish multi-platform manifest
     runs-on: ubuntu-24.04
-    needs: build
+    needs:
+      - extract-binaries
+      - pkglyctl
 
     steps:
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v4
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v4
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -78,6 +162,7 @@ jobs:
       - name: Create and push manifest
         run: |
           docker buildx imagetools create \
+            --tag "${IMAGE_NAME}:${GITHUB_SHA}" \
             --tag "${IMAGE_NAME}:latest" \
             "${IMAGE_NAME}:latest-${GITHUB_SHA}-amd64" \
             "${IMAGE_NAME}:latest-${GITHUB_SHA}-arm64"

@@ -78,8 +78,7 @@ When reviewing or writing code, check for:
 3. **Implement**: Write minimal code to pass tests
 4. **Refactor**: Clean up while keeping tests green
 5. **Verify**: Run relevant tests
-6. **Document**: Ensure code is self-documenting with clear names and necessary comments
-7. **Memorize**: Check knowledge graph memory section below on how to work with projects memory
+6. **Document**: Ensure code is self-documenting with clear names and necessary comments. Document all new or changed features, architecture, API changes in ./docs/ do not forget to add new sections to @./docs/docs/.vitepress/config.ts if needed.
 8. **Test placement**: Keep tests in dedicated files/modules (no inline tests inside source files); mirror structure used by existing repos (e.g., `proxy/tests.rs`).
 
 

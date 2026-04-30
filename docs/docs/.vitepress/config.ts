@@ -24,7 +24,7 @@ export default defineConfig({
         activeMatch: "^/repositoryTypes/",
       },
       {
-        text: "CLI",
+        text: "Command Line Interface",
         link: "/cli/",
         activeMatch: "^/cli/",
       },
@@ -59,7 +59,7 @@ function generalInfo() {
         { text: "What is Pkgly?", link: "/" },
         { text: "Quickstart", link: "/quickstart" },
         { text: "Features", link: "/features" },
-        { text: "CLI", link: "/cli/" },
+        { text: "Command Line Interface", link: "/cli/" },
         { text: "Contributing", link: "/contributing" },
         { text: "Single Sign-On", link: "/sso/" },
       ],

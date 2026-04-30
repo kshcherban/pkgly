@@ -3355,7 +3355,7 @@ dependencies = [
 
 [[package]]
 name = "nr-api"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "anyhow",
  "bytes",
@@ -3376,7 +3376,7 @@ dependencies = [
 
 [[package]]
 name = "nr-core"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3411,7 +3411,7 @@ dependencies = [
 
 [[package]]
 name = "nr-macros"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "anyhow",
  "heck",
@@ -3423,7 +3423,7 @@ dependencies = [
 
 [[package]]
 name = "nr-storage"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3986,7 +3986,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "pkgly"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "ahash",
  "anyhow",
@@ -4096,13 +4096,14 @@ dependencies = [
 
 [[package]]
 name = "pkgly-cli"
-version = "3.0.0-BETA"
+version = "1.0.0-BETA"
 dependencies = [
  "anyhow",
  "bytes",
  "chrono",
  "clap",
  "futures-util",
+ "inquire",
  "nr-api",
  "reqwest",
  "serde",

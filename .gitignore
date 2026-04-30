@@ -9,3 +9,4 @@ charts/pkgly/charts
 mise.toml
 .DS_Store
 .playwright-mcp/
+.plans/
