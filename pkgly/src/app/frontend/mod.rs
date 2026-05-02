@@ -1,3 +1,5 @@
+// ABOUTME: Exposes frontend serving errors and feature-gated request handlers.
+// ABOUTME: Provides a no-frontend fallback for backend-only builds.
 use axum::response::Response;
 use http::header::CONTENT_TYPE;
 use thiserror::Error;
@@ -51,6 +53,10 @@ mod no_frontend {
     use axum::extract::{Request, State};
 
     use crate::{app::Pkgly, utils::response::ResponseBuilder};
+
+    pub fn is_browser_spa_navigation_request(_site: &Pkgly, _request: &Request) -> bool {
+        false
+    }
 
     pub async fn frontend_request(
         State(_): State<Pkgly>,

@@ -13,8 +13,8 @@ lifespan = 86400
 cleanup_interval = 3600
 database_location = "/storage/sessions.redb"
 
-# [site]
-# app_url = "http://pkgly:8888"
+[site]
+app_url = "http://pkgly:8888"
 
 [web_server]
 bind_address = "0.0.0.0:8888"

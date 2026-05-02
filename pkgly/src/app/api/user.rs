@@ -1,3 +1,5 @@
+// ABOUTME: Implements user account API routes and session lifecycle responses.
+// ABOUTME: Handles login, logout, profile data, password changes, and tokens.
 use std::net::SocketAddr;
 
 use axum::{
@@ -10,7 +12,7 @@ use axum_extra::{
     TypedHeader,
     extract::{
         CookieJar,
-        cookie::{Cookie, Expiration},
+        cookie::{Cookie, Expiration, SameSite},
     },
     headers::UserAgent,
 };
@@ -209,6 +211,34 @@ fn login_success_response(cookie: Cookie<'static>, user_with_session: MeWithSess
         .json(&user_with_session)
 }
 
+fn session_cookie(session_id: String, is_https: bool) -> Cookie<'static> {
+    Cookie::build(("session", session_id))
+        .secure(is_https)
+        .same_site(session_same_site(is_https))
+        .path("/")
+        .http_only(true)
+        .expires(Expiration::Session)
+        .build()
+}
+
+fn session_removal_cookie(is_https: bool) -> Cookie<'static> {
+    Cookie::build("session")
+        .secure(is_https)
+        .same_site(session_same_site(is_https))
+        .path("/")
+        .http_only(true)
+        .removal()
+        .build()
+}
+
+fn session_same_site(is_https: bool) -> SameSite {
+    if is_https {
+        SameSite::None
+    } else {
+        SameSite::Lax
+    }
+}
+
 #[utoipa::path(
     post,
     path = "/login",
@@ -245,11 +275,8 @@ pub async fn login(
     let session = site
         .session_manager
         .create_session(user.id, user_agent, ip, duration)?;
-    let cookie = Cookie::build(("session", session.session_id.clone()))
-        .secure(true)
-        .path("/")
-        .expires(Expiration::Session)
-        .build();
+    let is_https = site.instance.lock().is_https;
+    let cookie = session_cookie(session.session_id.clone(), is_https);
     let user_with_session = MeWithSession::from((session.clone(), user));
     Ok(login_success_response(cookie, user_with_session))
 }
@@ -272,7 +299,8 @@ pub async fn logout(
         }
         Authentication::Session(session, _) => {
             site.session_manager.delete_session(&session.session_id)?;
-            let empty_session_cookie = Cookie::build("session").removal().build();
+            let is_https = site.instance.lock().is_https;
+            let empty_session_cookie = session_removal_cookie(is_https);
             let cookies = cookie.add(empty_session_cookie);
             Ok((cookies, StatusCode::NO_CONTENT).into_response())
         }

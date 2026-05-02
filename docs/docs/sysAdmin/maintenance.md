@@ -1,4 +1,6 @@
 # Maintenance Operations
+<!-- ABOUTME: Documents operational maintenance workflows for Pkgly deployments. -->
+<!-- ABOUTME: Covers migrations, restarts, audit logs, and web refresh behavior. -->
 
 This page describes the supported procedure for applying schema migrations and restarting Pkgly in a production environment.
 
@@ -79,3 +81,11 @@ docker compose logs pkgly | grep 'pkgly::audit'
 ```
 
 If you run JSON logs, filter on `"target":"pkgly::audit"` and join on `trace_id` when you need to correlate an audit event with lower-level request or tracing data.
+
+## Browser refresh routing
+
+Pkgly serves the Vue app with history-mode routes. Browser refreshes for paths present in `site/src/router/routes.json` return the SPA `index.html` when the request is a `GET` or `HEAD` with `Accept: text/html`.
+
+Package manager endpoints are still handled by repository routes. Requests under `/api/**`, `/v2/**`, `/repositories/**`, `/storages/**`, and direct package requests that do not ask for HTML keep their package/API behavior.
+
+For HTTP deployments, session cookies use `SameSite=Lax` without the `Secure` attribute. HTTPS deployments use `SameSite=None` with `Secure`. This lets local and plain-HTTP installs preserve a valid login across browser refreshes while keeping cross-site cookie compatibility for HTTPS.

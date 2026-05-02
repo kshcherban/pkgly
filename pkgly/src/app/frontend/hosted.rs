@@ -1,3 +1,5 @@
+// ABOUTME: Serves bundled frontend assets and maps browser navigation to SPA HTML.
+// ABOUTME: Parses routes.json so backend refresh handling matches Vue routes.
 use std::{
     path::{Path, PathBuf},
     sync::atomic::AtomicBool,
@@ -8,13 +10,17 @@ use axum::{
     response::Response,
 };
 use handlebars::Handlebars;
-use http::StatusCode;
+use http::{Method, StatusCode, header::ACCEPT};
 use mime::Mime;
 use serde::Deserialize;
 use tracing::{debug, instrument, trace, warn};
 
 use super::FrontendError;
-use crate::{app::Pkgly, error::InternalError, utils::ResponseBuilder};
+use crate::{
+    app::{Pkgly, state::Instance},
+    error::InternalError,
+    utils::ResponseBuilder,
+};
 
 #[cfg(feature = "frontend")]
 static FRONTEND_DATA: &[u8] = include_bytes!(env!("FRONTEND_ZIP"));
@@ -156,7 +162,7 @@ impl HostedFrontend {
             return Err(FrontendError::IndexPageMissing);
         }
         let content = std::fs::read_to_string(path)?;
-        let instance = site.instance.lock().clone();
+        let instance = index_template_data(site.instance.lock().clone());
         debug!(?instance, "Instance");
         let rendered = self.handlebars.render_template(&content, &instance)?;
         Ok(rendered.into_bytes())
@@ -179,6 +185,13 @@ impl HostedFrontend {
             None => mime::TEXT_PLAIN,
         }
     }
+}
+
+fn index_template_data(mut instance: Instance) -> Instance {
+    if instance.app_url.trim().is_empty() {
+        instance.app_url = "/".to_string();
+    }
+    instance
 }
 
 #[instrument(skip(site, request), fields(path = %request.uri().path()))]
@@ -214,6 +227,36 @@ pub async fn frontend_request(
     let response = frontend.get_file_as_response(path)?;
     Ok(response)
 }
+
+pub fn is_browser_spa_navigation_request(site: &Pkgly, request: &Request) -> bool {
+    is_spa_navigation_request(request, &site.frontend.routes)
+}
+
+fn is_spa_navigation_request(request: &Request, routes: &[RouteItem]) -> bool {
+    if !matches!(request.method(), &Method::GET | &Method::HEAD) {
+        return false;
+    }
+
+    let accepts_html = request
+        .headers()
+        .get(ACCEPT)
+        .and_then(|value| value.to_str().ok())
+        .is_some_and(accepts_text_html);
+    if !accepts_html {
+        return false;
+    }
+
+    let path = request.uri().path();
+    routes.iter().any(|route| route.path.matches_path(path))
+}
+
+fn accepts_text_html(accept: &str) -> bool {
+    accept
+        .split(',')
+        .map(|part| part.split(';').next().unwrap_or_default().trim())
+        .any(|media_type| media_type.eq_ignore_ascii_case("text/html"))
+}
+
 /// Basically if it contains and extension that we want to send a server side 404 from with no content
 ///
 /// Such as images, css, js, etc.
@@ -253,7 +296,13 @@ impl FrontendRoute {
         let split_path: Vec<_> = path.split('/').collect();
         trace!("{:?}", split_path);
 
-        if split_path.len() != self.parts.len() && !self.has_catch_all {
+        if split_path.len() > self.parts.len() && !self.has_catch_all {
+            debug!("Path Lengths Do Not Match");
+            return false;
+        }
+        if split_path.len() < self.parts.len()
+            && !self.remaining_parts_are_optional(split_path.len())
+        {
             debug!("Path Lengths Do Not Match");
             return false;
         }
@@ -282,6 +331,15 @@ impl FrontendRoute {
             }
         }
         true
+    }
+
+    fn remaining_parts_are_optional(&self, start: usize) -> bool {
+        self.parts[start..].iter().all(|component| {
+            matches!(
+                component,
+                FrontendRouteComponent::Param { optional: true, .. }
+            )
+        })
     }
 }
 impl TryFrom<String> for FrontendRoute {

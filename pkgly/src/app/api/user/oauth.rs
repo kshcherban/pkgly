@@ -1,3 +1,5 @@
+// ABOUTME: Implements OAuth2 provider discovery, login, callback, and RBAC sync.
+// ABOUTME: Exchanges provider identities for local sessions and redirect responses.
 use std::{io, net::SocketAddr, str::FromStr};
 
 use crate::app::authentication::jwks::{JwksManager, ReqwestJwksFetcher};
@@ -10,11 +12,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
-use axum_extra::{
-    TypedHeader,
-    extract::cookie::{Cookie, Expiration},
-    headers::UserAgent,
-};
+use axum_extra::{TypedHeader, headers::UserAgent};
 use chrono::{DateTime, Duration, Utc};
 use nr_core::database::entities::user::{UserSafeData, UserType};
 use nr_core::user::permissions::UpdatePermissions;
@@ -38,7 +36,10 @@ use crate::{
     },
 };
 
-use super::sso::{SsoPrincipal, create_user, normalize_username, sanitize_redirect};
+use super::{
+    session_cookie,
+    sso::{SsoPrincipal, create_user, normalize_username, sanitize_redirect},
+};
 
 #[derive(Debug, Deserialize, IntoParams)]
 #[into_params(parameter_in = Query)]
@@ -608,13 +609,8 @@ pub async fn callback(
             }
         };
 
-    let cookie = Cookie::build(("session", session.session_id.clone()))
-        .secure(true)
-        .same_site(axum_extra::extract::cookie::SameSite::None)
-        .path("/")
-        .http_only(true)
-        .expires(Expiration::Session)
-        .build();
+    let is_https = site.instance.lock().is_https;
+    let cookie = session_cookie(session.session_id.clone(), is_https);
 
     let redirect_header =
         sanitize_redirect(exchange.redirect.as_deref().or(query.redirect.as_deref()));

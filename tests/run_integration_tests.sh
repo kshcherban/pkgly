@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Orchestrates Docker-backed integration test suites for Pkgly.
+# ABOUTME: Starts the shared stack and runs selected repository or web tests.
 # Main integration test orchestrator
 # Runs all or specific integration tests for Pkgly
 
@@ -57,6 +59,7 @@ TEST_SUITES:
     cargo       Run Cargo registry integration tests
     helm        Run Helm integration tests
     nuget       Run NuGet integration tests
+    web_refresh Run web route refresh integration tests
     all         Run all test suites (default)
 
 EXAMPLES:
@@ -114,12 +117,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget)
+        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget)
+            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh)
             shift
             ;;
         *)
@@ -132,7 +135,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget)
+    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh)
 fi
 
 # Enable verbose mode

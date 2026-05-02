@@ -1,6 +1,17 @@
+// ABOUTME: Resolves frontend runtime API and WebSocket endpoints.
+// ABOUTME: Keeps refreshed SPA routes from becoming the backend API base URL.
+function defaultApiURL(): string {
+  const baseHref = document.querySelector("base")?.getAttribute("href")?.trim() ?? "";
+  if (baseHref.length > 0) {
+    return document.baseURI;
+  }
+
+  return new URL("/", window.location.href).toString();
+}
+
 export const apiURL =
   import.meta.env.VITE_API_URL === undefined
-    ? document.baseURI
+    ? defaultApiURL()
     : (import.meta.env.VITE_API_URL as string);
 
 export function websocketUrl(): string {

@@ -1,3 +1,5 @@
+// ABOUTME: Handles OIDC single sign-on login and principal resolution.
+// ABOUTME: Converts verified provider identities into local user sessions.
 use std::{net::SocketAddr, str::FromStr};
 
 use axum::{
@@ -8,14 +10,7 @@ use axum::{
     },
     response::{IntoResponse, Response},
 };
-use axum_extra::{
-    TypedHeader,
-    extract::{
-        CookieJar,
-        cookie::{Cookie, Expiration},
-    },
-    headers::UserAgent,
-};
+use axum_extra::{TypedHeader, extract::CookieJar, headers::UserAgent};
 use chrono::Duration;
 use http::HeaderValue;
 use nr_core::{
@@ -40,6 +35,8 @@ use crate::{
         request_logging::access_log::AccessLogContext,
     },
 };
+
+use super::session_cookie;
 
 #[derive(Debug, Deserialize, IntoParams)]
 pub struct SsoLoginQuery {
@@ -122,12 +119,8 @@ pub async fn login(
         }
     };
 
-    let cookie = Cookie::build(("session", session.session_id.clone()))
-        .secure(true)
-        .same_site(axum_extra::extract::cookie::SameSite::None)
-        .path("/")
-        .expires(Expiration::Session)
-        .build();
+    let is_https = site.instance.lock().is_https;
+    let cookie = session_cookie(session.session_id.clone(), is_https);
 
     let redirect_target = sanitize_redirect(query.redirect.as_deref());
 

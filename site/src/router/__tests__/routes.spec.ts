@@ -1,4 +1,7 @@
+// ABOUTME: Tests router metadata and refresh route export coverage.
+// ABOUTME: Guards routes.json so backend SPA refresh matching stays synchronized.
 import { beforeAll, describe, expect, it, vi } from "vitest";
+import refreshRoutes from "@/router/routes.json";
 
 beforeAll(() => {
   vi.stubGlobal("localStorage", {
@@ -52,5 +55,17 @@ describe("router security metadata", () => {
     expect(routes.find((route) => route.name === "SystemWebhooks")?.path).toBe(
       "/admin/system/webhooks",
     );
+  });
+
+  it("keeps routes.json synchronized with refreshable router paths", async () => {
+    const router = (await import("@/router")).default;
+    const expectedPaths = router
+      .getRoutes()
+      .filter((route) => !route.meta?.skipRoutesJson)
+      .map((route) => route.path)
+      .sort();
+    const exportedPaths = refreshRoutes.map((route) => route.path).sort();
+
+    expect(exportedPaths).toEqual(expectedPaths);
   });
 });

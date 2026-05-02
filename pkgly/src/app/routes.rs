@@ -1,4 +1,10 @@
-use axum::{Router, extract::DefaultBodyLimit};
+// ABOUTME: Builds the top-level HTTP router and route ordering for Pkgly.
+// ABOUTME: Keeps API, repository, Docker, and frontend fallback paths isolated.
+use axum::{
+    Router,
+    extract::{DefaultBodyLimit, Path, State},
+    response::{IntoResponse, Response},
+};
 use http::{HeaderName, HeaderValue};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
@@ -6,6 +12,10 @@ use tracing::info;
 use crate::app::{
     api, authentication::layer::AuthenticationLayer, config::MaxUpload, frontend, open_api,
     request_logging::AppTracingLayer,
+};
+use crate::{
+    repository::{RepoRequestPath, RepositoryAuthentication},
+    utils::request_logging::request_span::RequestSpan,
 };
 
 use super::Pkgly;
@@ -48,7 +58,7 @@ pub fn build_app_router(site: Pkgly, max_upload: MaxUpload, open_api_routes: boo
         // Direct repository routes for patterns like /{storage}/{repository}/{*path}
         .route(
             "/{storage}/{repository}/{*path}",
-            axum::routing::any(crate::repository::handle_repo_request),
+            axum::routing::any(direct_repository_or_frontend_request),
         )
         .fallback(frontend::frontend_request)
         .with_state(site.clone());
@@ -67,4 +77,32 @@ pub fn build_app_router(site: Pkgly, max_upload: MaxUpload, open_api_routes: boo
         ))
         .layer(AppTracingLayer(site))
         .layer(body_limit)
+}
+
+async fn direct_repository_or_frontend_request(
+    State(site): State<Pkgly>,
+    Path(request_path): Path<RepoRequestPath>,
+    parent_span: Option<RequestSpan>,
+    authentication: RepositoryAuthentication,
+    request: axum::extract::Request,
+) -> Response {
+    if frontend::is_browser_spa_navigation_request(&site, &request) {
+        return match frontend::frontend_request(State(site), request).await {
+            Ok(response) => response,
+            Err(error) => error.into_response(),
+        };
+    }
+
+    match crate::repository::handle_repo_request(
+        State(site),
+        Path(request_path),
+        parent_span,
+        authentication,
+        request,
+    )
+    .await
+    {
+        Ok(response) => response,
+        Err(error) => error.into_response(),
+    }
 }
