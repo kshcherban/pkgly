@@ -6,6 +6,7 @@ use std::sync::{Arc, Mutex};
 use std::thread;
 
 use clap::Parser;
+use pkgly_cli::CliError;
 use pkgly_cli::cli::Cli;
 use pkgly_cli::config::{ConfigFile, EnvConfig, ProfileConfig};
 
@@ -161,10 +162,13 @@ async fn run_cli_with_password(args: &[&str], password: &str) -> String {
     String::from_utf8(output).unwrap_or_else(|err| panic!("output was not utf8: {err}"))
 }
 
-async fn run_cli_error(args: &[&str]) -> String {
+async fn run_cli_error_with_password_prompt<F>(args: &[&str], prompt: F) -> String
+where
+    F: FnMut() -> Result<String, CliError>,
+{
     let cli = Cli::try_parse_from(args).unwrap_or_else(|err| panic!("parse failed: {err}"));
     let mut output = Vec::new();
-    let err = pkgly_cli::run(cli, EnvConfig::default(), &mut output)
+    let err = pkgly_cli::run_with_password_prompt(cli, EnvConfig::default(), &mut output, prompt)
         .await
         .expect_err("run should fail");
     err.to_string()
@@ -347,17 +351,24 @@ async fn auth_login_requires_password_flag_when_stdin_is_not_interactive() {
     let temp = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
     let config_path = temp.path().join("config.toml");
 
-    let err = run_cli_error(&[
-        "pkglyctl",
-        "--config",
-        config_path.to_string_lossy().as_ref(),
-        "--base-url",
-        "http://127.0.0.1:9",
-        "auth",
-        "login",
-        "--username",
-        "admin",
-    ])
+    let err = run_cli_error_with_password_prompt(
+        &[
+            "pkglyctl",
+            "--config",
+            config_path.to_string_lossy().as_ref(),
+            "--base-url",
+            "http://127.0.0.1:9",
+            "auth",
+            "login",
+            "--username",
+            "admin",
+        ],
+        || {
+            Err(CliError::Message(
+                "auth login requires --password when stdin is not interactive".to_string(),
+            ))
+        },
+    )
     .await;
 
     assert_eq!(
