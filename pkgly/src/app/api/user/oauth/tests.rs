@@ -6,6 +6,7 @@ fn extract_roles_combines_roles_and_groups() {
     let claims = IdTokenClaims {
         sub: "user-1".to_string(),
         email: Some("user@example.com".to_string()),
+        email_verified: None,
         preferred_username: None,
         name: None,
         given_name: None,
@@ -22,6 +23,7 @@ fn extract_roles_adds_google_fallback_when_missing() {
     let claims = IdTokenClaims {
         sub: "user-2".to_string(),
         email: Some("user@example.com".to_string()),
+        email_verified: Some(true),
         preferred_username: None,
         name: None,
         given_name: None,
@@ -31,6 +33,23 @@ fn extract_roles_adds_google_fallback_when_missing() {
 
     let roles = extract_roles(OAuth2ProviderKind::Google, &claims);
     assert_eq!(roles, vec!["group:user@example.com".to_string()]);
+}
+
+#[test]
+fn extract_roles_skips_google_email_fallback_when_unverified() {
+    let claims = IdTokenClaims {
+        sub: "user-3".to_string(),
+        email: Some("user@example.com".to_string()),
+        email_verified: Some(false),
+        preferred_username: None,
+        name: None,
+        given_name: None,
+        roles: None,
+        groups: None,
+    };
+
+    let roles = extract_roles(OAuth2ProviderKind::Google, &claims);
+    assert!(roles.is_empty());
 }
 
 #[test]

@@ -74,6 +74,8 @@ struct IdTokenClaims {
     #[serde(default)]
     email: Option<String>,
     #[serde(default)]
+    email_verified: Option<bool>,
+    #[serde(default)]
     preferred_username: Option<String>,
     #[serde(default)]
     name: Option<String>,
@@ -658,12 +660,20 @@ async fn resolve_oauth_user(
     principal: &SsoPrincipal,
 ) -> Result<UserSafeData, Response> {
     if let Some(email) = principal.email.as_ref() {
-        match UserSafeData::get_by_email(email, &site.database).await {
-            Ok(Some(user)) => return Ok(user),
-            Ok(None) => {}
-            Err(err) => {
-                error!(%err, "Failed to lookup user by email during OAuth2 login");
-                return Err(internal_login_error());
+        if !principal.email_verified {
+            warn!(
+                email = %email,
+                username = %principal.username,
+                "OAuth2 email lookup skipped: email not verified by identity provider"
+            );
+        } else {
+            match UserSafeData::get_by_email(email, &site.database).await {
+                Ok(Some(user)) => return Ok(user),
+                Ok(None) => {}
+                Err(err) => {
+                    error!(%err, "Failed to lookup user by email during OAuth2 login");
+                    return Err(internal_login_error());
+                }
             }
         }
     }
@@ -679,6 +689,15 @@ async fn resolve_oauth_user(
 
     if !settings.auto_create_users {
         return Err(oauth_denied_redirect("no_account"));
+    }
+
+    if principal.email.is_some() && !principal.email_verified {
+        warn!(
+            email = %principal.email.as_deref().unwrap_or("?"),
+            username = %principal.username,
+            "OAuth2 auto-create rejected: email not verified"
+        );
+        return Err(oauth_denied_redirect("unverified_email"));
     }
 
     create_user(site, principal).await
@@ -780,6 +799,7 @@ fn build_principal(claims: &IdTokenClaims) -> SsoPrincipal {
     SsoPrincipal {
         username,
         email: claims.email.clone(),
+        email_verified: claims.email_verified.unwrap_or(false),
         display_name,
         roles: Vec::new(),
     }
@@ -841,7 +861,10 @@ fn extract_roles(provider: OAuth2ProviderKind, claims: &IdTokenClaims) -> Vec<St
         collected.extend(groups.iter().cloned());
     }
 
-    if collected.is_empty() && provider == OAuth2ProviderKind::Google {
+    if collected.is_empty()
+        && provider == OAuth2ProviderKind::Google
+        && claims.email_verified == Some(true)
+    {
         collected.extend(claims.email.iter().map(|email| format!("group:{email}")));
     }
 

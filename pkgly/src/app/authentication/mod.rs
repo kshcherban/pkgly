@@ -9,6 +9,7 @@ use axum::{
     response::IntoResponse,
 };
 use axum_extra::extract::cookie::Cookie;
+use chrono::Utc;
 use derive_more::From;
 use header::AuthorizationHeader;
 use http::request::Parts;
@@ -421,6 +422,11 @@ pub async fn get_user_and_auth_token(
     let auth_token = AuthToken::get_by_token(token, database)
         .await?
         .ok_or(AuthenticationError::Unauthorized)?;
+    if let Some(expires) = auth_token.expires_at {
+        if expires <= Utc::now().fixed_offset() {
+            return Err(AuthenticationError::Unauthorized);
+        }
+    }
     let user = UserSafeData::get_by_id(auth_token.user_id, database)
         .await?
         .ok_or(AuthenticationError::Unauthorized)?;

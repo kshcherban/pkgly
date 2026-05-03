@@ -387,7 +387,11 @@ impl SessionManager {
             .get(session_id)?
             .map(|x| Session::from_tuple(x.value()))
             .transpose()?;
-        Ok(session)
+
+        match session {
+            Some(s) if s.expires <= Local::now().fixed_offset() => Ok(None),
+            other => Ok(other),
+        }
     }
     #[instrument]
     pub fn delete_session(&self, session_id: &str) -> Result<Option<Session>, SessionError> {
@@ -431,7 +435,7 @@ impl SessionManager {
 pub fn create_session_id(exists_call_back: impl Fn(&str) -> bool) -> String {
     let mut rand = StdRng::from_os_rng();
     loop {
-        let session_id: String = (0..7).map(|_| rand.sample(Alphanumeric) as char).collect();
+        let session_id: String = (0..32).map(|_| rand.sample(Alphanumeric) as char).collect();
         if !exists_call_back(&session_id) {
             break session_id;
         }

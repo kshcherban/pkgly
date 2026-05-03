@@ -1,6 +1,6 @@
 # Single Sign-On (SSO)
 
-Pkgly validates signed JWT/ID tokens from upstream SSO providers (Cloudflare Access, Okta, Auth0, Azure B2C, etc.) using JWKS. Tokens are verified per-provider, mapped to a Pkgly user, optional Casbin roles are applied, and a Pkgly session cookie is issued.
+Pkgly validates signed JWT/ID tokens from upstream SSO providers (Cloudflare Access, Okta, Auth0, Azure B2C, etc.) using JWKS. Tokens are verified per-provider, mapped to a Pkgly user, optional Casbin roles are applied, and a Pkgly session cookie is issued. Auto-creation requires that the identity provider asserts `email_verified: true` in the token.
 
 ## Configuration
 
@@ -32,7 +32,7 @@ Key points:
 - Define one or more providers. Each token is verified against the provider’s JWKS using the `kid` in the header and checked for matching `iss`/`aud`.
 - Tokens can be sourced from headers or cookies; optional prefixes (e.g., `Bearer `) are stripped automatically.
 - `role_claims` (global or per-provider) pull role values from string or string-array claims and apply them to Casbin before redirecting the user back to the UI.
-- Users are auto-provisioned when `auto_create_users` is true; otherwise they must exist beforehand.
+- Users are auto-provisioned when `auto_create_users` is true **and** the identity provider asserts `email_verified: true` in the JWT/ID token. If the claim is missing or `false`, auto-creation is rejected even when `auto_create_users` is enabled.
 
 ## OIDC / JWT Providers (JWKS)
 
@@ -65,7 +65,7 @@ Each provider entry:
 - `token_source`: Where to read the token (`header` or `cookie`). For headers you can supply an optional `prefix` (default `"Bearer "`).
 - `subject_claim` / `email_claim` / `display_name_claim`: Optional claim keys when a provider deviates from `preferred_username`, `email`, or `name`.
 
-Keys fetched from JWKS are cached for one hour and refreshed automatically when they expire or a new `kid` shows up. If no provider yields a valid token, Pkgly falls back to the legacy header-based extraction above.
+JWKS keys are cached for one hour and refreshed automatically when they expire or a new `kid` shows up. Pkgly supports **RSA**, **EC** (P-256/P-384/P-521), and **EdDSA** (Ed25519/Ed448) key types. If no provider yields a valid token, Pkgly falls back to the legacy header-based extraction above.
 
 ### Runtime Configuration
 

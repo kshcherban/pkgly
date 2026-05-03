@@ -43,11 +43,12 @@ impl ReferencesUser for AuthToken {
 }
 impl AuthToken {
     pub async fn get_by_token(token: &str, database: &PgPool) -> sqlx::Result<Option<Self>> {
-        let token =
-            sqlx::query_as(r#"SELECT * FROM user_auth_tokens WHERE token = $1 AND active = true"#)
-                .bind(hash_token(token))
-                .fetch_optional(database)
-                .await?;
+        let token = sqlx::query_as(
+            r#"SELECT * FROM user_auth_tokens WHERE token = $1 AND active = true AND (expires_at IS NULL OR expires_at > NOW())"#,
+        )
+        .bind(hash_token(token))
+        .fetch_optional(database)
+        .await?;
         Ok(token)
     }
     pub async fn has_scope(&self, scope: NRScope, database: &PgPool) -> sqlx::Result<bool> {

@@ -124,7 +124,22 @@ impl<F: JwksFetcher + JwksResolver + Clone> JwksManager<F> {
         for jwk in document.keys {
             if let (Some(n), Some(e)) = (jwk.n.as_deref(), jwk.e.as_deref()) {
                 if let Ok(key) = DecodingKey::from_rsa_components(n, e) {
-                    map.insert(jwk.kid, key);
+                    map.insert(jwk.kid.clone(), key);
+                    continue;
+                }
+            }
+            if let (Some(x), Some(y)) = (jwk.x.as_deref(), jwk.y.as_deref()) {
+                if let Ok(key) = DecodingKey::from_ec_components(x, y) {
+                    map.insert(jwk.kid.clone(), key);
+                    continue;
+                }
+            }
+            if jwk.kty.as_deref() == Some("OKP") {
+                if let Some(x) = jwk.x.as_deref() {
+                    if let Ok(key) = DecodingKey::from_ed_components(x) {
+                        map.insert(jwk.kid, key);
+                        continue;
+                    }
                 }
             }
         }

@@ -104,6 +104,32 @@ fn sign_test_token(
     Ok(token)
 }
 
+fn sign_eddsa_test_token(kid: &str, issuer: &str, audience: &str) -> anyhow::Result<String> {
+    const ED25519_PRIVATE_KEY: &str = "\
+-----BEGIN PRIVATE KEY-----
+MC4CAQAwBQYDK2VwBCIEIGrD/e7uKYqSY4twDEsRfMMuLSrODf14dpTiTK6K1YI0
+-----END PRIVATE KEY-----
+";
+    let mut header = Header::new(Algorithm::EdDSA);
+    header.kid = Some(kid.to_string());
+
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| anyhow::anyhow!(err))?
+        .as_secs();
+    let claims = TestClaims {
+        sub: "user-123".to_string(),
+        email: "user@example.com".to_string(),
+        iss: issuer.to_string(),
+        aud: audience.to_string(),
+        exp: (now + 3600) as usize,
+        name: "Test User".to_string(),
+    };
+
+    let key = jsonwebtoken::EncodingKey::from_ed_pem(ED25519_PRIVATE_KEY.as_bytes())?;
+    Ok(encode(&header, &claims, &key)?)
+}
+
 fn provider_config(name: &str, issuer: &str, audience: &str, jwks_url: &str) -> OidcProviderConfig {
     OidcProviderConfig {
         name: name.to_string(),
@@ -140,5 +166,31 @@ async fn jwks_manager_caches_key_until_ttl() -> anyhow::Result<()> {
         Some("user@example.com")
     );
     assert_eq!(fetcher.calls(), first_calls, "JWKS fetch should be cached");
+    Ok(())
+}
+
+#[tokio::test]
+async fn jwks_manager_verifies_eddsa_okp_key() -> anyhow::Result<()> {
+    let kid = "ed-key-id";
+    let issuer = "https://issuer.example";
+    let audience = "pkgly";
+    let jwks_url = "https://issuer.example/keys";
+    let jwk = JwkKey {
+        kid: kid.to_string(),
+        kty: Some("OKP".to_string()),
+        n: None,
+        e: None,
+        x: Some("2-Jj2UvNCvQiUPNYRgSi0cJSPiJI6Rs6D0UTeEpQVj8".to_string()),
+        y: None,
+        crv: Some("Ed25519".to_string()),
+    };
+    let token = sign_eddsa_test_token(kid, issuer, audience)?;
+    let fetcher = StaticFetcher::new(JwkDocument { keys: vec![jwk] });
+    let manager = JwksManager::new(fetcher, Duration::from_secs(3600));
+    let provider = provider_config("test", issuer, audience, jwks_url);
+
+    let claims = manager.verify(&token, &provider).await?;
+
+    assert_eq!(claims.get("sub").and_then(|v| v.as_str()), Some("user-123"));
     Ok(())
 }

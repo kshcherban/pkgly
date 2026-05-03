@@ -47,6 +47,7 @@ pub struct SsoLoginQuery {
 pub(super) struct SsoPrincipal {
     pub(super) username: String,
     pub(super) email: Option<String>,
+    pub(super) email_verified: bool,
     pub(super) display_name: String,
     pub(super) roles: Vec<String>,
 }
@@ -190,13 +191,21 @@ pub(super) async fn resolve_or_create_user(
 ) -> Result<UserSafeData, Response> {
     if let Some(email) = principal.email.as_ref() {
         trace!(email, "Attempting to match SSO user by email");
-        match UserSafeData::get_by_email(email, &site.database).await {
-            Ok(Some(user)) => return Ok(user),
-            Ok(None) => {}
-            Err(err) => {
-                error!(%err, "Failed to lookup user by email during SSO login");
-                return Err(ResponseBuilder::internal_server_error()
-                    .body("Unexpected error processing SSO login"));
+        if !principal.email_verified {
+            warn!(
+                email = %email,
+                username = %principal.username,
+                "SSO email lookup skipped: email not verified by identity provider"
+            );
+        } else {
+            match UserSafeData::get_by_email(email, &site.database).await {
+                Ok(Some(user)) => return Ok(user),
+                Ok(None) => {}
+                Err(err) => {
+                    error!(%err, "Failed to lookup user by email during SSO login");
+                    return Err(ResponseBuilder::internal_server_error()
+                        .body("Unexpected error processing SSO login"));
+                }
             }
         }
     }
@@ -215,6 +224,20 @@ pub(super) async fn resolve_or_create_user(
     if !config.auto_create_users {
         let api_error: APIErrorResponse<(), ()> = APIErrorResponse {
             message: "Account not found".into(),
+            details: None,
+            error: None,
+        };
+        return Err(ResponseBuilder::forbidden().json(&api_error));
+    }
+
+    if principal.email.is_some() && !principal.email_verified {
+        warn!(
+            email = %principal.email.as_deref().unwrap_or("?"),
+            username = %principal.username,
+            "SSO auto-create rejected: email not verified"
+        );
+        let api_error: APIErrorResponse<(), ()> = APIErrorResponse {
+            message: "Email not verified by identity provider".into(),
             details: None,
             error: None,
         };
@@ -511,6 +534,11 @@ fn map_claims_to_principal(
         .or_else(|| claim_value(claims, "email"))
         .map(str::to_string);
 
+    let email_verified = claims
+        .get("email_verified")
+        .and_then(|v| v.as_bool())
+        .unwrap_or(false);
+
     let display_name = provider
         .display_name_claim
         .as_deref()
@@ -528,6 +556,7 @@ fn map_claims_to_principal(
     Ok(SsoPrincipal {
         username: normalize_username(raw_username),
         email,
+        email_verified,
         display_name: display_name.to_string(),
         roles,
     })
