@@ -97,11 +97,16 @@
                 class="mb-4" />
 
               <div class="text-end mb-4">
-                <router-link
-                  to="/forgot-password"
-                  class="text-primary text-decoration-none">
-                  Forgot Password?
-                </router-link>
+                <v-tooltip text="Not implemented">
+                  <template v-slot:activator="{ props }">
+                    <span
+                      v-bind="props"
+                      class="text-primary text-decoration-none"
+                      style="cursor: not-allowed">
+                      Forgot Password?
+                    </span>
+                  </template>
+                </v-tooltip>
               </div>
 
               <v-btn

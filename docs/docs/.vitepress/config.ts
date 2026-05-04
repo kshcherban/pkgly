@@ -1,3 +1,5 @@
+// ABOUTME: Configures the Pkgly documentation site shell and global metadata.
+// ABOUTME: Defines VitePress navigation, sidebars, and external project links.
 import { defineConfig } from "vitepress";
 
 export default defineConfig({
@@ -9,14 +11,9 @@ export default defineConfig({
     nav: [
       { text: "Home", link: "/", activeMatch: "^/$" },
       {
-        text: "System Admin",
+        text: "Administration",
         link: "/sysAdmin/",
-        activeMatch: "^/sysAdmin/",
-      },
-      {
-        text: "Knowledge Base",
-        link: "/knowledge/",
-        activeMatch: "^/knowledge/",
+        activeMatch: "^/(sysAdmin|knowledge)/",
       },
       {
         text: "Repository Types",
@@ -43,8 +40,8 @@ export default defineConfig({
     ],
     sidebar: {
       "/": generalInfo(),
-      "/sysAdmin/": sysAdminBar(),
-      "/knowledge/": knowledgeBaseBar(),
+      "/sysAdmin/": administrationBar(),
+      "/knowledge/": administrationBar(),
       "/repositoryTypes/": repositoryTypesBar(),
       "/cli/": cliBar(),
     },
@@ -76,20 +73,7 @@ function cliBar() {
   ];
 }
 
-function knowledgeBaseBar() {
-  return [
-    {
-      text: "Other",
-      items: [
-        { text: "Architecture", link: "/knowledge/Architecture" },
-        { text: "Search", link: "/knowledge/search" },
-        { text: "Internal Workings", link: "/knowledge/InternalWorkings" },
-      ],
-    },
-  ];
-}
-
-function sysAdminBar() {
+function administrationBar() {
   return [
     {
       text: "Operating",
@@ -99,6 +83,13 @@ function sysAdminBar() {
         { text: "Maintenance", link: "/sysAdmin/maintenance" },
         { text: "Configuring S3 Storage", link: "/sysAdmin/s3" },
         { text: "Retention Policies", link: "/sysAdmin/retention" },
+      ],
+    },
+    {
+      text: "Knowledge Base",
+      items: [
+        { text: "Architecture", link: "/knowledge/Architecture" },
+        { text: "Search", link: "/knowledge/search" },
       ],
     },
   ];

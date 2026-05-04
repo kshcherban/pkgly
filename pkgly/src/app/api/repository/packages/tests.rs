@@ -1,3 +1,5 @@
+// ABOUTME: Tests admin package listing and deletion behavior across repository formats.
+// ABOUTME: Uses real storage and catalog records to verify package table API semantics.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::repository::proxy_indexing::{ProxyIndexing, ProxyIndexingError};
@@ -1365,6 +1367,8 @@ mod catalog_db_tests {
     };
     use crate::repository::NewRepository;
     use crate::repository::deb::{DebHostedConfig, DebRepositoryConfig, DebRepositoryConfigType};
+    use crate::repository::docker::{DockerRegistryConfig, DockerRegistryConfigType};
+    use crate::repository::maven::{MavenRepositoryConfig, MavenRepositoryConfigType};
     use crate::test_support::DB_TEST_LOCK;
     use ahash::HashMap;
     use nr_core::database::entities::user::auth_token::AuthToken;
@@ -1496,6 +1500,24 @@ mod catalog_db_tests {
             .id
     }
 
+    async fn insert_maven_hosted_repository(pool: &PgPool, storage_id: Uuid) -> Uuid {
+        let mut configs = HashMap::with_hasher(Default::default());
+        configs.insert(
+            MavenRepositoryConfigType::get_type_static().to_string(),
+            serde_json::to_value(MavenRepositoryConfig::Hosted).expect("serialize maven config"),
+        );
+        let repo = NewRepository {
+            name: "maven-hosted-test".into(),
+            uuid: Uuid::new_v4(),
+            repository_type: "maven".into(),
+            configs,
+        };
+        repo.insert(storage_id, pool)
+            .await
+            .expect("insert maven hosted repository")
+            .id
+    }
+
     async fn insert_php_repository(pool: &PgPool, storage_id: Uuid) -> Uuid {
         let repo = NewRepository {
             name: "composer-hosted-test".into(),
@@ -1538,6 +1560,24 @@ mod catalog_db_tests {
         repo.insert(storage_id, pool)
             .await
             .expect("insert deb repository")
+            .id
+    }
+
+    async fn insert_docker_repository(pool: &PgPool, storage_id: Uuid) -> Uuid {
+        let mut configs = HashMap::with_hasher(Default::default());
+        configs.insert(
+            DockerRegistryConfigType::get_type_static().to_string(),
+            serde_json::to_value(DockerRegistryConfig::Hosted).expect("serialize docker config"),
+        );
+        let repo = NewRepository {
+            name: "docker-hosted-test".into(),
+            uuid: Uuid::new_v4(),
+            repository_type: "docker".into(),
+            configs,
+        };
+        repo.insert(storage_id, pool)
+            .await
+            .expect("insert docker repository")
             .id
     }
 
@@ -1788,6 +1828,184 @@ mod catalog_db_tests {
             extra: version_data,
         };
         new_version.insert(pool).await.expect("insert version");
+    }
+
+    #[tokio::test]
+    async fn docker_package_listing_reports_referenced_manifest_and_blob_size() {
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        reset_database(&db).await;
+        let root = tempfile::tempdir().expect("tempdir");
+        let storage_id = insert_storage_at(db.pool(), root.path()).await;
+        let repository_id = insert_docker_repository(db.pool(), storage_id).await;
+        let fetched = chrono::Utc
+            .with_ymd_and_hms(2025, 1, 2, 12, 0, 0)
+            .single()
+            .unwrap();
+        let config_digest =
+            "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+        let layer_digest =
+            "sha256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let manifest = serde_json::to_vec(&json!({
+            "schemaVersion": 2,
+            "mediaType": "application/vnd.oci.image.manifest.v1+json",
+            "config": {
+                "mediaType": "application/vnd.oci.image.config.v1+json",
+                "digest": config_digest,
+                "size": 1
+            },
+            "layers": [
+                {
+                    "mediaType": "application/vnd.oci.image.layer.v1.tar+gzip",
+                    "digest": layer_digest,
+                    "size": 2
+                }
+            ]
+        }))
+        .expect("serialize docker manifest");
+        let config = b"stored config bytes";
+        let layer = b"stored layer bytes";
+
+        insert_proxy_version(
+            db.pool(),
+            repository_id,
+            "library/alpine",
+            "library/alpine",
+            "latest",
+            "v2/library/alpine/manifests/latest",
+            manifest.len() as u64,
+            fetched,
+        )
+        .await;
+
+        let site = build_site(&db, root.path()).await;
+        let repository = site
+            .get_repository(repository_id)
+            .expect("repository should be loaded");
+        let storage = repository.get_storage();
+        storage
+            .save_file(
+                repository_id,
+                FileContent::from(manifest.as_slice()),
+                &StoragePath::from("v2/library/alpine/manifests/latest"),
+            )
+            .await
+            .expect("save manifest");
+        storage
+            .save_file(
+                repository_id,
+                FileContent::from(config.as_slice()),
+                &StoragePath::from(format!("v2/library/alpine/blobs/{config_digest}")),
+            )
+            .await
+            .expect("save config");
+        storage
+            .save_file(
+                repository_id,
+                FileContent::from(layer.as_slice()),
+                &StoragePath::from(format!("v2/library/alpine/blobs/{layer_digest}")),
+            )
+            .await
+            .expect("save layer");
+
+        let response = super::list_cached_packages(
+            State(site.clone()),
+            Some(sample_auth()),
+            Path(repository_id),
+            Query(PackageListQuery {
+                page: 1,
+                per_page: 50,
+                q: None,
+                sort_by: PackageSortBy::Modified,
+                sort_dir: PackageSortDirection::Desc,
+            }),
+        )
+        .await
+        .expect("list packages succeeds");
+
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json response");
+        let size = payload["items"][0]["size"].as_u64().expect("size value");
+
+        assert_eq!(
+            size,
+            manifest.len() as u64 + config.len() as u64 + layer.len() as u64
+        );
+        site.close().await;
+    }
+
+    #[tokio::test]
+    async fn maven_package_listing_reports_stored_version_directory_size() {
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        reset_database(&db).await;
+        let root = tempfile::tempdir().expect("tempdir");
+        let storage_id = insert_storage_at(db.pool(), root.path()).await;
+        let repository_id = insert_maven_hosted_repository(db.pool(), storage_id).await;
+        let version_path = "org/example/demo/1.0.0";
+
+        insert_maven_version(
+            db.pool(),
+            repository_id,
+            "org.example:demo",
+            "1.0.0",
+            version_path,
+        )
+        .await;
+
+        let site = build_site(&db, root.path()).await;
+        let repository = site
+            .get_repository(repository_id)
+            .expect("repository should be loaded");
+        let storage = repository.get_storage();
+        let jar = b"jar bytes";
+        let pom = b"pom bytes";
+        let checksum = b"checksum";
+        for (name, bytes) in [
+            ("demo-1.0.0.jar", jar.as_slice()),
+            ("demo-1.0.0.pom", pom.as_slice()),
+            ("demo-1.0.0.jar.sha1", checksum.as_slice()),
+        ] {
+            storage
+                .save_file(
+                    repository_id,
+                    FileContent::from(bytes),
+                    &StoragePath::from(format!("{version_path}/{name}")),
+                )
+                .await
+                .expect("save maven file");
+        }
+
+        let response = super::list_cached_packages(
+            State(site.clone()),
+            Some(sample_auth()),
+            Path(repository_id),
+            Query(PackageListQuery {
+                page: 1,
+                per_page: 50,
+                q: None,
+                sort_by: PackageSortBy::Modified,
+                sort_dir: PackageSortDirection::Desc,
+            }),
+        )
+        .await
+        .expect("list packages succeeds");
+
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json response");
+        let size = payload["items"][0]["size"].as_u64().expect("size value");
+
+        assert_eq!(
+            size,
+            jar.len() as u64 + pom.len() as u64 + checksum.len() as u64
+        );
+        site.close().await;
     }
 
     #[tokio::test]

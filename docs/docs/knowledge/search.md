@@ -13,6 +13,8 @@ This guide explains how the pipeline works, how to interact with `/api/search/pa
 | **Query path** | `/api/search/packages` and `/api/repository/<id>/packages` read from `package_files` | same |
 | **Response** | JSON list of `PackageSearchResult` entries + optional `X-Pkgly-Warning` header when a repository has zero indexed rows | same |
 
+Docker admin package listings enrich catalog rows with storage metadata before responding: the row `size` represents stored manifest bytes plus referenced config/layer/child-manifest files that are present for that tag/reference, with digest deduplication within the row. Repository-level Storage Usage is intentionally separate and scans every stored file under the repository.
+
 ### Key tables & indexes
 - `projects(id, repository_id, key, name, path, …)`
 - `project_versions(id, project_id, repository_id, version, path, extra JSONB, updated_at, created_at)`

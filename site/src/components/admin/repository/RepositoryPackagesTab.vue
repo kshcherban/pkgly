@@ -1,3 +1,5 @@
+<!-- ABOUTME: Displays admin package and Docker image rows for a repository. -->
+<!-- ABOUTME: Handles package search, pagination, deletion, and row metadata formatting. -->
 <template>
   <section class="packages">
     <v-card>
@@ -89,9 +91,11 @@
         :items-per-page="perPage"
         :items-length="totalPackages"
         :items-per-page-options="perPageOptions"
+        :sort-by="sortBy"
         hide-default-footer
         @update:page="handlePageChange"
-        @update:items-per-page="handleItemsPerPageChange">
+        @update:items-per-page="handleItemsPerPageChange"
+        @update:sort-by="handleSortByChange">
 
         <template v-slot:item.size="{ value }">
           <div class="text-end">{{ formatBytes(value) }}</div>
@@ -191,6 +195,11 @@ interface PackageEntry {
   package: string;
 }
 
+interface TableSortItem {
+  key: string;
+  order?: "asc" | "desc";
+}
+
 const props = defineProps<{
   repositoryId: string;
   repositoryType?: string;
@@ -207,6 +216,7 @@ const perPageOptions = [25, 50, 100, 200, 500, 1000];
 const selected = ref<string[]>([]);
 const isDeleting = ref(false);
 const searchTerm = ref("");
+const sortBy = ref<TableSortItem[]>([{ key: "modified", order: "desc" }]);
 const pendingDeletionPaths = ref<string[]>([]);
 const pendingDeletionCount = ref(0);
 const indexingWarning = ref<string | null>(null);
@@ -232,6 +242,7 @@ watch(
     currentPage.value = 1;
     selected.value = [];
     searchTerm.value = "";
+    sortBy.value = [{ key: "modified", order: "desc" }];
     pendingDeletionPaths.value = [];
     pendingDeletionCount.value = 0;
     indexingWarning.value = null;
@@ -283,7 +294,7 @@ const headers = computed(() => {
       sortable: true,
     },
     {
-      title: "Size",
+      title: sizeColumnTitle.value,
       key: "size",
       sortable: true,
       align: "end" as const,
@@ -387,6 +398,9 @@ const nameColumnTitle = computed(() => {
   }
   return "Name";
 });
+const sizeColumnTitle = computed(() =>
+  isDockerRepository.value ? "Referenced Size" : "Size",
+);
 const pathColumnTitle = computed(() => {
   if (isDockerRepository.value) {
     return "Manifest Path";
@@ -416,11 +430,12 @@ async function loadPackages() {
   isLoading.value = true;
   error.value = null;
   try {
+    const sort = apiSortParams();
     const params: Record<string, any> = {
       page: currentPage.value,
       per_page: perPage.value,
-      sort_by: "modified",
-      sort_dir: "desc",
+      sort_by: sort.sortBy,
+      sort_dir: sort.sortDir,
     };
     const term = normalizedSearchTerm.value;
     if (term) {
@@ -535,6 +550,33 @@ function handlePageChange(value: number) {
     return;
   }
   currentPage.value = value;
+}
+
+function handleSortByChange(value: TableSortItem[]) {
+  const nextSort = value.length > 0 ? value : [{ key: "modified", order: "desc" as const }];
+  sortBy.value = nextSort;
+  selected.value = [];
+  if (currentPage.value !== 1) {
+    currentPage.value = 1;
+    return;
+  }
+  loadPackages();
+}
+
+function apiSortParams() {
+  const active = sortBy.value[0] ?? { key: "modified", order: "desc" as const };
+  const sortByMap: Record<string, string> = {
+    package: "package",
+    name: "name",
+    size: "size",
+    cachePath: "path",
+    blobDigest: "digest",
+    modified: "modified",
+  };
+  return {
+    sortBy: sortByMap[active.key] ?? "modified",
+    sortDir: active.order === "asc" ? "asc" : "desc",
+  };
 }
 
 function formatBytes(bytes: number): string {

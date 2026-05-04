@@ -94,7 +94,7 @@ Limitations:
 ## Browsing and Management
 
 - The repository browser flattens the internal `v2/.../manifests` layout so you can navigate storages, repositories, and image names without seeing implementation folders. Selecting an image shows all uploaded tags as individual entries.
-- The **Admin → Packages** tab lists Docker image manifests with the same paginated view used for other repository types. Administrators can select one or more tags and delete their manifests directly from the UI.
+- The **Admin → Packages** tab lists Docker image manifests with the same paginated view used for other repository types. Its **Referenced Size** column is per tag/reference row: Pkgly counts the stored manifest bytes plus referenced config, layer, and child-manifest files that are present in repository storage, deduped by digest for that row. Referenced objects that have not been pulled or cached yet are skipped. This differs from repository **Storage Usage**, which scans all regular files stored for the repository, including unreferenced blobs and leftover uploads.
 - Pkgly's global search now indexes Docker repositories. Queries match both the repository path (for example `library/nginx`) and individual tags (`latest`, build numbers, digests), returning the underlying manifest metadata.
 
 Deleting a manifest removes the tag immediately. Blobs referenced by other manifests are preserved; garbage collection for unused blobs is handled separately.

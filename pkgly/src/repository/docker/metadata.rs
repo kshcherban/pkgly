@@ -1,11 +1,13 @@
-use std::collections::VecDeque;
+// ABOUTME: Collects Docker registry metadata for listings, browse views, and size reporting.
+// ABOUTME: Resolves manifest paths and computes referenced Docker content sizes.
+use std::collections::{HashSet, VecDeque};
 
 use chrono::{DateTime, FixedOffset};
 use nr_core::storage::StoragePath;
 use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile, s3::S3Storage};
 use uuid::Uuid;
 
-use super::types::{Manifest, MediaType};
+use super::types::{Descriptor, Manifest, ManifestDescriptor, MediaType};
 
 /// Represents a manifest (tag or digest) stored for a Docker image.
 #[derive(Debug, Clone)]
@@ -100,11 +102,13 @@ pub async fn collect_manifest_entries(
                                 let mut manifest_path = manifests_path.clone();
                                 manifest_path.push_mut(&manifest.name);
 
-                                let manifest_bytes =
-                                    read_manifest_bytes(storage, repository_id, &manifest_path)
-                                        .await;
-                                let calculated_size = calculate_manifest_size(&manifest_bytes)
-                                    .unwrap_or(file_meta.file_size);
+                                let calculated_size = calculate_referenced_manifest_size(
+                                    storage,
+                                    repository_id,
+                                    &manifest_path,
+                                )
+                                .await?
+                                .unwrap_or(file_meta.file_size);
 
                                 manifests.push(DockerManifestEntry {
                                     repository: repository_name.clone(),
@@ -195,35 +199,99 @@ async fn collect_manifest_entries_s3(
     Ok(entries)
 }
 
-async fn read_manifest_bytes(
+async fn read_manifest_file(
     storage: &DynStorage,
     repository_id: Uuid,
     path: &StoragePath,
-) -> Vec<u8> {
+) -> Result<Option<(Vec<u8>, u64)>, StorageError> {
     let manifest_file = match storage.open_file(repository_id, path).await {
         Ok(Some(file)) => file,
-        Ok(None) => return Vec::new(),
-        Err(err) => {
-            tracing::warn!(?err, manifest_path = %path, "Failed to open manifest file");
-            return Vec::new();
-        }
+        Ok(None) => return Ok(None),
+        Err(err) => return Err(err),
     };
 
     let StorageFile::File { meta, content } = manifest_file else {
-        return Vec::new();
+        return Ok(None);
     };
 
     let size_hint = usize::try_from(meta.file_type.file_size).unwrap_or(0);
     match content.read_to_vec(size_hint).await {
-        Ok(bytes) => bytes,
+        Ok(bytes) => Ok(Some((bytes, meta.file_type.file_size))),
         Err(err) => {
             tracing::warn!(?err, manifest_path = %path, "Failed to read manifest content");
-            Vec::new()
+            Ok(None)
         }
     }
 }
 
-fn calculate_manifest_size(bytes: &[u8]) -> Option<u64> {
+pub(crate) async fn calculate_referenced_manifest_size(
+    storage: &DynStorage,
+    repository_id: Uuid,
+    manifest_path: &StoragePath,
+) -> Result<Option<u64>, StorageError> {
+    let manifest_path_string = manifest_path.to_string();
+    let Some((repository_name, _)) = split_manifest_cache_path(&manifest_path_string) else {
+        return Ok(None);
+    };
+    let Some((bytes, manifest_size)) =
+        read_manifest_file(storage, repository_id, manifest_path).await?
+    else {
+        return Ok(None);
+    };
+    let Some(manifest) = parse_manifest(&bytes) else {
+        return Ok(None);
+    };
+
+    let mut total = manifest_size;
+    let mut seen_blobs = HashSet::new();
+    let mut seen_manifests = HashSet::new();
+    let mut pending_manifests = Vec::new();
+
+    add_manifest_payload_sizes(
+        storage,
+        repository_id,
+        &repository_name,
+        manifest,
+        &mut total,
+        &mut seen_blobs,
+        &mut pending_manifests,
+    )
+    .await?;
+
+    while let Some(descriptor) = pending_manifests.pop() {
+        if !seen_manifests.insert(descriptor.digest.clone()) {
+            continue;
+        }
+
+        let child_path = StoragePath::from(format!(
+            "v2/{}/manifests/{}",
+            repository_name, descriptor.digest
+        ));
+        let Some((child_bytes, child_size)) =
+            read_manifest_file(storage, repository_id, &child_path).await?
+        else {
+            continue;
+        };
+
+        total += child_size;
+        if let Some(child_manifest) = parse_manifest(&child_bytes) {
+            add_manifest_payload_sizes(
+                storage,
+                repository_id,
+                &repository_name,
+                child_manifest,
+                &mut total,
+                &mut seen_blobs,
+                &mut pending_manifests,
+            )
+            .await?;
+        }
+    }
+
+    Ok(Some(total))
+}
+
+fn parse_manifest(bytes: &[u8]) -> Option<Manifest> {
     if bytes.is_empty() {
         return None;
     }
@@ -234,32 +302,95 @@ fn calculate_manifest_size(bytes: &[u8]) -> Option<u64> {
         .and_then(|v| v.as_str())
         .unwrap_or(MediaType::OCI_IMAGE_MANIFEST);
 
-    let manifest = Manifest::from_bytes(bytes, media_type).ok()?;
-    Some(match manifest {
-        Manifest::DockerV2(manifest) => {
-            let mut total = normalize_size(manifest.config.size);
-            for layer in manifest.layers {
-                total += normalize_size(layer.size);
-            }
-            total
-        }
-        Manifest::OciImage(manifest) => {
-            let mut total = manifest
-                .config
-                .as_ref()
-                .map(|descriptor| normalize_size(descriptor.size))
-                .unwrap_or(0);
-            for layer in manifest.layers {
-                total += normalize_size(layer.size);
-            }
-            total
-        }
-        Manifest::OciIndex(index) => index.manifests.into_iter().fold(0u64, |acc, descriptor| {
-            acc + normalize_size(descriptor.size)
-        }),
-    })
+    Manifest::from_bytes(bytes, media_type).ok()
 }
 
-fn normalize_size(size: i64) -> u64 {
-    u64::try_from(size.max(0)).unwrap_or(0)
+async fn add_manifest_payload_sizes(
+    storage: &DynStorage,
+    repository_id: Uuid,
+    repository_name: &str,
+    manifest: Manifest,
+    total: &mut u64,
+    seen_blobs: &mut HashSet<String>,
+    pending_manifests: &mut Vec<ManifestDescriptor>,
+) -> Result<(), StorageError> {
+    match manifest {
+        Manifest::DockerV2(manifest) => {
+            add_blob_descriptor_size(
+                storage,
+                repository_id,
+                repository_name,
+                &manifest.config,
+                total,
+                seen_blobs,
+            )
+            .await?;
+            for layer in manifest.layers.iter() {
+                add_blob_descriptor_size(
+                    storage,
+                    repository_id,
+                    repository_name,
+                    layer,
+                    total,
+                    seen_blobs,
+                )
+                .await?;
+            }
+        }
+        Manifest::OciImage(manifest) => {
+            if let Some(config) = manifest.config.as_ref() {
+                add_blob_descriptor_size(
+                    storage,
+                    repository_id,
+                    repository_name,
+                    config,
+                    total,
+                    seen_blobs,
+                )
+                .await?;
+            }
+            for layer in manifest.layers.iter() {
+                add_blob_descriptor_size(
+                    storage,
+                    repository_id,
+                    repository_name,
+                    layer,
+                    total,
+                    seen_blobs,
+                )
+                .await?;
+            }
+        }
+        Manifest::OciIndex(index) => {
+            pending_manifests.extend(index.manifests);
+        }
+    }
+    Ok(())
 }
+
+async fn add_blob_descriptor_size(
+    storage: &DynStorage,
+    repository_id: Uuid,
+    repository_name: &str,
+    descriptor: &Descriptor,
+    total: &mut u64,
+    seen_blobs: &mut HashSet<String>,
+) -> Result<(), StorageError> {
+    if !seen_blobs.insert(descriptor.digest.clone()) {
+        return Ok(());
+    }
+
+    let blob_path = StoragePath::from(format!(
+        "v2/{}/blobs/{}",
+        repository_name, descriptor.digest
+    ));
+    if let Some(StorageFile::File { meta, .. }) =
+        storage.open_file(repository_id, &blob_path).await?
+    {
+        *total += meta.file_type.file_size;
+    }
+    Ok(())
+}
+
+#[cfg(test)]
+mod tests;

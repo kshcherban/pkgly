@@ -1,6 +1,6 @@
 # How to setup Pkgly
 ## Pre Install Tasks
-1. Install MySQL. For more information click [here](https://docs.pkgly.dev/knowledge/InternalWorkings.html#users).
+1. Install MySQL.
 2. Create a database. For pkgly to use
 ## Getting your build
 Please use one of the following options for your build

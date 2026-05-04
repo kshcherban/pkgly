@@ -1,3 +1,5 @@
+// ABOUTME: Serves admin package listing and deletion APIs for repository contents.
+// ABOUTME: Maps catalog and storage metadata into package table rows for all repository types.
 use std::sync::Arc;
 #[cfg(test)]
 use std::{
@@ -17,11 +19,11 @@ use axum::{
 };
 use chrono::{DateTime, FixedOffset};
 use http::header::HeaderValue;
-use nr_storage::Storage;
 #[cfg(test)]
-use nr_storage::{DynStorage, FileType, StorageFile, StorageFileMeta};
+use nr_storage::StorageFileMeta;
 #[cfg(test)]
-use nr_storage::{StorageError, s3::S3Storage};
+use nr_storage::s3::S3Storage;
+use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
 use serde_json;
@@ -50,7 +52,9 @@ use crate::{
         DynRepository, Repository,
         docker::{
             DockerRegistry,
-            metadata::{docker_package_key, split_manifest_cache_path},
+            metadata::{
+                calculate_referenced_manifest_size, docker_package_key, split_manifest_cache_path,
+            },
             types::{Manifest as DockerManifest, MediaType},
         },
         go::GoRepository,
@@ -732,17 +736,55 @@ pub async fn list_cached_packages(
     };
     let (total_packages, rows) =
         DBPackageFile::list_repository_page(&site.database, &params).await?;
-    let items = rows
-        .into_iter()
-        .map(|row| PackageFileEntry {
+    let is_docker_repository = matches!(repository, DynRepository::Docker(_));
+    let is_maven_repository = matches!(repository, DynRepository::Maven(_));
+    let storage = repository.get_storage();
+    let mut items = Vec::with_capacity(rows.len());
+    for row in rows {
+        let mut entry = PackageFileEntry {
             package: row.package,
             name: row.name,
-            cache_path: row.path,
+            cache_path: row.path.clone(),
             blob_digest: row.content_digest.or(row.upstream_digest),
             size: row.size_bytes.max(0) as u64,
             modified: row.modified_at,
-        })
-        .collect();
+        };
+
+        if is_docker_repository {
+            let manifest_path = StoragePath::from(entry.cache_path.as_str());
+            match calculate_referenced_manifest_size(&storage, repository.id(), &manifest_path)
+                .await
+            {
+                Ok(Some(size)) => {
+                    entry.size = size;
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        cache_path = %entry.cache_path,
+                        "Failed to calculate Docker referenced size"
+                    );
+                }
+            }
+        } else if is_maven_repository {
+            match calculate_stored_path_size(&storage, repository.id(), &entry.cache_path).await {
+                Ok(Some(size)) => {
+                    entry.size = size;
+                }
+                Ok(None) => {}
+                Err(err) => {
+                    warn!(
+                        ?err,
+                        cache_path = %entry.cache_path,
+                        "Failed to calculate Maven stored path size"
+                    );
+                }
+            }
+        }
+
+        items.push(entry);
+    }
     let response_body = PackageListResponse {
         page: current_page,
         per_page,
@@ -766,9 +808,34 @@ pub async fn list_cached_packages(
     Ok(response)
 }
 
-#[cfg(test)]
 fn should_ignore(name: &str) -> bool {
     name.starts_with('.') || name.ends_with(".nr-meta")
+}
+
+async fn calculate_stored_path_size(
+    storage: &DynStorage,
+    repository_id: Uuid,
+    cache_path: &str,
+) -> Result<Option<u64>, StorageError> {
+    let storage_path = StoragePath::from(cache_path);
+    let Some(file) = storage.open_file(repository_id, &storage_path).await? else {
+        return Ok(None);
+    };
+
+    match file {
+        StorageFile::File { meta, .. } => Ok(Some(meta.file_type.file_size)),
+        StorageFile::Directory { files, .. } => {
+            let total = files
+                .iter()
+                .filter(|entry| !should_ignore(entry.name()))
+                .filter_map(|entry| match entry.file_type() {
+                    FileType::File(file_meta) => Some(file_meta.file_size),
+                    FileType::Directory(_) => None,
+                })
+                .sum();
+            Ok(Some(total))
+        }
+    }
 }
 
 #[cfg(test)]

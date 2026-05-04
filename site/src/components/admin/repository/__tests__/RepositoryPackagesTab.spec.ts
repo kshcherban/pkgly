@@ -1,3 +1,5 @@
+// ABOUTME: Tests admin repository package table rendering and API interactions.
+// ABOUTME: Covers package metadata columns, searching, pagination, and repository-specific labels.
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
@@ -106,7 +108,9 @@ const VDataTableStub = defineComponent({
     itemsPerPage: [Number, String],
     hideDefaultFooter: Boolean,
     loading: Boolean,
+    sortBy: Array,
   },
+  emits: ["update:sortBy"],
   template: "<table class='v-data-table'><slot /></table>",
 });
 
@@ -311,6 +315,62 @@ describe("RepositoryPackagesTab.vue", () => {
     });
   });
 
+  it("requests sorted package pages when table sort changes", async () => {
+    const httpGet = http.get as vi.Mock;
+    httpGet.mockClear();
+
+    const wrapper = mount(RepositoryPackagesTab, {
+      props: {
+        repositoryId: "1",
+        repositoryType: "maven",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+    httpGet.mockClear();
+
+    const table = wrapper.getComponent(VDataTableStub);
+    table.vm.$emit("update:sortBy", [{ key: "size", order: "asc" }]);
+
+    await flushPromises();
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(httpGet).toHaveBeenCalledWith("/api/repository/1/packages", {
+      params: { page: 1, per_page: 50, sort_by: "size", sort_dir: "asc" },
+    });
+  });
+
+  it("maps blob digest sorting to digest API sort", async () => {
+    const httpGet = http.get as vi.Mock;
+    httpGet.mockClear();
+
+    const wrapper = mount(RepositoryPackagesTab, {
+      props: {
+        repositoryId: "1",
+        repositoryType: "docker",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+    httpGet.mockClear();
+
+    const table = wrapper.getComponent(VDataTableStub);
+    table.vm.$emit("update:sortBy", [{ key: "blobDigest", order: "desc" }]);
+
+    await flushPromises();
+
+    expect(httpGet).toHaveBeenCalledTimes(1);
+    expect(httpGet).toHaveBeenCalledWith("/api/repository/1/packages", {
+      params: { page: 1, per_page: 50, sort_by: "digest", sort_dir: "desc" },
+    });
+  });
+
   it("keeps search field visible when search returns zero results", async () => {
     const httpGet = http.get as vi.Mock;
     httpGet.mockClear();
@@ -447,5 +507,43 @@ describe("RepositoryPackagesTab.vue", () => {
 
     const headers = wrapper.vm.headers as any[];
     expect(headers.some((header) => header.key === "blobDigest")).toBe(true);
+  });
+
+  it("labels Docker size column as referenced size", async () => {
+    const wrapper = mount(RepositoryPackagesTab, {
+      props: {
+        repositoryId: "repo-docker",
+        repositoryType: "docker",
+        repositoryKind: "hosted",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    const headers = wrapper.vm.headers as any[];
+    const sizeHeader = headers.find((header) => header.key === "size");
+    expect(sizeHeader?.title).toBe("Referenced Size");
+  });
+
+  it("keeps non-Docker size column label as size", async () => {
+    const wrapper = mount(RepositoryPackagesTab, {
+      props: {
+        repositoryId: "repo-npm",
+        repositoryType: "npm",
+        repositoryKind: "hosted",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    const headers = wrapper.vm.headers as any[];
+    const sizeHeader = headers.find((header) => header.key === "size");
+    expect(sizeHeader?.title).toBe("Size");
   });
 });
