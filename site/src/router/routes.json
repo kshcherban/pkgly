@@ -76,6 +76,10 @@
         "name": "SystemWebhooks"
     },
     {
+        "path": "/admin/system/password-rules",
+        "name": "SystemPasswordRules"
+    },
+    {
         "path": "/profile",
         "name": "profile"
     },

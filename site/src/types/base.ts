@@ -53,7 +53,7 @@ export interface SiteInfo {
   description: string;
   is_installed: boolean;
   version: string;
-  password_rules?: PasswordRules;
+  password_rules?: PasswordRules | null;
   sso?: SsoInfo;
   oauth2?: InstanceOAuth2Settings;
 }

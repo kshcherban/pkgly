@@ -61,7 +61,7 @@ const props = defineProps({
   },
 
   passwordRules: {
-    type: Object as PropType<PasswordRules>,
+    type: Object as PropType<PasswordRules | null>,
     required: false,
   },
 });

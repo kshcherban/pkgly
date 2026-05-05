@@ -39,6 +39,11 @@
         routeName="SystemWebhooks">
         <span>Webhooks</span>
       </SideNavElement>
+      <SideNavElement
+        to="/admin/system/password-rules"
+        routeName="SystemPasswordRules">
+        <span>Password Rules</span>
+      </SideNavElement>
     </div>
   </SideNav>
 </template>

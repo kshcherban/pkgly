@@ -74,3 +74,32 @@ auto_create_users = true
 You can also manage these settings under **Admin → System → Single Sign-On** without editing configuration files or restarting the service.
 
 Requests that reach `/api/user/sso/login` must already be authenticated by the upstream provider; Pkgly verifies the JWT signature and claims, issues its own session cookie, and redirects back to the UI.
+
+## Password Rules
+
+Pkgly enforces configurable password strength requirements for all user passwords (login, registration, and password changes). The defaults require at least 8 characters with uppercase, lowercase, a number, and a special character.
+
+### Configuring via config.toml
+
+Add a `[security.password_rules]` section:
+
+```toml
+[security.password_rules]
+min_length = 12
+require_uppercase = false
+require_lowercase = true
+require_number = false
+require_symbol = false
+```
+
+All fields are optional. Omitted fields fall back to their defaults (`min_length: 8`, all `require_*` set to `true`).
+
+### Managing via the Admin UI
+
+Password rules can also be configured at runtime under **Admin → System → Password Rules** without editing configuration files or restarting the service. The UI provides:
+
+- An **enable/disable** toggle — when disabled, no password strength checks are applied.
+- A **minimum length** field and four toggles for uppercase, lowercase, number, and symbol requirements.
+- An inline warning when no constraints are active (at least one must be set before saving).
+
+Changes made through the UI are persisted to the database and **override the `config.toml` value** after the next restart. If you later disable the rules through the UI (which deletes the database entry), the `config.toml` value takes effect again on the next restart.

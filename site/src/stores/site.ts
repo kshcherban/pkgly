@@ -33,7 +33,17 @@ export const siteStore = defineStore(
         require_number: true,
         require_symbol: true,
       };
+      const noConstraints: PasswordRules = {
+        min_length: 0,
+        require_uppercase: false,
+        require_lowercase: false,
+        require_number: false,
+        require_symbol: false,
+      };
       const rules = siteInfo.value?.password_rules;
+      if (rules === null) {
+        return noConstraints;
+      }
       if (!rules) {
         return fallback;
       }

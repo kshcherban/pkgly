@@ -10,6 +10,7 @@ import UserCreateView from "@/views/admin/user/UserCreateView.vue";
 import UserListView from "@/views/admin/user/UserListView.vue";
 import UserPage from "@/views/admin/user/UserPage.vue";
 import AdminSystem from "./AdminSystem.vue";
+import AdminPasswordRules from "./AdminPasswordRules.vue";
 import AdminWebhooks from "./AdminWebhooks.vue";
 const defaultAdminMeta = {
   sideBar: AdminNav,
@@ -135,6 +136,12 @@ export const adminRoutes = [
     path: "/admin/system/webhooks",
     name: "SystemWebhooks",
     component: AdminWebhooks,
+    meta: defaultAdminMeta,
+  },
+  {
+    path: "/admin/system/password-rules",
+    name: "SystemPasswordRules",
+    component: AdminPasswordRules,
     meta: defaultAdminMeta,
   },
 ];

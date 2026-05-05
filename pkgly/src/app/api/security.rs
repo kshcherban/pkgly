@@ -10,7 +10,7 @@ use crate::{
         authentication::oauth::normalize_scopes,
         config::{
             OAuth2CasbinConfig, OAuth2GoogleConfig, OAuth2GroupRoleMapping, OAuth2MicrosoftConfig,
-            OAuth2Settings, OidcProviderConfig, SsoSettings, TokenSource,
+            OAuth2Settings, OidcProviderConfig, PasswordRules, SsoSettings, TokenSource,
         },
     },
     error::InternalError,
@@ -26,9 +26,11 @@ use serde::{Deserialize, Serialize};
         get_sso_settings,
         update_sso_settings,
         get_oauth2_settings,
-        update_oauth2_settings
+        update_oauth2_settings,
+        get_password_rules,
+        update_password_rules,
     ),
-    components(schemas(SsoSettings, OAuth2Settings))
+    components(schemas(SsoSettings, OAuth2Settings, PasswordRules))
 )]
 pub struct SecurityAPI;
 
@@ -38,6 +40,10 @@ pub fn security_routes() -> axum::Router<Pkgly> {
         .route(
             "/oauth2",
             get(get_oauth2_settings).put(update_oauth2_settings),
+        )
+        .route(
+            "/password-rules",
+            get(get_password_rules).put(update_password_rules),
         )
 }
 
@@ -562,6 +568,71 @@ pub async fn update_oauth2_settings(
         return Ok(
             ResponseBuilder::internal_server_error().body("Failed to update OAuth2 configuration")
         );
+    }
+
+    Ok(ResponseBuilder::no_content().empty())
+}
+
+#[utoipa::path(
+    get,
+    path = "/password-rules",
+    tag = "security",
+    responses(
+        (status = 200, description = "Current password rules configuration", body = Option<PasswordRules>)
+    ),
+    security(("session" = []))
+)]
+#[instrument(skip(auth, site), fields(project_module = "Security"))]
+pub async fn get_password_rules(
+    auth: Authentication,
+    State(site): State<Pkgly>,
+) -> Result<Response, InternalError> {
+    if !auth.is_admin_or_system_manager() {
+        return Ok(ResponseBuilder::forbidden().body("Administrator permissions required"));
+    }
+
+    let rules = site.security_settings().password_rules;
+    Ok(ResponseBuilder::ok().json(&rules))
+}
+
+#[utoipa::path(
+    put,
+    path = "/password-rules",
+    tag = "security",
+    request_body = Option<PasswordRules>,
+    responses(
+        (status = 204, description = "Password rules updated"),
+        (status = 400, description = "Invalid rules configuration"),
+        (status = 403, description = "Administrator permissions required"),
+        (status = 500, description = "Failed to update password rules")
+    ),
+    security(("session" = []))
+)]
+#[instrument(skip(auth, site), fields(project_module = "Security"))]
+pub async fn update_password_rules(
+    auth: Authentication,
+    State(site): State<Pkgly>,
+    Json(rules): Json<Option<PasswordRules>>,
+) -> Result<Response, InternalError> {
+    if !auth.is_admin_or_system_manager() {
+        return Ok(ResponseBuilder::forbidden().body("Administrator permissions required"));
+    }
+
+    if let Some(ref rules) = rules {
+        if rules.min_length == 0
+            && !rules.require_uppercase
+            && !rules.require_lowercase
+            && !rules.require_number
+            && !rules.require_symbol
+        {
+            return Ok(ResponseBuilder::bad_request()
+                .body("Password rules must have at least one constraint"));
+        }
+    }
+
+    if let Err(err) = site.update_password_rules(rules).await {
+        error!(%err, "Failed to update password rules");
+        return Ok(ResponseBuilder::internal_server_error().body("Failed to update password rules"));
     }
 
     Ok(ResponseBuilder::no_content().empty())

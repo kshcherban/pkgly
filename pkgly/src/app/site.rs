@@ -58,7 +58,7 @@ use super::{
         oauth::{OAuth2Rbac, OAuth2Service},
         session::{SessionManager, SessionManagerConfig},
     },
-    config::{Mode, OAuth2Settings, SecuritySettings, SiteSetting, SsoSettings},
+    config::{Mode, OAuth2Settings, PasswordRules, SecuritySettings, SiteSetting, SsoSettings},
     email::EmailSetting,
     email_service::{EmailAccess, EmailService},
     state::{Instance, InstanceOAuth2Settings, InstanceSsoSettings, RepositoryStorageName},
@@ -271,12 +271,21 @@ impl Pkgly {
             ApplicationSettings::get::<OAuth2Settings>("security.oauth2", &database)
                 .await
                 .context("Failed to load stored OAuth2 settings")?;
+        let stored_password_rules =
+            ApplicationSettings::get::<Option<PasswordRules>>("security.password_rules", &database)
+                .await
+                .context("Failed to load stored password rules")?;
         let mut security = security;
         if let Some(stored_sso) = stored_sso {
             security.sso = Some(stored_sso);
         }
         if let Some(stored_oauth2) = stored_oauth2 {
             security.oauth2 = Some(stored_oauth2);
+        }
+        match stored_password_rules {
+            Some(None) => security.password_rules = None,
+            Some(Some(rules)) => security.password_rules = Some(rules),
+            None => {}
         }
 
         let oauth2_service = match security.oauth2.clone() {
@@ -793,6 +802,22 @@ impl Pkgly {
         } else {
             ApplicationSettings::delete("security.sso", &self.database).await?;
         }
+
+        Ok(())
+    }
+
+    pub async fn update_password_rules(&self, rules: Option<PasswordRules>) -> anyhow::Result<()> {
+        {
+            let mut security = self.inner.general_security_settings.write();
+            security.password_rules = rules.clone();
+        }
+
+        {
+            let mut instance = self.inner.instance.lock();
+            instance.password_rules = rules.clone();
+        }
+
+        ApplicationSettings::upsert("security.password_rules", &rules, &self.database).await?;
 
         Ok(())
     }

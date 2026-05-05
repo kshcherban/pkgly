@@ -66,14 +66,8 @@
               v-if="user"
               class="my-6" />
 
-            <div
-              v-if="user && !passwordRules"
-              class="text-body-2 text-medium-emphasis">
-              Password changes are currently disabled by the administrator.
-            </div>
-
             <form
-              v-else-if="user"
+              v-if="user"
               data-testid="password-form"
               @submit.prevent="changePassword">
               <input
