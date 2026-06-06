@@ -1,12 +1,29 @@
+<!-- ABOUTME: Displays public repository metadata, setup guidance, and package contents. -->
+<!-- ABOUTME: Keeps operational status visible while setup instructions stay collapsible. -->
 <template>
   <v-container v-if="repository" class="repository-page" fluid>
     <v-card variant="flat" class="repository-page__header">
       <v-card-text class="repository-page__header-shell">
         <div class="repository-page__header-summary">
           <div class="repository-page__title">
-            <h1 class="text-h5 text-md-h4 font-weight-semibold mb-0">
+            <h1 class="text-h5 font-weight-semibold mb-0">
               {{ repository.storage_name }}/{{ repository.name }}
             </h1>
+            <div
+              data-testid="repository-metadata"
+              class="repository-page__summary-meta">
+              <span>{{ repository.repository_type.toUpperCase() }}</span>
+              <span>{{ repositoryKindLabel }}</span>
+              <v-chip size="x-small" variant="outlined">
+                {{ repository.auth_enabled ? "Secured" : "Unsecured" }}
+              </v-chip>
+              <v-chip
+                size="x-small"
+                :color="repository.active ? 'success' : 'default'"
+                :variant="repository.active ? 'tonal' : 'outlined'">
+                {{ repository.active ? "Active" : "Inactive" }}
+              </v-chip>
+            </div>
           </div>
           <button
             type="button"
@@ -32,7 +49,9 @@
                   :name="repositoryType.name"
                   :icon="icon" />
               </div>
-              <CopyURL :code="url" />
+              <div class="repository-page__url">
+                <CopyURL :code="url" label="repository URL" />
+              </div>
             </div>
           </div>
           <div class="repository-page__header-helper">
@@ -86,6 +105,16 @@ const repositoryType = computed(() => {
   return undefined;
 });
 const packagePerPageOptions = [50, 100, 200, 500, 1000];
+const repositoryKindLabel = computed(() => {
+  const kind = repository.value?.repository_kind?.toLowerCase();
+  if (kind === "proxy") {
+    return "Proxy";
+  }
+  if (kind === "virtual") {
+    return "Virtual";
+  }
+  return "Hosted";
+});
 const showPackages = computed(() => {
   return supportsRepositoryPackageView(repository.value?.repository_type);
 });
@@ -142,12 +171,14 @@ onMounted(() => {
 </script>
 <style scoped lang="scss">
 .repository-page {
+  max-width: 1440px;
   padding-top: 1.5rem;
   padding-bottom: 2rem;
 }
 
 .repository-page__header {
-  border-radius: 16px;
+  border-bottom: 1px solid var(--nr-border-color);
+  border-radius: 0;
 }
 
 .repository-page__header-shell {
@@ -163,9 +194,23 @@ onMounted(() => {
   gap: 1rem;
 }
 
+.repository-page__title {
+  min-width: 0;
+}
+
+.repository-page__summary-meta {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-spacing-sm);
+  margin-top: var(--nr-spacing-sm);
+  color: var(--nr-text-secondary);
+  font-size: var(--nr-font-size-sm);
+  flex-wrap: wrap;
+}
+
 .repository-page__header-toggle {
   border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: 999px;
+  border-radius: var(--nr-radius-lg);
   background: #fff;
   padding: 0.45rem 0.9rem;
   cursor: pointer;
@@ -199,10 +244,8 @@ onMounted(() => {
 }
 
 .repository-page__meta {
-  display: flex;
-  align-items: center;
-  gap: 1rem;
-  flex-wrap: wrap;
+  display: grid;
+  gap: var(--nr-spacing-md);
 }
 
 .repository-page__icons {
@@ -212,5 +255,9 @@ onMounted(() => {
 
 .repository-page__meta :deep(.copyURL) {
   margin: 0;
+}
+
+.repository-page__url {
+  min-width: 0;
 }
 </style>

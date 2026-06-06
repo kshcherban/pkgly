@@ -1,3 +1,5 @@
+// ABOUTME: Verifies public repository metadata, setup disclosure, and package rendering.
+// ABOUTME: Covers repository data loaded through the public route contracts.
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, ref } from "vue";
@@ -53,6 +55,7 @@ describe("RepositoryPageView.vue", () => {
           "v-container": simpleStub,
           "v-card": simpleStub,
           "v-card-text": simpleStub,
+          "v-chip": simpleStub,
           CopyURL: simpleStub,
           RepositoryHelper: simpleStub,
           RepositoryIcon: simpleStub,
@@ -75,6 +78,7 @@ describe("RepositoryPageView.vue", () => {
           "v-container": simpleStub,
           "v-card": simpleStub,
           "v-card-text": simpleStub,
+          "v-chip": simpleStub,
           CopyURL: defineComponent({
             template: "<div data-testid='copy-url'>Copy URL</div>",
           }),
@@ -102,5 +106,45 @@ describe("RepositoryPageView.vue", () => {
     const meta = wrapper.get(".repository-page__meta").html();
     expect(header.text()).toContain("Repository helper");
     expect(meta.indexOf("repository-icon")).toBeLessThan(meta.indexOf("copy-url"));
+  });
+
+  it("shows operational metadata while setup is collapsed and passes the exact URL to copy", async () => {
+    const copyStub = defineComponent({
+      props: {
+        code: {
+          type: String,
+          required: true,
+        },
+      },
+      template: "<div data-testid='copy-url'>{{ code }}</div>",
+    });
+    const wrapper = mount(RepositoryPageView, {
+      global: {
+        stubs: {
+          "v-container": simpleStub,
+          "v-card": simpleStub,
+          "v-card-text": simpleStub,
+          "v-chip": simpleStub,
+          CopyURL: copyStub,
+          RepositoryHelper: simpleStub,
+          RepositoryIcon: simpleStub,
+          RepositoryPackagesPublic: simpleStub,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    const metadata = wrapper.get('[data-testid="repository-metadata"]').text();
+    expect(metadata).toContain("NPM");
+    expect(metadata).toContain("Hosted");
+    expect(metadata).toContain("Unsecured");
+    expect(metadata).toContain("Active");
+    expect(wrapper.find('[data-testid="copy-url"]').exists()).toBe(false);
+
+    await wrapper.get('[data-testid="repository-header-toggle"]').trigger("click");
+    expect(wrapper.getComponent(copyStub).props("code")).toBe(
+      "http://localhost:3000/repositories/primary/example",
+    );
   });
 });

@@ -1,3 +1,5 @@
+<!-- ABOUTME: Manages repositories and reports cached storage usage for administrators. -->
+<!-- ABOUTME: Prioritizes human-readable repository metadata over implementation identifiers. -->
 <template>
   <v-container class="py-6 admin-repository-page">
     <div class="page-header">
@@ -7,20 +9,23 @@
           Monitor repository cache usage and manage repositories within this instance.
         </p>
       </div>
-      <div class="page-header__actions">
+      <div class="page-header__actions" aria-label="Repository actions">
         <div class="page-header__cache">
-          <div class="text-body-1 font-weight-medium">Storage Usage Cache</div>
-          <div class="text-caption text-medium-emphasis">{{ usageStatusText }}</div>
+          <v-icon size="small" color="primary">mdi-database-clock-outline</v-icon>
+          <div>
+            <div class="text-body-2 font-weight-medium">Storage usage</div>
+            <div class="text-caption text-medium-emphasis">{{ usageStatusText }}</div>
+          </div>
           <v-btn
             color="primary"
-            variant="flat"
+            variant="tonal"
             :loading="refreshing"
             :disabled="loading"
-            prepend-icon="mdi-refresh"
+            icon="mdi-refresh"
+            aria-label="Refresh storage usage"
+            title="Refresh storage usage"
             class="page-header__refresh"
-            @click="refreshUsage">
-            {{ refreshing ? "Refreshing…" : "Refresh Storage Usage" }}
-          </v-btn>
+            @click="refreshUsage" />
         </div>
         <v-btn
           v-if="repositories.length >= 1 && hasStorages"
@@ -57,30 +62,43 @@
             item-value="id"
             @click:row="handleRowClick"
             class="elevation-0 repository-table">
-            <template #[`item.repository_kind`]="{ value }">
-              <v-chip
-                size="small"
-                :color="value === 'Proxy' ? 'primary' : value === 'Virtual' ? '#b388ff' : 'default'"
-                variant="tonal">
-                {{ value }}
-              </v-chip>
-            </template>
-            <template #[`item.auth_enabled`]="{ value }">
-              <v-chip
-                :color="value ? 'success' : 'default'"
-                :variant="value ? 'flat' : 'outlined'"
-                size="small">
-                {{ value ? 'On' : 'Off' }}
-              </v-chip>
+            <template #[`item.repository`]="{ item }">
+              <div class="repository-cell">
+                <span class="font-weight-medium">{{ item.name }}</span>
+                <span class="text-caption text-medium-emphasis">
+                  {{ item.repository_type.toUpperCase() }} · {{ item.repository_kind }}
+                </span>
+              </div>
             </template>
 
-            <template #[`item.storage_usage_bytes`]="{ value }">
+            <template #[`item.access`]="{ item }">
+              <div class="access-cell">
+                <v-chip size="x-small" variant="outlined">
+                  {{ item.auth_label }}
+                </v-chip>
+                <v-chip
+                  size="x-small"
+                  :color="item.active ? 'success' : 'default'"
+                  :variant="item.active ? 'tonal' : 'outlined'">
+                  {{ item.active_label }}
+                </v-chip>
+              </div>
+            </template>
+
+            <template #[`item.usage`]="{ value }">
               <span class="text-no-wrap">{{ formatBytes(value) }}</span>
             </template>
 
             <template #[`item.storage_usage_updated_at`]="{ value }">
-              <span class="text-caption text-medium-emphasis">
+              <time
+                v-if="isValidTimestamp(value)"
+                :datetime="value"
+                :title="formatExactTimestamp(value)"
+                class="text-caption text-medium-emphasis text-no-wrap">
                 {{ formatUpdatedAt(value) }}
+              </time>
+              <span v-else class="text-caption text-medium-emphasis">
+                Not available
               </span>
             </template>
 
@@ -134,53 +152,29 @@ const error = ref<string | null>(null);
 // Define table headers
 const headers: DataTableHeader[] = [
   {
-    title: 'ID #',
-    key: 'id',
-    value: 'id',
-    sortable: true,
-  },
-  {
-    title: 'Name',
-    key: 'name',
+    title: 'Repository',
+    key: 'repository',
     value: 'name',
     sortable: true,
   },
   {
-    title: 'Storage Name',
+    title: 'Storage',
     key: 'storage_name',
     value: 'storage_name',
     sortable: true,
   },
   {
-    title: 'Repository Type',
-    key: 'repository_type',
-    value: 'repository_type',
-    sortable: true,
-  },
-  {
-    title: 'Kind',
-    key: 'repository_kind',
-    value: 'repository_kind',
+    title: 'Access',
+    key: 'access',
+    value: 'auth_label',
     sortable: false,
   },
   {
-    title: 'Auth',
-    key: 'auth_enabled',
-    value: 'auth_enabled',
-    sortable: true,
-  },
-  {
-    title: 'Storage',
-    key: 'storage_usage_bytes',
+    title: 'Usage',
+    key: 'usage',
     value: 'storage_usage_bytes',
     sortable: true,
     align: 'end' as const,
-  },
-  {
-    title: 'Active',
-    key: 'active',
-    value: 'active',
-    sortable: true,
   },
   {
     title: 'Usage Updated',
@@ -202,8 +196,10 @@ const tableItems = computed(() => {
       repository_type: repo.repository_type,
       repository_kind,
       auth_enabled: repo.auth_enabled,
+      auth_label: repo.auth_enabled ? "Secured" : "Unsecured",
       storage_usage_bytes: repo.storage_usage_bytes,
       active: repo.active,
+      active_label: repo.active === false ? "Inactive" : "Active",
       storage_usage_updated_at: repo.storage_usage_updated_at,
     };
   });
@@ -289,7 +285,7 @@ function handleRowClick(_event: MouseEvent, row: DataTableRow) {
 // Utility functions
 function formatBytes(bytes?: number | null): string {
   if (bytes === null || bytes === undefined) {
-    return "—";
+    return "Not available";
   }
   if (bytes === 0) {
     return "0 B";
@@ -301,14 +297,21 @@ function formatBytes(bytes?: number | null): string {
 }
 
 function formatUpdatedAt(timestamp?: string | null): string {
-  if (!timestamp) {
-    return "—";
+  if (!isValidTimestamp(timestamp)) {
+    return "Not available";
   }
-  const date = new Date(timestamp);
-  if (Number.isNaN(date.getTime())) {
-    return "—";
-  }
-  return date.toLocaleString();
+  return new Intl.DateTimeFormat(undefined, {
+    dateStyle: "medium",
+    timeStyle: "short",
+  }).format(new Date(timestamp));
+}
+
+function isValidTimestamp(timestamp?: string | null): timestamp is string {
+  return Boolean(timestamp) && !Number.isNaN(new Date(timestamp as string).getTime());
+}
+
+function formatExactTimestamp(timestamp: string): string {
+  return new Date(timestamp).toLocaleString();
 }
 
 const latestUsageUpdate = computed(() => {
@@ -407,7 +410,7 @@ void fetchInitialData();
   background: var(--nr-surface);
   border: 1px solid var(--nr-border-color);
   border-radius: var(--nr-radius-md);
-  padding: 0.75rem 1rem;
+  padding: var(--nr-spacing-sm) var(--nr-spacing-md);
 }
 
 .page-header__cache > div:first-child {
@@ -417,7 +420,20 @@ void fetchInitialData();
 }
 
 .page-header__refresh {
-  min-width: 200px;
+  flex: 0 0 auto;
+}
+
+.repository-cell {
+  display: flex;
+  min-width: 150px;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.access-cell {
+  display: flex;
+  min-width: 150px;
+  gap: var(--nr-spacing-xs);
 }
 
 @media (max-width: 900px) {
@@ -430,8 +446,5 @@ void fetchInitialData();
     justify-content: space-between;
   }
 
-  .page-header__refresh {
-    width: 100%;
-  }
 }
 </style>

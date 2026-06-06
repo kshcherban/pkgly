@@ -1,3 +1,5 @@
+// ABOUTME: Verifies admin repository operations, table hierarchy, and empty states.
+// ABOUTME: Covers real request state transitions through focused component stubs.
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
@@ -76,6 +78,7 @@ const stubs = {
       color: String,
       variant: String,
       prependIcon: String,
+      icon: String,
       to: [String, Object],
     },
     emits: ["click"],
@@ -84,9 +87,14 @@ const stubs = {
         type="button"
         :data-to-name="to && typeof to === 'object' ? to.name : to"
         @click="$emit('click')">
-        <slot />
+        <slot />{{ ariaLabel }}
       </button>
     `,
+    computed: {
+      ariaLabel() {
+        return this.$attrs["aria-label"] ?? "";
+      },
+    },
   }),
   "v-progress-circular": defineComponent({
     template: "<div data-testid='loading-indicator'><slot /></div>",
@@ -168,6 +176,59 @@ describe("RepositoryListView.vue", () => {
     expect(table.exists()).toBe(true);
     expect(wrapper.findAll("[data-testid='repository-row']")).toHaveLength(repositories.length);
     expect(wrapper.findAll("button").filter((button) => button.text().includes("Create Repository"))).toHaveLength(1);
+
+    const headers = wrapper.getComponent(stubs["v-data-table"]).props("headers") as Array<{
+      title: string;
+    }>;
+    expect(headers.map((header) => header.title)).toEqual([
+      "Repository",
+      "Storage",
+      "Access",
+      "Usage",
+      "Usage Updated",
+    ]);
+    expect(headers.map((header) => header.title)).not.toContain("ID #");
+  });
+
+  it("maps repository metadata and statuses to consistent labels", async () => {
+    httpGet.mockResolvedValue({
+      data: [
+        repositories[0],
+        {
+          ...repositories[0],
+          id: "repo-2",
+          repository_kind: "proxy",
+          auth_enabled: false,
+          active: false,
+          storage_usage_bytes: null,
+          storage_usage_updated_at: "not-a-date",
+        },
+        {
+          ...repositories[0],
+          id: "repo-3",
+          repository_kind: "virtual",
+        },
+      ],
+    });
+
+    const wrapper = mount(RepositoryListView, {
+      global: { stubs },
+    });
+    await flushPromises();
+
+    const items = (wrapper.vm as any).tableItems;
+    expect(items.map((item: any) => item.repository_kind)).toEqual([
+      "Hosted",
+      "Proxy",
+      "Virtual",
+    ]);
+    expect(items[0].auth_label).toBe("Secured");
+    expect(items[0].active_label).toBe("Active");
+    expect(items[1].auth_label).toBe("Unsecured");
+    expect(items[1].active_label).toBe("Inactive");
+    expect((wrapper.vm as any).formatBytes(null)).toBe("Not available");
+    expect((wrapper.vm as any).formatUpdatedAt(null)).toBe("Not available");
+    expect((wrapper.vm as any).formatUpdatedAt("not-a-date")).toBe("Not available");
   });
 
   it("navigates to the repository details when a row is clicked", async () => {
@@ -198,6 +259,38 @@ describe("RepositoryListView.vue", () => {
 
     expect(wrapper.find("[data-testid='repository-error']").text()).toContain("Failed to fetch repositories");
     consoleError.mockRestore();
+  });
+
+  it("preserves loaded rows while refreshing usage", async () => {
+    let resolveRefresh: ((value: unknown) => void) | undefined;
+    httpGet
+      .mockResolvedValueOnce({ data: repositories })
+      .mockReturnValueOnce(new Promise((resolve) => {
+        resolveRefresh = resolve;
+      }));
+
+    const wrapper = mount(RepositoryListView, {
+      global: { stubs },
+    });
+    await flushPromises();
+
+    const refresh = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Refresh"));
+    await refresh!.trigger("click");
+
+    expect(wrapper.findAll("[data-testid='repository-row']")).toHaveLength(1);
+    expect(wrapper.getComponent(stubs["v-data-table"]).props("loading")).toBe(true);
+    expect(httpGet).toHaveBeenLastCalledWith("/api/repository/list", {
+      params: {
+        include_usage: true,
+        refresh_usage: true,
+      },
+    });
+
+    resolveRefresh?.({ data: repositories });
+    await flushPromises();
+    expect(wrapper.getComponent(stubs["v-data-table"]).props("loading")).toBe(false);
   });
 
   it("shows one create repository CTA when no repositories exist but storage exists", async () => {

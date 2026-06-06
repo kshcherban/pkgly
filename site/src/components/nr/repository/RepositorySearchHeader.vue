@@ -1,3 +1,5 @@
+<!-- ABOUTME: Provides repository/package search and an accessible syntax-help dialog. -->
+<!-- ABOUTME: Applies task-oriented search recipes to the shared search input. -->
 <template>
   <div class="repository-search-header">
     <div class="repository-search-header__controls">
@@ -17,6 +19,7 @@
           @click:clear="clearSearch" />
       </div>
       <button
+        ref="helpButton"
         type="button"
         class="search-help-button"
         data-testid="search-help-button"
@@ -24,8 +27,8 @@
         :aria-expanded="showSearchHelp"
         aria-controls="search-help-modal"
         title="Search syntax help">
+        <v-icon aria-hidden="true">mdi-help-circle-outline</v-icon>
         <span class="sr-only">Search syntax help</span>
-        ?
       </button>
     </div>
 
@@ -41,6 +44,7 @@
         <header class="search-help-modal__header">
           <h3 id="searchHelpTitle">Search Syntax Guide</h3>
           <button
+            ref="closeButton"
             type="button"
             class="modal-close"
             @click="closeSearchHelp"
@@ -49,9 +53,54 @@
           </button>
         </header>
         <div class="search-help-modal__content">
+          <section aria-labelledby="searchRecipesTitle">
+            <h4 id="searchRecipesTitle">Common searches</h4>
+            <div class="recipes-grid">
+              <button
+                type="button"
+                class="example-card"
+                data-testid="search-recipe-package"
+                @click="applyExample('package:express')">
+                <span>Find a package</span>
+                <code>package:express</code>
+              </button>
+              <button
+                type="button"
+                class="example-card"
+                data-testid="search-recipe-repository"
+                @click="applyExample('repo:npm-hosted')">
+                <span>Filter by repository</span>
+                <code>repo:npm-hosted</code>
+              </button>
+              <button
+                type="button"
+                class="example-card"
+                data-testid="search-recipe-type"
+                @click="applyExample('type:helm')">
+                <span>Filter by repository type</span>
+                <code>type:helm</code>
+              </button>
+              <button
+                type="button"
+                class="example-card"
+                data-testid="search-recipe-version"
+                @click="applyExample('version:>=1.0.0')">
+                <span>Filter by version</span>
+                <code>version:&gt;=1.0.0</code>
+              </button>
+              <button
+                type="button"
+                class="example-card"
+                data-testid="search-recipe-combined"
+                @click="applyExample('package:express version:>=4.0.0 type:npm')">
+                <span>Combine filters</span>
+                <code>package:express version:&gt;=4.0.0 type:npm</code>
+              </button>
+            </div>
+          </section>
           <section>
-            <h4>Basic Search</h4>
-            <p>Enter any text to match package names, versions, repository names, or storage names.</p>
+            <h4>Quick text search</h4>
+            <p>Match package, version, repository, or storage names.</p>
             <button
               type="button"
               class="example-chip"
@@ -61,8 +110,10 @@
               <span>Simple text search</span>
             </button>
           </section>
-          <section>
-            <h4>Field Filters</h4>
+          <details class="search-reference">
+            <summary>Syntax reference</summary>
+            <section>
+            <h4>Fields and aliases</h4>
             <table class="syntax-table">
               <thead>
                 <tr>
@@ -99,8 +150,8 @@
                 </tr>
               </tbody>
             </table>
-          </section>
-          <section>
+            </section>
+            <section>
             <h4>Version Operators</h4>
             <ul class="operator-list">
               <li><code>&gt;</code>, <code>&gt;=</code>, <code>&lt;</code>, <code>&lt;=</code> — numeric or semantic comparisons</li>
@@ -108,49 +159,16 @@
               <li><code>~</code> — contains search (e.g., <code>version:~beta</code>)</li>
               <li><code>^</code>, <code>~</code> prefix — semantic ranges (e.g., <code>version:^1.5</code>)</li>
             </ul>
-          </section>
-          <section>
-            <h4>Examples</h4>
-            <div class="examples-grid">
-              <button
-                type="button"
-                class="example-card"
-                data-testid="search-example-version"
-                @click="applyExample('package:gin version:>1.0')">
-                <code>package:gin version:&gt;1.0</code>
-                <span>Gin packages newer than 1.0</span>
-              </button>
-              <button
-                type="button"
-                class="example-card"
-                @click="applyExample('package:spring type:maven')">
-                <code>package:spring type:maven</code>
-                <span>Spring artifacts in Maven repositories</span>
-              </button>
-              <button
-                type="button"
-                class="example-card"
-                @click="applyExample('nginx repo:docker-prod')">
-                <code>nginx repo:docker-prod</code>
-                <span>Nginx images in docker-prod</span>
-              </button>
-              <button
-                type="button"
-                class="example-card"
-                @click="applyExample('package:~express version:>=4.0.0 type:npm')">
-                <code>package:~express version:&gt;=4.0.0 type:npm</code>
-                <span>Express packages ≥ 4.0.0 in npm repos</span>
-              </button>
-            </div>
-          </section>
-          <section>
+            </section>
+            <section>
             <h4>Tips</h4>
             <ul class="tips-list">
               <li>Combine multiple filters with spaces, e.g., <code>repo:npm-prod version:&gt;=2.0</code>.</li>
               <li>Use quotes for values containing spaces: <code>package:"@scope/pkg"</code>.</li>
               <li>Filters are case-insensitive.</li>
             </ul>
-          </section>
+            </section>
+          </details>
         </div>
       </div>
     </div>
@@ -158,7 +176,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref } from "vue";
+import { computed, nextTick, onBeforeUnmount, ref } from "vue";
 
 const props = withDefaults(
   defineProps<{
@@ -178,17 +196,30 @@ const emit = defineEmits<{
 }>();
 
 const showSearchHelp = ref(false);
+const helpButton = ref<HTMLButtonElement | null>(null);
+const closeButton = ref<HTMLButtonElement | null>(null);
 const internalValue = computed({
   get: () => props.modelValue,
   set: (value: string) => emit("update:modelValue", value),
 });
 
 function toggleSearchHelp() {
-  showSearchHelp.value = !showSearchHelp.value;
+  if (showSearchHelp.value) {
+    closeSearchHelp();
+    return;
+  }
+  showSearchHelp.value = true;
+  window.addEventListener("keydown", handleKeydown);
+  void nextTick(() => closeButton.value?.focus());
 }
 
 function closeSearchHelp() {
+  if (!showSearchHelp.value) {
+    return;
+  }
   showSearchHelp.value = false;
+  window.removeEventListener("keydown", handleKeydown);
+  void nextTick(() => helpButton.value?.focus());
 }
 
 function applyExample(query: string) {
@@ -199,6 +230,16 @@ function applyExample(query: string) {
 function clearSearch() {
   emit("update:modelValue", "");
 }
+
+function handleKeydown(event: KeyboardEvent) {
+  if (event.key === "Escape") {
+    closeSearchHelp();
+  }
+}
+
+onBeforeUnmount(() => {
+  window.removeEventListener("keydown", handleKeydown);
+});
 </script>
 
 <style scoped lang="scss">
@@ -226,24 +267,22 @@ function clearSearch() {
 .search-help-button {
   width: 2.5rem;
   height: 2.5rem;
-  border-radius: 50%;
+  border-radius: var(--nr-radius-round);
   border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
   background: var(--nr-background-primary, #fff);
   color: var(--nr-accent, #03a9f4);
-  font-weight: 600;
-  font-size: 1.2rem;
   cursor: pointer;
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background-color 0.2s ease, color 0.2s ease, transform 0.2s ease;
+  transition: background-color var(--nr-transition-fast), color var(--nr-transition-fast);
 }
 
 .search-help-button:hover,
 .search-help-button:focus-visible {
   background: var(--nr-accent, #03a9f4);
   color: var(--nr-background-primary, #fff);
-  transform: translateY(-1px);
+  box-shadow: var(--nr-focus-ring);
 }
 
 .sr-only {
@@ -272,15 +311,15 @@ function clearSearch() {
 .search-help-modal {
   background: var(--nr-background-primary, #fff);
   color: var(--nr-text-color, #1f2937);
-  border-radius: 0.75rem;
+  border-radius: var(--nr-radius-lg);
   box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
   width: min(48rem, 100%);
   max-height: 85vh;
   overflow-y: auto;
   display: flex;
   flex-direction: column;
-  gap: 1.25rem;
-  padding: 1.5rem;
+  gap: var(--nr-spacing-lg);
+  padding: var(--nr-spacing-lg);
 }
 
 .search-help-modal__header {
@@ -293,7 +332,7 @@ function clearSearch() {
 .search-help-modal__content {
   display: flex;
   flex-direction: column;
-  gap: 1.5rem;
+  gap: var(--nr-spacing-lg);
 }
 
 .modal-close {
@@ -330,24 +369,25 @@ function clearSearch() {
   border-radius: 0.25rem;
 }
 
-.examples-grid {
+.recipes-grid {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-  gap: 0.75rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--nr-spacing-sm);
+  margin-top: var(--nr-spacing-sm);
 }
 
 .example-card,
 .example-chip {
   border: 1px solid rgba(15, 23, 42, 0.12);
   background: var(--nr-background-secondary, #f8fafc);
-  border-radius: 0.5rem;
-  padding: 0.75rem;
+  border-radius: var(--nr-radius-lg);
+  padding: var(--nr-spacing-md);
   display: flex;
   flex-direction: column;
   gap: 0.35rem;
   text-align: left;
   cursor: pointer;
-  transition: border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
+  transition: border-color var(--nr-transition-fast), box-shadow var(--nr-transition-fast);
   color: inherit;
 }
 
@@ -365,7 +405,7 @@ function clearSearch() {
 .example-chip:focus-visible {
   border-color: var(--nr-accent, #03a9f4);
   box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.15);
-  transform: translateY(-1px);
+  box-shadow: var(--nr-focus-ring);
 }
 
 .example-card code,
@@ -386,6 +426,21 @@ function clearSearch() {
   font-size: 0.95rem;
 }
 
+.search-reference {
+  border-top: 1px solid var(--nr-border-color);
+  padding-top: var(--nr-spacing-md);
+}
+
+.search-reference summary {
+  color: var(--nr-primary);
+  cursor: pointer;
+  font-weight: var(--nr-font-weight-medium);
+}
+
+.search-reference section {
+  margin-top: var(--nr-spacing-md);
+}
+
 @media screen and (max-width: 900px) {
   .repository-search-header__controls {
     flex-direction: column;
@@ -394,7 +449,11 @@ function clearSearch() {
 
   .search-help-button {
     width: 100%;
-    border-radius: 0.75rem;
+    border-radius: var(--nr-radius-lg);
+  }
+
+  .recipes-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>

@@ -1,3 +1,5 @@
+// ABOUTME: Verifies repository discovery, search states, and navigation on the home page.
+// ABOUTME: Uses focused Vuetify stubs so page behavior remains deterministic.
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
@@ -272,6 +274,50 @@ describe("HomeView.vue", () => {
     expect(wrapper.text()).not.toContain(
       "Review repository status, confirm authentication posture, and drill into details.",
     );
+  });
+
+  it("shows repository totals and consistent operational status labels", async () => {
+    const wrapper = mount(HomeView, {
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    expect(wrapper.get('[data-testid="repository-summary"]').text()).toBe("2 repositories");
+    expect(wrapper.text()).toContain("Hosted");
+    expect(wrapper.text()).toContain("Secured");
+    expect(wrapper.text()).toContain("Unsecured");
+    expect(wrapper.text()).toContain("Active");
+    expect(wrapper.text()).toContain("Inactive");
+    expect(wrapper.text()).not.toContain("Open");
+  });
+
+  it("shows filtered counts and a distinct no-match state", async () => {
+    const wrapper = mount(HomeView, {
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    await wrapper.get('input[data-testid="repository-search-input"]').setValue("alpha");
+    await nextTick();
+    expect(wrapper.get('[data-testid="repository-summary"]').text()).toBe(
+      "1 of 2 repositories",
+    );
+
+    await wrapper.get('input[data-testid="repository-search-input"]').setValue("missing");
+    await nextTick();
+    expect(wrapper.get('[data-testid="repository-summary"]').text()).toBe(
+      "0 of 2 repositories",
+    );
+    expect(wrapper.get('[data-testid="repository-no-match"]').text()).toContain(
+      'No repositories match "missing"',
+    );
+    expect(wrapper.text()).not.toContain("Contact your administrator");
   });
 
   it("uses the ruby language icon for ruby repositories", async () => {

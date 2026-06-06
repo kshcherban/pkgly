@@ -1,7 +1,22 @@
+<!-- ABOUTME: Presents repository discovery, package search, and repository navigation. -->
+<!-- ABOUTME: Keeps repository operational metadata compact and scannable. -->
 <template>
-  <v-container class="pa-6">
-    <v-row class="mb-4" justify="center">
+  <v-container class="home-page pa-6">
+    <v-row justify="center">
       <v-col cols="12" lg="10">
+        <div class="home-page__heading">
+          <div>
+            <h1 class="text-h5 font-weight-medium">Repositories</h1>
+            <p class="text-body-2 text-medium-emphasis">
+              Find repositories and packages across this instance.
+            </p>
+          </div>
+          <div
+            data-testid="repository-summary"
+            class="home-page__summary text-body-2 text-medium-emphasis">
+            {{ repositorySummary }}
+          </div>
+        </div>
         <RepositorySearchHeader v-model="searchValue" />
       </v-col>
     </v-row>
@@ -46,9 +61,13 @@
         lg="3">
         <v-card
           :ripple="false"
+          tabindex="0"
+          role="link"
           class="repository-card h-100"
-          @click="navigateToRepository(repo)">
-          <v-card-title class="d-flex align-center pa-4">
+          @click="navigateToRepository(repo)"
+          @keydown.enter="navigateToRepository(repo)"
+          @keydown.space.prevent="navigateToRepository(repo)">
+          <v-card-title class="repository-card__title">
             <span class="repository-card__icon mr-3">
               <component
                 v-if="hasComponentIcon(repo.repository_type || '')"
@@ -60,52 +79,55 @@
                 :icon="getFallbackIcon(repo.repository_type || '')"
                 color="primary" />
             </span>
-            <div>
-              <div class="text-h6">{{ repo.name || "Unknown" }}</div>
-              <div class="text-caption text-medium-emphasis d-flex align-center gap-2">
-                <span>{{ (repo.repository_type || "").toUpperCase() }}</span>
-                <v-chip
-                  size="x-small"
-                  :color="repo.repository_kind?.toLowerCase() === 'proxy'
-                    ? 'primary'
-                    : repo.repository_kind?.toLowerCase() === 'virtual'
-                      ? '#b388ff'
-                      : 'default'"
-                  variant="tonal">
-                  {{ repositoryKindLabel(repo) }}
-                </v-chip>
+            <div class="repository-card__identity">
+              <div class="text-h6 text-truncate">{{ repo.name || "Unknown" }}</div>
+              <div class="repository-card__type text-caption text-medium-emphasis">
+                <span>{{ (repo.repository_type || "Unknown").toUpperCase() }}</span>
+                <span aria-hidden="true">·</span>
+                <span>{{ repositoryKindLabel(repo) }}</span>
               </div>
             </div>
           </v-card-title>
 
-          <v-card-text class="pa-4 pt-0">
-            <div class="d-flex align-center gap-4 text-caption">
-              <div class="d-flex align-center gap-1">
-                <v-icon size="small">mdi-database</v-icon>
-                {{ repo.storage_name || "Unknown" }}
-              </div>
-              <div class="d-flex align-center gap-1">
-                <v-icon size="small">mdi-shield-check</v-icon>
-                <span :class="repo.auth_enabled ? 'text-success' : 'text-warning'">
+          <v-card-text class="repository-card__metadata">
+            <div class="repository-card__row">
+              <span class="repository-card__label">Storage</span>
+              <span class="text-truncate">{{ repo.storage_name || "Unknown" }}</span>
+            </div>
+            <div class="repository-card__row">
+              <span class="repository-card__label">Access</span>
+              <div class="repository-card__statuses">
+                <v-chip size="x-small" variant="outlined">
                   {{ repo.auth_enabled ? "Secured" : "Unsecured" }}
-                </span>
+                </v-chip>
+                <v-chip
+                  size="x-small"
+                  :color="repo.active === false ? 'default' : 'success'"
+                  :variant="repo.active === false ? 'outlined' : 'tonal'">
+                  {{ repo.active === false ? "Inactive" : "Active" }}
+                </v-chip>
               </div>
             </div>
-
-            <div v-if="repo.storage_usage_bytes !== undefined" class="mt-2">
-              <div class="d-flex align-center gap-1 text-caption">
-                <v-icon size="small">mdi-hard-disk</v-icon>
-                {{ formatBytes(repo.storage_usage_bytes) }}
-              </div>
+            <div class="repository-card__row">
+              <span class="repository-card__label">Usage</span>
+              <span>{{ formatBytes(repo.storage_usage_bytes) }}</span>
             </div>
           </v-card-text>
-
-          <v-card-actions class="pa-4 pt-0">
-            <v-btn color="primary" variant="text" prepend-icon="mdi-open-in-new" class="text-none">
-              Open
-            </v-btn>
-          </v-card-actions>
         </v-card>
+      </v-col>
+    </v-row>
+
+    <v-row v-else-if="repositories.length > 0" justify="center">
+      <v-col cols="12" lg="10">
+        <div
+          data-testid="repository-no-match"
+          class="home-page__empty">
+          <v-icon color="medium-emphasis" size="40">mdi-magnify-close</v-icon>
+          <h2 class="text-h6">No repositories match "{{ trimmedSearch }}"</h2>
+          <p class="text-body-2 text-medium-emphasis">
+            Try a repository name, type, or storage name.
+          </p>
+        </div>
       </v-col>
     </v-row>
 
@@ -317,6 +339,15 @@ const filteredRepositories = computed(() => {
   );
 });
 
+const repositorySummary = computed(() => {
+  const total = repositories.value.length;
+  const noun = total === 1 ? "repository" : "repositories";
+  if (trimmedSearch.value && !isAdvancedQuery(trimmedSearch.value)) {
+    return `${filteredRepositories.value.length} of ${total} ${noun}`;
+  }
+  return `${total} ${noun}`;
+});
+
 // Format bytes for display
 function formatBytes(bytes?: number | null): string {
   if (bytes === null || bytes === undefined) {
@@ -386,13 +417,92 @@ function openPackage(pkg: PackageResult) {
 </script>
 
 <style scoped lang="scss">
+.home-page {
+  max-width: 1280px;
+}
+
+.home-page__heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: var(--nr-spacing-md);
+}
+
+.home-page__heading p {
+  margin-top: var(--nr-spacing-xs);
+}
+
+.home-page__summary {
+  white-space: nowrap;
+}
+
 .repository-card {
   cursor: pointer;
-  transition: transform 0.2s ease-in-out;
+  border: 1px solid var(--nr-card-border);
+  border-radius: var(--nr-radius-lg);
+  box-shadow: none;
+  transition: border-color var(--nr-transition-fast), box-shadow var(--nr-transition-fast);
 
-  &:hover {
-    transform: translateY(-4px);
+  &:hover,
+  &:focus-visible {
+    border-color: var(--nr-primary);
+    box-shadow: var(--nr-focus-ring);
+    outline: none;
   }
+}
+
+.repository-card__title {
+  display: flex;
+  align-items: center;
+  padding: var(--nr-spacing-md);
+}
+
+.repository-card__identity {
+  min-width: 0;
+}
+
+.repository-card__type {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-spacing-xs);
+}
+
+.repository-card__metadata {
+  display: flex;
+  flex-direction: column;
+  gap: var(--nr-spacing-sm);
+  padding: 0 var(--nr-spacing-md) var(--nr-spacing-md);
+}
+
+.repository-card__row {
+  min-height: 24px;
+  display: grid;
+  grid-template-columns: 64px minmax(0, 1fr);
+  align-items: center;
+  gap: var(--nr-spacing-sm);
+  font-size: var(--nr-font-size-sm);
+}
+
+.repository-card__label {
+  color: var(--nr-text-secondary);
+}
+
+.repository-card__statuses {
+  display: flex;
+  gap: var(--nr-spacing-xs);
+  flex-wrap: wrap;
+}
+
+.home-page__empty {
+  display: flex;
+  min-height: 180px;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--nr-spacing-sm);
+  border: 1px dashed var(--nr-border-color-strong);
+  border-radius: var(--nr-radius-lg);
+  text-align: center;
 }
 
 .repository-card__brand-icon {
@@ -406,8 +516,10 @@ function openPackage(pkg: PackageResult) {
   height: 32px;
 }
 
-:deep(.v-card--hover) {
-  cursor: pointer;
+@media (max-width: 600px) {
+  .home-page__heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
-
 </style>

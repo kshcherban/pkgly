@@ -1,3 +1,5 @@
+<!-- ABOUTME: Provides global Pkgly branding, primary navigation, and account actions. -->
+<!-- ABOUTME: Exposes route-aware active states for home and administration. -->
 <template>
   <v-app-bar
     :elevation="1"
@@ -7,6 +9,7 @@
     <v-container fluid class="d-flex align-center pa-0 app-bar__inner">
       <router-link
         to="/"
+        exact-active-class="app-bar__nav-link--active"
         class="d-flex align-center text-decoration-none logo-link">
         <v-avatar
           :image="'/logo.svg'"
@@ -18,6 +21,7 @@
       <v-btn
         v-if="user?.admin"
         :to="{ name: 'admin' }"
+        active-class="app-bar__nav-link--active"
         variant="text"
         class="text-none app-bar__admin-link">
         <v-icon start>mdi-shield-account</v-icon>
@@ -103,5 +107,10 @@ defineProps({
 
 .app-bar__admin-link {
   margin-left: 0.25rem;
+}
+
+:deep(.app-bar__nav-link--active) {
+  background: rgba(30, 136, 229, 0.1);
+  color: var(--nr-primary);
 }
 </style>

@@ -32,6 +32,18 @@ without guesswork.
 | S3 Disk Cache | Yes | Configurable on-disk LRU cache keeps hot artifacts locally; knobs for path, byte cap, and entry cap are exposed in the Admin UI. |
 | Package Retention | Yes | Disabled-by-default per-repository cleanup for hosted and proxy repositories, using the package catalog and the same deletion path as manual package deletes ([docs](./sysAdmin/retention.md)). |
 
+## Web Console
+
+The desktop web console groups repository discovery, package search, administration, setup
+guidance, and package inspection around operator tasks:
+
+- Home shows repository totals, filter context, storage, access, activity, and usage at a glance.
+- Search help provides task-oriented recipes plus an expandable syntax reference.
+- Admin repository management prioritizes repository identity, storage, access, usage, and update time.
+- Public repository pages keep operational metadata visible while setup guidance remains collapsible.
+- Package tables preserve sorting and column preferences, label missing metadata explicitly, and reduce
+  pagination controls when all results fit on one page.
+
 Use this page as the single source of truth when deciding which repository modes to enable or when
 planning migrations from other managers (Nexus, StrongBox, Reposilite, etc.). If a capability is
 marked **Planned**, follow the linked issue to track progress.

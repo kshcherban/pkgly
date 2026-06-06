@@ -1,3 +1,5 @@
+// ABOUTME: Verifies public package table loading, controls, formatting, and navigation.
+// ABOUTME: Covers repository-specific package labels and persisted table preferences.
 import { config, flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
@@ -725,5 +727,36 @@ describe("RepositoryPackagesPublic.vue", () => {
 
     expect(wrapper.find('th[data-column="digest"]').exists()).toBe(true);
     expect(wrapper.text()).toContain("Blob Digest");
+    expect(wrapper.get('[data-testid="package-row"]').text()).toContain("Not available");
+  });
+
+  it("hides page navigation when all packages fit on one page", async () => {
+    (http.get as vi.Mock).mockResolvedValue(
+      createPackages([
+        {
+          package: "pkg-alpha",
+          name: "Alpha",
+          size: 1024,
+          cache_path: "cache/pkg-alpha",
+          modified: "2025-11-05T09:30:00Z",
+        },
+      ]),
+    );
+
+    const wrapper = mount(RepositoryPackagesPublic, {
+      props: {
+        repositoryId: "repo-single-page",
+        repositoryType: "npm",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+    await flushPromises();
+
+    expect(wrapper.text()).not.toContain("Previous");
+    expect(wrapper.text()).not.toContain("Next");
+    expect(wrapper.text()).not.toContain("Page 1 of 1");
+    expect(wrapper.find('[data-stub="v-select"]').exists()).toBe(true);
   });
 });

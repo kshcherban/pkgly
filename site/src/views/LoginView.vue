@@ -1,3 +1,5 @@
+<!-- ABOUTME: Presents local and federated authentication options for Pkgly users. -->
+<!-- ABOUTME: Handles login errors inline while preserving accessible form controls. -->
 <template>
   <v-container class="login-container">
     <v-row justify="center" align="center">
@@ -73,9 +75,11 @@
                 Invalid username or password
               </v-alert>
 
+              <label class="sr-only" for="login-username">Username or Email</label>
               <v-text-field
+                id="login-username"
                 v-model="input.email_or_username"
-                label="Username or Email"
+                placeholder="Username or email"
                 autocomplete="username"
                 autocapitalize="false"
                 variant="outlined"
@@ -84,17 +88,31 @@
                 autofocus
                 class="mb-4" />
 
+              <label class="sr-only" for="login-password">Password</label>
               <v-text-field
+                id="login-password"
                 v-model="input.password"
-                label="Password"
+                placeholder="Password"
                 :type="showPassword ? 'text' : 'password'"
                 autocomplete="current-password"
                 variant="outlined"
                 prepend-inner-icon="mdi-lock"
-                :append-inner-icon="showPassword ? 'mdi-eye-off' : 'mdi-eye'"
-                @click:append-inner="showPassword = !showPassword"
                 required
-                class="mb-4" />
+                class="mb-4">
+                <template #append-inner>
+                  <v-btn
+                    type="button"
+                    icon
+                    size="small"
+                    variant="text"
+                    :aria-label="showPassword ? 'Hide password' : 'Show password'"
+                    @click="showPassword = !showPassword">
+                    <v-icon>
+                      {{ showPassword ? "mdi-eye-off" : "mdi-eye" }}
+                    </v-icon>
+                  </v-btn>
+                </template>
+              </v-text-field>
 
               <div class="text-end mb-4">
                 <v-tooltip text="Not implemented">
@@ -111,6 +129,7 @@
 
               <v-btn
                 type="submit"
+                aria-label="Log in"
                 block
                 size="large"
                 color="primary"
@@ -276,6 +295,18 @@ onMounted(async () => {
 .login-container {
   min-height: 100vh;
   background-color: rgb(var(--v-theme-background));
+}
+
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
 }
 
 // Ensure proper color contrast for links

@@ -12,12 +12,28 @@
   </v-text-field>
 </template>
 <script setup lang="ts">
+import { watch } from "vue";
+
 defineProps({
   id: String,
 });
 
 const value = defineModel<number>({
   required: true,
+});
+
+watch(value, (val) => {
+  const raw = val as unknown;
+  if (typeof raw === "string") {
+    const trimmed = raw.trim();
+    if (trimmed === "") {
+      return;
+    }
+    const num = Number(trimmed);
+    if (Number.isFinite(num)) {
+      value.value = num;
+    }
+  }
 });
 </script>
 

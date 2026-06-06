@@ -1,3 +1,5 @@
+<!-- ABOUTME: Renders searchable, sortable package data for a public repository. -->
+<!-- ABOUTME: Persists table preferences and adapts labels to repository ecosystems. -->
 <template>
   <section class="packages">
     <header class="packages__header">
@@ -187,23 +189,25 @@
     <div
       v-if="totalPackages > 0"
       class="packages__pager">
-      <v-btn
-        variant="tonal"
-        color="primary"
-        class="text-none"
-        @click="prevPage"
-        :disabled="currentPage === 1">
-        Previous
-      </v-btn>
-      <span class="packages__pager-label">{{ pageLabel }}</span>
-      <v-btn
-        variant="tonal"
-        color="primary"
-        class="text-none"
-        @click="nextPage"
-        :disabled="currentPage >= totalPages">
-        Next
-      </v-btn>
+      <div v-if="totalPages > 1" class="packages__pager-navigation">
+        <v-btn
+          variant="tonal"
+          color="primary"
+          class="text-none"
+          @click="prevPage"
+          :disabled="currentPage === 1">
+          Previous
+        </v-btn>
+        <span class="packages__pager-label">{{ pageLabel }}</span>
+        <v-btn
+          variant="tonal"
+          color="primary"
+          class="text-none"
+          @click="nextPage"
+          :disabled="currentPage >= totalPages">
+          Next
+        </v-btn>
+      </div>
       <v-select
         class="packages__pager-select"
         label="Per page"
@@ -632,7 +636,7 @@ function cellText(column: ColumnKey, pkg: PackageEntry): string {
     case "name":
       return pkg.name;
     case "digest":
-      return pkg.blobDigest;
+      return pkg.blobDigest || "Not available";
     case "size":
       return formatBytes(pkg.size);
     case "path":
@@ -795,7 +799,7 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 1rem;
-  padding: 1rem 1.5rem;
+  padding: var(--nr-spacing-lg);
 }
 
 .packages__header {
@@ -821,7 +825,7 @@ watch(
 .packages__search input {
   width: 100%;
   border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.15));
-  border-radius: 0.5rem;
+  border-radius: var(--nr-radius-lg);
   padding: 0.5rem 0.75rem;
   background: var(--nr-background-primary, #fff);
   color: var(--nr-text-color, inherit);
@@ -1079,6 +1083,13 @@ watch(
   display: flex;
   align-items: center;
   gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.packages__pager-navigation {
+  display: flex;
+  align-items: center;
+  gap: var(--nr-spacing-sm);
   flex-wrap: wrap;
 }
 

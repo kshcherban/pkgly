@@ -1,3 +1,5 @@
+// ABOUTME: Stores authenticated user/session state and performs session discovery.
+// ABOUTME: Treats unauthenticated discovery as normal while reporting unexpected failures.
 import { defineStore } from "pinia";
 import type { Me, Session, UserResponseType } from "@/types/base";
 import http from "@/http";
@@ -42,7 +44,10 @@ export const sessionStore = defineStore("sessionStore", {
         this.user = response.data.user;
         return response.data.user;
       } catch (error) {
-        console.error("Failed to refresh user information", error);
+        const status = (error as { response?: { status?: number } })?.response?.status;
+        if (status !== 401) {
+          console.error("Failed to refresh user information", error);
+        }
         this.session = undefined;
         this.user = undefined;
         return undefined;

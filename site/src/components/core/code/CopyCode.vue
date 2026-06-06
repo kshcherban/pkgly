@@ -1,11 +1,20 @@
+<!-- ABOUTME: Displays a code value with a keyboard-accessible clipboard action. -->
+<!-- ABOUTME: Reports successful copies through the shared alerts store. -->
 <template>
   <div class="copyURL">
-    <label>
-      <slot></slot>
-    </label>
-    <span @click="copyURL">
-      {{ code }}
-    </span>
+    <div v-if="$slots.default || label" class="copyURL__label">
+      <slot>{{ label }}</slot>
+    </div>
+    <div class="copyURL__control">
+      <code>{{ code }}</code>
+      <button
+        type="button"
+        :aria-label="`Copy ${label}`"
+        :title="`Copy ${label}`"
+        @click="copyURL">
+        <v-icon size="small" aria-hidden="true">mdi-content-copy</v-icon>
+      </button>
+    </div>
   </div>
 </template>
 <script setup lang="ts">
@@ -15,6 +24,10 @@ const props = defineProps({
   code: {
     type: String,
     required: true,
+  },
+  label: {
+    type: String,
+    default: "value",
   },
 });
 
@@ -28,28 +41,56 @@ function copyURL() {
 <style lang="scss" scoped>
 @use "@/assets/styles/theme.scss" as *;
 .copyURL {
-  margin: 1rem;
+  min-width: 0;
+}
+
+.copyURL__label {
+  margin-bottom: var(--nr-spacing-xs);
+  color: var(--nr-text-secondary);
+  font-size: var(--nr-font-size-sm);
 }
 @media screen and (max-width: 768px) {
-  span {
+  code {
     max-width: 90%;
     word-wrap: break-word;
   }
 }
-span {
-  display: block;
-  width: fit-content;
-  cursor: pointer;
-  padding: 0.5rem;
-  padding-right: 1rem;
-  border-radius: 0.25rem;
-  margin-top: 0.5rem;
-  border: 0.25px solid $primary-50;
-  // Text wrapping
 
-  &:hover {
-    background-color: $primary-50;
-    transition: background-color 0.25s;
+.copyURL__control {
+  display: flex;
+  max-width: 100%;
+  align-items: stretch;
+}
+
+code {
+  min-width: 0;
+  overflow: hidden;
+  padding: var(--nr-spacing-sm) var(--nr-spacing-md);
+  border: 1px solid var(--nr-border-color);
+  border-right: 0;
+  border-radius: var(--nr-radius-md) 0 0 var(--nr-radius-md);
+  background: var(--nr-surface-variant);
+  font-family: var(--nr-font-family-mono);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--nr-border-color);
+  border-radius: 0 var(--nr-radius-md) var(--nr-radius-md) 0;
+  background: var(--nr-background);
+  color: var(--nr-primary);
+  cursor: pointer;
+  padding: 0 var(--nr-spacing-sm);
+
+  &:hover,
+  &:focus-visible {
+    background: $primary-50;
+    outline: none;
+    box-shadow: var(--nr-focus-ring);
   }
 }
 </style>

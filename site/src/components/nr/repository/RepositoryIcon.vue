@@ -1,3 +1,5 @@
+<!-- ABOUTME: Renders a repository ecosystem icon linked to its external homepage. -->
+<!-- ABOUTME: Keeps external icon links labeled and isolated from the current page. -->
 <template>
   <a
     target="_blank"
@@ -11,7 +13,7 @@
 </template>
 <script setup lang="ts">
 import type { RepositoryIconDef } from "@/types/repository";
-import { defineProps, type PropType } from "vue";
+import type { PropType } from "vue";
 defineProps({
   icon: {
     type: Object as PropType<RepositoryIconDef>,

@@ -1,3 +1,5 @@
+// ABOUTME: Verifies app-shell branding, navigation visibility, and active-state wiring.
+// ABOUTME: Uses component stubs to inspect route-aware navigation props.
 import { mount } from "@vue/test-utils";
 import { describe, expect, it } from "vitest";
 import AppBar from "@/components/layout/AppBar.vue";
@@ -25,6 +27,10 @@ const VBtnStub = {
       default: undefined,
     },
     variant: {
+      type: String,
+      default: "",
+    },
+    activeClass: {
       type: String,
       default: "",
     },
@@ -211,5 +217,43 @@ describe("AppBar.vue", () => {
 
     const topBarButtons = wrapper.findAll(".v-btn");
     expect(topBarButtons.some((btn) => btn.text().includes("Admin Panel"))).toBe(false);
+  });
+
+  it("wires explicit active classes for home and admin navigation", () => {
+    const wrapper = mount(AppBar, {
+      props: {
+        user: {
+          username: "chief",
+          admin: true,
+        },
+      },
+      global: {
+        stubs: {
+          "router-link": {
+            props: ["exactActiveClass"],
+            template: "<a class='router-link' :data-active-class='exactActiveClass'><slot /></a>",
+          },
+          "v-app-bar": VAppBarStub,
+          "v-container": VContainerStub,
+          "v-avatar": VAvatarStub,
+          "v-spacer": VSpacerStub,
+          "v-btn": VBtnStub,
+          "v-menu": VMenuStub,
+          "v-list": VListStub,
+          "v-list-item": VListItemStub,
+          "v-list-item-title": VListItemTitleStub,
+          "v-divider": VDividerStub,
+          "v-icon": VIconStub,
+        },
+      },
+    });
+
+    expect(wrapper.get(".router-link").attributes("data-active-class")).toBe(
+      "app-bar__nav-link--active",
+    );
+    const admin = wrapper
+      .findAllComponents(VBtnStub)
+      .find((button) => button.text().includes("Admin Panel"));
+    expect(admin?.props("activeClass")).toBe("app-bar__nav-link--active");
   });
 });
