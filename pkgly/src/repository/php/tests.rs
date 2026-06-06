@@ -75,6 +75,27 @@ fn php_hosted_dist_url_prefers_configured_app_url() {
     let url = PhpHosted::format_dist_url(
         "http://pkgly:8888",
         false,
+        None,
+        "test-storage",
+        "php-hosted",
+        &dist,
+    );
+    assert_eq!(
+        url,
+        "http://pkgly:8888/repositories/test-storage/php-hosted/dist/pkgly-test/sample-lib/1.0.0.zip"
+    );
+}
+
+#[test]
+fn php_hosted_dist_url_uses_request_host_when_app_url_missing() {
+    use super::hosted::PhpHosted;
+    use nr_core::storage::StoragePath;
+
+    let dist = StoragePath::from("dist/pkgly-test/sample-lib/1.0.0.zip");
+    let url = PhpHosted::format_dist_url(
+        "",
+        false,
+        Some("pkgly:8888"),
         "test-storage",
         "php-hosted",
         &dist,
@@ -91,13 +112,13 @@ fn php_hosted_dist_url_falls_back_when_app_url_missing() {
     use nr_core::storage::StoragePath;
 
     let dist = StoragePath::from("dist/pkgly-test/sample-lib/1.0.0.zip");
-    let http_url = PhpHosted::format_dist_url("", false, "test-storage", "php-hosted", &dist);
+    let http_url = PhpHosted::format_dist_url("", false, None, "test-storage", "php-hosted", &dist);
     assert_eq!(
         http_url,
         "http://localhost:6742/repositories/test-storage/php-hosted/dist/pkgly-test/sample-lib/1.0.0.zip"
     );
 
-    let https_url = PhpHosted::format_dist_url("", true, "test-storage", "php-hosted", &dist);
+    let https_url = PhpHosted::format_dist_url("", true, None, "test-storage", "php-hosted", &dist);
     assert_eq!(
         https_url,
         "https://localhost:6742/repositories/test-storage/php-hosted/dist/pkgly-test/sample-lib/1.0.0.zip"

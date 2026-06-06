@@ -135,12 +135,16 @@ impl PhpHosted {
     pub(super) fn format_dist_url(
         app_url: &str,
         is_https: bool,
+        host: Option<&str>,
         storage_name: &str,
         repo_name: &str,
         dist: &StoragePath,
     ) -> String {
         let base = if !app_url.is_empty() {
             app_url.trim_end_matches('/').to_string()
+        } else if let Some(host) = host {
+            let scheme = if is_https { "https" } else { "http" };
+            format!("{scheme}://{host}")
         } else {
             // Best-effort fallback for environments that haven't configured a public URL.
             // Keep this consistent with other repos (e.g. PHP proxy).
@@ -157,12 +161,13 @@ impl PhpHosted {
         )
     }
 
-    fn dist_url(&self, dist: &StoragePath) -> String {
+    fn dist_url(&self, dist: &StoragePath, host: Option<&str>) -> String {
         let site = self.site();
         let instance = site.inner.instance.lock();
         Self::format_dist_url(
             &instance.app_url,
             instance.is_https,
+            host,
             self.storage_name(),
             &self.name(),
             dist,
@@ -194,13 +199,14 @@ impl PhpHosted {
         package: &ComposerPackage,
         dist_path: &StoragePath,
         shasum: Option<String>,
+        host: Option<&str>,
     ) -> Result<(), PhpRepositoryError> {
         let (vendor, package_name) = package.name.split_once('/').ok_or_else(|| {
             PhpRepositoryError::InvalidComposer("package name missing vendor".into())
         })?;
         let is_dev = package.version.to_ascii_lowercase().contains("dev");
         let metadata_path = self.metadata_path(vendor, package_name, is_dev);
-        let dist_url = self.dist_url(dist_path);
+        let dist_url = self.dist_url(dist_path, host);
         let doc = match self.load_metadata(&metadata_path).await? {
             Some(mut existing) => {
                 existing.add_version(package, dist_url.clone(), shasum.clone());
@@ -352,6 +358,12 @@ impl PhpHosted {
 
         validate_package_against_path(&composer, &dist)?;
 
+        let host = request
+            .parts
+            .headers
+            .get(http::header::HOST)
+            .and_then(|header| header.to_str().ok())
+            .map(str::to_owned);
         let dist_storage_path = self.dist_storage_path(&dist);
         self.storage()
             .save_file(
@@ -361,8 +373,13 @@ impl PhpHosted {
             )
             .await?;
 
-        self.write_metadata(&composer, &dist_storage_path, Some(shasum.clone()))
-            .await?;
+        self.write_metadata(
+            &composer,
+            &dist_storage_path,
+            Some(shasum.clone()),
+            host.as_deref(),
+        )
+        .await?;
         self.upsert_metadata(Some(user.id), &composer, &dist_storage_path)
             .await?;
         if let Err(err) = webhooks::enqueue_package_path_event(
@@ -380,7 +397,10 @@ impl PhpHosted {
 
         Ok(RepoResponse::Other(
             ResponseBuilder::created()
-                .header(CONTENT_LOCATION, self.dist_url(&dist_storage_path))
+                .header(
+                    CONTENT_LOCATION,
+                    self.dist_url(&dist_storage_path, host.as_deref()),
+                )
                 .empty(),
         ))
     }
