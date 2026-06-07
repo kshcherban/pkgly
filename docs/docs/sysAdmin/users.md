@@ -4,6 +4,12 @@ Administrators and user managers can create local users from **Administration > 
 The create form submits the user's identity, password, elevated roles, and default repository
 permissions together. The user is only created when the complete operation succeeds.
 
+## Users Table
+
+The Users table at **Administration > Users** lists all registered users with columns for
+ID, Name, Username, Admin status, and Active/Inactive status. Click any row to open the
+user's detail page for permission management.
+
 ## Initial Permissions
 
 The administration interface creates users with these defaults:

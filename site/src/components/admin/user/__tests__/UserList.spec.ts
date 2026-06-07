@@ -1,3 +1,5 @@
+// ABOUTME: Tests the admin user list table component's search, header columns, and admin status rendering.
+// ABOUTME: Verifies that the Admin column appears and maps boolean admin flags to readable labels.
 import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";
@@ -89,6 +91,7 @@ describe("UserList.vue", () => {
             name: "Alice",
             username: "alice",
             active: true,
+            admin: false,
             email: "alice@example.com",
           },
         ],
@@ -108,5 +111,42 @@ describe("UserList.vue", () => {
     field.vm.$emit("click:clear");
     await nextTick();
     expect(wrapper.vm.searchValue).toBe("");
+  });
+
+  it("includes Admin column in table headers", async () => {
+    const wrapper = mount(UserList, {
+      props: {
+        users: [
+          { id: 1, name: "Alice", username: "alice", active: true, admin: false, email: "alice@example.com" },
+        ],
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    const headers = wrapper.getComponent(vuetifyStubs["v-data-table"]).props("headers") as Array<{ title: string }>;
+    expect(headers.map((h) => h.title)).toEqual(["ID #", "Name", "Username", "Admin", "Status"]);
+    expect(headers.map((h) => h.title)).toContain("Admin");
+  });
+
+  it("maps admin boolean to readable labels in table items", async () => {
+    const wrapper = mount(UserList, {
+      props: {
+        users: [
+          { id: 1, name: "Admin User", username: "admin", active: true, admin: true, email: "admin@example.com" },
+          { id: 2, name: "Normal", username: "user1", active: true, admin: false, email: "user@example.com" },
+        ],
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    const items = wrapper.vm.tableItems as Array<{ admin: boolean; admin_label: string }>;
+    expect(items[0].admin).toBe(true);
+    expect(items[0].admin_label).toBe("Admin");
+    expect(items[1].admin).toBe(false);
+    expect(items[1].admin_label).toBe("User");
   });
 });

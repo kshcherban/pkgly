@@ -1,3 +1,5 @@
+<!-- ABOUTME: Displays admin user list table with search, status, and admin role columns. -->
+<!-- ABOUTME: Clicking a row navigates to the user's detail page for permission management. -->
 <template>
   <v-card>
     <v-card-title class="d-flex align-center pa-4">
@@ -30,6 +32,15 @@
           :variant="value ? 'flat' : 'outlined'"
           size="small">
           {{ value ? 'Active' : 'Inactive' }}
+        </v-chip>
+      </template>
+
+      <template v-slot:item.admin="{ value }">
+        <v-chip
+          :color="value ? 'primary' : 'default'"
+          :variant="value ? 'flat' : 'outlined'"
+          size="small">
+          {{ value ? 'Admin' : 'User' }}
         </v-chip>
       </template>
 
@@ -75,6 +86,12 @@ const headers: DataTableHeader[] = [
     sortable: true,
   },
   {
+    title: 'Admin',
+    key: 'admin',
+    value: 'admin',
+    sortable: true,
+  },
+  {
     title: 'Status',
     key: 'active',
     value: 'active',
@@ -91,6 +108,8 @@ const tableItems = computed(() => {
     id: user.id,
     name: user.name,
     username: user.username,
+    admin: user.admin,
+    admin_label: user.admin ? 'Admin' : 'User',
     active: user.active,
     email: user.email, // Include for search functionality
   }));
