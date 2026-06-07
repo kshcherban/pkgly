@@ -31,6 +31,6 @@ fn install_request_accepts_username_and_password_only() {
 
     assert_eq!(user.name, "admin");
     assert_eq!(user.username, Username::new("admin".to_string()).unwrap());
-    assert_eq!(user.email.as_ref(), DEFAULT_FIRST_ADMIN_EMAIL);
+    assert_eq!(user.email.as_deref(), Some(DEFAULT_FIRST_ADMIN_EMAIL));
     assert_eq!(user.password.as_deref(), Some("change-me"));
 }

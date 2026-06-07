@@ -48,6 +48,10 @@ const props = defineProps({
     type: Array as PropType<KeyPressAction[]>,
     required: false,
   },
+  optional: {
+    type: Boolean,
+    default: false,
+  },
 });
 
 const isFocused = ref(false);
@@ -64,6 +68,14 @@ const emit = defineEmits<{
 }>();
 
 watch(internalValue, async () => {
+  if (props.optional && internalValue.value.length === 0) {
+    validationResults.value = {};
+    value.value = internalValue.value;
+    isValid.value = true;
+    emit("validity", true);
+    return;
+  }
+
   const { isValid: newIsValid, validationResults: newValidationResults } = await checkValidations(
     props.validations,
     internalValue.value,

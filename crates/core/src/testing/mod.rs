@@ -79,7 +79,7 @@ impl TestCore {
             let user = NewUserRequest {
                 name: "Test User".to_string(),
                 username: Username::from_str(TEST_USER_USERNAME)?,
-                email: Email::from_str("testing@example.com")?,
+                email: Some(Email::from_str("testing@example.com")?),
                 password: Some(TEST_USER_PASSWORD_HASHED.to_owned()),
             };
             let user = user.insert_admin(&self.db).await?;

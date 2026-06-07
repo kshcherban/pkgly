@@ -207,7 +207,7 @@ async function changeEmail() {
       email: email.value.trim(),
     });
     session.user = response.data;
-    email.value = response.data.email;
+    email.value = response.data.email ?? "";
     emailFeedback.value = {
       type: "success",
       title: "Email updated",

@@ -29,7 +29,7 @@ fn sample_user() -> UserSafeData {
         id: 1,
         name: "Test User".into(),
         username: Username::new("test_user".into()).unwrap(),
-        email: Email::new("user@example.com".into()).unwrap(),
+        email: Some(Email::new("user@example.com".into()).unwrap()),
         require_password_change: false,
         active: true,
         admin: false,
@@ -201,7 +201,7 @@ async fn insert_user(
     NewUserRequest {
         name: name.to_string(),
         username: Username::new(username.to_string()).expect("username"),
-        email: Email::new(email.to_string()).expect("email"),
+        email: Some(Email::new(email.to_string()).expect("email")),
         password: None,
     }
     .insert(pool)
@@ -283,13 +283,13 @@ async fn change_email_updates_current_session_user() {
         .expect("body")
         .to_bytes();
     let updated: UserSafeData = serde_json::from_slice(&payload).expect("updated user");
-    assert_eq!(updated.email.to_string(), "updated@example.com");
+    assert_eq!(updated.email.as_deref(), Some("updated@example.com"));
 
     let stored = UserSafeData::get_by_id(user.id, db.pool())
         .await
         .expect("lookup")
         .expect("user");
-    assert_eq!(stored.email.to_string(), "updated@example.com");
+    assert_eq!(stored.email.as_deref(), Some("updated@example.com"));
 
     site.close().await;
 }

@@ -25,60 +25,48 @@
         <v-form @submit.prevent="create">
           <v-row dense>
             <v-col cols="12" md="6">
-              <TextInput
-                v-model="user.name"
-                :disabled="isSubmitting"
-                required>
-                Name
-              </TextInput>
-            </v-col>
-            <v-col cols="12" md="6">
-              <ValidatableTextBox
-                id="email"
-                type="email"
-                :validations="EMAIL_VALIDATIONS"
-                v-model="user.email"
-                :disabled="isSubmitting"
-                @validity="emailValid = $event">
-                Email
-              </ValidatableTextBox>
-            </v-col>
-            <v-col cols="12" md="6">
-              <ValidatableTextBox
-                id="username"
-                :validations="USERNAME_VALIDATIONS"
-                :deniedKeys="URL_SAFE_BAD_CHARS"
-                v-model="user.username"
-                :disabled="isSubmitting"
-                @validity="usernameValid = $event">
-                Username
-              </ValidatableTextBox>
+              <div class="identity-fields">
+                <ValidatableTextBox
+                  id="username"
+                  :validations="USERNAME_VALIDATIONS"
+                  :deniedKeys="URL_SAFE_BAD_CHARS"
+                  v-model="user.username"
+                  :disabled="isSubmitting"
+                  @validity="usernameValid = $event">
+                  Username
+                </ValidatableTextBox>
+                <ValidatableTextBox
+                  id="email"
+                  type="email"
+                  :validations="EMAIL_VALIDATIONS"
+                  v-model="user.email"
+                  :disabled="isSubmitting"
+                  optional
+                  @validity="emailValid = $event">
+                  Email
+                </ValidatableTextBox>
+                <TextInput
+                  v-model="user.name"
+                  :disabled="isSubmitting">
+                  Name
+                </TextInput>
+              </div>
             </v-col>
           </v-row>
 
           <v-divider class="my-4" />
 
-          <SwitchInput
-            id="setPassword"
-            v-model="setPassword"
-            :disabled="isSubmitting">
-            Set Password
-            <template #comment>
-              Disable to send the user an invite email instead.
-            </template>
-          </SwitchInput>
-
-          <v-expand-transition>
-            <div v-if="setPassword" class="mt-2">
+          <v-row dense>
+            <v-col cols="12" md="6">
               <NewPasswordInput
                 id="password"
                 :passwordRules="passwordRules"
                 v-model="password"
                 :disabled="isSubmitting" />
-            </div>
-          </v-expand-transition>
+            </v-col>
+          </v-row>
 
-          <div class="d-flex justify-end mt-6">
+          <div class="d-flex justify-start mt-6">
             <SubmitButton
               :block="false"
               :disabled="!formIsValid || isSubmitting"
@@ -95,7 +83,6 @@
 </template>
 <script lang="ts" setup>
 import SubmitButton from "@/components/form/SubmitButton.vue";
-import SwitchInput from "@/components/form/SwitchInput.vue";
 import NewPasswordInput from "@/components/form/text/NewPasswordInput.vue";
 import TextInput from "@/components/form/text/TextInput.vue";
 import ValidatableTextBox from "@/components/form/text/ValidatableTextBox.vue";
@@ -121,8 +108,6 @@ if (!site.siteInfo) {
 }
 const passwordRules = computed(() => site.getPasswordRulesOrDefault());
 
-const setPassword = ref(true);
-
 const password: Ref<string | undefined> = ref(undefined);
 
 const errorBanner = ref({
@@ -132,7 +117,7 @@ const errorBanner = ref({
 });
 
 const isSubmitting = ref(false);
-const emailValid = ref(false);
+const emailValid = ref(true);
 const usernameValid = ref(false);
 
 const resetError = () => {
@@ -146,7 +131,6 @@ watch(
     user.value.name,
     user.value.email,
     user.value.username,
-  setPassword.value,
   password.value,
   emailValid.value,
   usernameValid.value,
@@ -158,16 +142,9 @@ watch(
   },
 );
 
-watch(setPassword, (enabled) => {
-  if (!enabled) {
-    password.value = undefined;
-  }
-});
-
-const nameValid = computed(() => user.value.name.trim().length > 0);
-const passwordValid = computed(() => !setPassword.value || !!password.value);
+const passwordValid = computed(() => !!password.value);
 const formIsValid = computed(
-  () => nameValid.value && emailValid.value && usernameValid.value && passwordValid.value,
+  () => usernameValid.value && passwordValid.value && emailValid.value,
 );
 
 async function create() {
@@ -185,8 +162,8 @@ async function create() {
   }
 
   const requestBody = {
-    name: user.value.name.trim(),
-    email: user.value.email,
+    name: user.value.name.trim() || user.value.username,
+    email: user.value.email || null,
     username: user.value.username,
     password: password.value,
   };
@@ -336,6 +313,12 @@ form {
   display: flex;
   flex-direction: column;
   gap: 1.25rem;
+}
+
+.identity-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
 }
 
 :deep(.primary-action) {

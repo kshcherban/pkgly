@@ -115,14 +115,14 @@ pub trait UserType:
 
     async fn update_email_address(
         &self,
-        email: impl AsRef<str>,
+        email: Option<Email>,
         database: &PgPool,
     ) -> Result<(), sqlx::Error>
     where
         Self: Sized,
     {
         sqlx::query("UPDATE users SET email = $1 WHERE id = $2")
-            .bind(email.as_ref())
+            .bind(email)
             .bind(self.get_id())
             .execute(database)
             .await?;
@@ -163,7 +163,7 @@ pub struct User {
     pub id: i32,
     pub name: String,
     pub username: Username,
-    pub email: Email,
+    pub email: Option<Email>,
     pub active: bool,
     #[serde(skip_serializing)]
     pub password: Option<String>,
@@ -202,7 +202,7 @@ pub struct UserSafeData {
     pub id: i32,
     pub name: String,
     pub username: Username,
-    pub email: Email,
+    pub email: Option<Email>,
     pub require_password_change: bool,
     pub active: bool,
     pub admin: bool,
@@ -290,7 +290,7 @@ mod tests;
 pub struct NewUserRequest {
     pub name: String,
     pub username: Username,
-    pub email: Email,
+    pub email: Option<Email>,
     pub password: Option<String>,
 }
 impl NewUserRequest {

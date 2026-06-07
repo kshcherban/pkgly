@@ -5,7 +5,7 @@ export class User {
   id: number;
   name: string;
   username: string;
-  email: string;
+  email: string | null;
   admin: boolean;
   user_manager: boolean;
   system_manager: boolean;

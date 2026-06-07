@@ -272,7 +272,7 @@ pub(super) async fn create_user(
         let new_user = NewUserRequest {
             name: principal.display_name.clone(),
             username,
-            email,
+            email: Some(email),
             password: None,
         };
 

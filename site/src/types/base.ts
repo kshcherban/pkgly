@@ -11,7 +11,7 @@ export interface UserResponseType {
   id: number;
   name: string;
   username: string;
-  email: string;
+  email: string | null;
   active: boolean;
   require_password_change: boolean;
   admin: boolean;
@@ -42,8 +42,8 @@ export interface Me {
 
 export interface NewUser {
   username: string;
-  password: string;
-  email: string;
+  password: string | null;
+  email: string | null;
   name: string;
 }
 export interface SiteInfo {

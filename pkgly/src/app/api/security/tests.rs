@@ -91,7 +91,7 @@ fn sample_user(system_manager: bool) -> NewUserRequest {
     NewUserRequest {
         name: "Test User".into(),
         username: Username::new(format!("test_{suffix}")).expect("username"),
-        email: Email::new(format!("{suffix}@example.com")).expect("email"),
+        email: Some(Email::new(format!("{suffix}@example.com")).expect("email")),
         password: None,
     }
 }

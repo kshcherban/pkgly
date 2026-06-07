@@ -336,7 +336,7 @@ pub async fn change_email(
         Err(err) => return Ok(plain_response(StatusCode::BAD_REQUEST, err.to_string())),
     };
 
-    if new_email == user.email {
+    if user.email.as_ref() == Some(&new_email) {
         return Ok(Json(user).into_response());
     }
 
@@ -344,7 +344,7 @@ pub async fn change_email(
         return Ok(ConflictResponse::from("email").into_response());
     }
 
-    user.update_email_address(new_email.as_ref(), &site.database)
+    user.update_email_address(Some(new_email), &site.database)
         .await?;
 
     let Some(updated_user) = UserSafeData::get_by_id(user.id, &site.database).await? else {

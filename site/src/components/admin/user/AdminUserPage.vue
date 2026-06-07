@@ -85,8 +85,9 @@
                 id="email"
                 autocomplete="email"
                 :validations="EMAIL_VALIDATIONS"
-                :originalValue="user.email"
-                v-model="changeUser.email">
+                :originalValue="user.email ?? ''"
+                v-model="changeUser.email"
+                optional>
                 Email
               </ValidatableTextBox>
               <ValidatableTextBox
@@ -133,7 +134,7 @@
               type="hidden"
               name="email"
               autocomplete="email"
-              :value="user.email" />
+              :value="user.email ?? ''" />
             <input
               type="hidden"
               name="username"
@@ -245,7 +246,7 @@ watch(
     }
     changeUser.value = {
       name: newUser.name,
-      email: newUser.email,
+      email: newUser.email ?? "",
       username: newUser.username,
     };
     resetError();
@@ -294,11 +295,15 @@ async function saveUserDetails() {
   resetError();
   savingUser.value = true;
   try {
-    await http.put(`/api/user-management/update/${props.user.id}`, {
+    const body: Record<string, string> = {
       name: changeUser.value.name,
-      email: changeUser.value.email,
       username: changeUser.value.username,
-    });
+    };
+    const originalEmail = props.user.email ?? "";
+    if (changeUser.value.email !== originalEmail) {
+      body.email = changeUser.value.email;
+    }
+    await http.put(`/api/user-management/update/${props.user.id}`, body);
     alerts.success("User updated", "User profile details have been saved.");
     emit("refresh");
   } catch (error) {

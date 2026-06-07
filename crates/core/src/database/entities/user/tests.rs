@@ -8,7 +8,7 @@ pub fn assert_no_serialize_password() {
         id: Default::default(),
         name: Default::default(),
         username: "username".parse().unwrap(),
-        email: "email@email.com".parse().unwrap(),
+        email: Some("email@email.com".parse().unwrap()),
         active: Default::default(),
         password_last_changed: Default::default(),
         require_password_change: Default::default(),

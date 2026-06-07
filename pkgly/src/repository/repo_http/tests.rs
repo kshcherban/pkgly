@@ -193,7 +193,7 @@ async fn virtual_repository_auth_checks_read_permission_on_virtual_repo() {
     let user = NewUserRequest {
         name: "Virtual Test".to_string(),
         username: Username::new("virtual-test".to_string()).expect("username"),
-        email: Email::new("virtual-test@example.invalid".to_string()).expect("email"),
+        email: Some(Email::new("virtual-test@example.invalid".to_string()).expect("email")),
         password: Some("password".to_string()),
     }
     .insert(&db.pool)

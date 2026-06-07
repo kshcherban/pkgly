@@ -1626,7 +1626,7 @@ mod catalog_db_tests {
             id: 1,
             name: "Test Admin".into(),
             username: Username::new("test_admin".into()).expect("username"),
-            email: Email::new("admin@example.com".into()).expect("email"),
+            email: Some(Email::new("admin@example.com".into()).expect("email")),
             require_password_change: false,
             active: true,
             admin: true,

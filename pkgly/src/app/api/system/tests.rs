@@ -94,7 +94,7 @@ fn sample_user(
         id: user_id,
         name: "Test User".into(),
         username: Username::new("test_user".into()).expect("username"),
-        email: Email::new("user@example.com".into()).expect("email"),
+        email: Some(Email::new("user@example.com".into()).expect("email")),
         require_password_change: false,
         active: true,
         admin: false,

@@ -91,7 +91,7 @@ afterEach(() => {
 });
 const formFieldStubs = {
   TextInput: defineComponent({
-    props: ["modelValue", "label", "disabled", "id"],
+    props: ["modelValue", "label", "disabled", "id", "hint"],
     emits: ["update:modelValue"],
     template: `
       <label class="text-input">
@@ -105,7 +105,7 @@ const formFieldStubs = {
     `,
   }),
   ValidatableTextBox: defineComponent({
-    props: ["modelValue", "disabled", "id"],
+    props: ["modelValue", "disabled", "id", "optional"],
     emits: ["update:modelValue", "validity"],
     setup(_, { emit }) {
       const value = ref("");
@@ -176,7 +176,7 @@ const vuetifyStubs = {
     template: "<div class='v-col'><slot /></div>",
   }),
   "v-alert": defineComponent({
-    template: "<div data-testid='user-create-error'><slot /></div>",
+    template: "<div :data-testid='$attrs[\"data-testid\"] || \"user-create-error\"'><slot /></div>",
   }),
   "v-btn": defineComponent({
     props: { type: { type: String, default: "button" } },
@@ -214,23 +214,6 @@ describe("UserCreateView.vue", () => {
     expect(wrapper.find(".v-btn").text()).toContain("Create User");
   });
 
-  it("reveals the password input when 'Set Password' is enabled", async () => {
-    const wrapper = mount(UserCreateView, {
-      global: {
-        stubs: {
-          ...vuetifyStubs,
-          ...formFieldStubs,
-        },
-      },
-    });
-
-    await flushPromises();
-
-    expect(wrapper.find('[data-testid="password-input"]').exists()).toBe(false);
-    await wrapper.get('input[type="checkbox"]').setValue(true);
-    expect(wrapper.find('[data-testid="password-input"]').exists()).toBe(true);
-  });
-
   it("shows the conflicting username returned by the create API", async () => {
     const consoleError = vi.spyOn(console, "error").mockImplementation(() => undefined);
     vi.mocked(http.post).mockRejectedValue({
@@ -253,18 +236,19 @@ describe("UserCreateView.vue", () => {
       },
     });
 
-    const inputs = wrapper.findAll('input[type="text"], input:not([type])');
-    await inputs[0]!.setValue("Test User");
-    await wrapper.get("#email").setValue("test@example.com");
+    await flushPromises();
+
     await wrapper.get("#username").setValue("test1");
+    await wrapper.get("#email").setValue("test@example.com");
+    await wrapper.get('input[type="password"]').setValue("P@ssw0rd!Test123");
     await wrapper.get('[data-testid="user-create-form"]').trigger("submit");
     await flushPromises();
 
     expect(http.post).toHaveBeenCalledWith("/api/user-management/create", {
-      name: "Test User",
+      name: "test1",
       email: "test@example.com",
       username: "test1",
-      password: undefined,
+      password: "P@ssw0rd!Test123",
     });
     expect(wrapper.get('[data-testid="user-create-error"]').text()).toContain(
       "Username already exists",

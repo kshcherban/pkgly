@@ -534,7 +534,11 @@ pub async fn callback(
         return Ok(oauth_denied_redirect("inactive"));
     }
 
-    let email = user.email.to_string();
+    let email = user
+        .email
+        .as_ref()
+        .map(|e| e.to_string())
+        .unwrap_or_else(|| user.username.to_string());
     if existing_roles.is_empty() && subject_identifier != email {
         if let Some(ref rbac_engine) = rbac {
             match rbac_engine.roles_for_user(&email).await {
@@ -620,7 +624,7 @@ pub async fn callback(
     let redirect_str = redirect_header.to_str().unwrap_or("/").to_string();
     info!(
         user_id = user.id,
-        email = %user.email,
+        email = ?user.email,
         provider = %exchange.provider,
         redirect = %redirect_str,
         "OAuth2 login succeeded"

@@ -99,7 +99,7 @@ impl InstallUserRequest {
         Ok(NewUserRequest {
             name: self.username.as_ref().to_string(),
             username: self.username,
-            email: Email::new(DEFAULT_FIRST_ADMIN_EMAIL.to_string())?,
+            email: Some(Email::new(DEFAULT_FIRST_ADMIN_EMAIL.to_string())?),
             password: self.password,
         })
     }
