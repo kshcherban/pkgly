@@ -9,7 +9,6 @@
     <v-container fluid class="d-flex align-center pa-0 app-bar__inner">
       <router-link
         to="/"
-        exact-active-class="app-bar__nav-link--active"
         class="d-flex align-center text-decoration-none logo-link">
         <v-avatar
           :image="'/logo.svg'"

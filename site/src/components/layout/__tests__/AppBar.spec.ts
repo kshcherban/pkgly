@@ -219,7 +219,7 @@ describe("AppBar.vue", () => {
     expect(topBarButtons.some((btn) => btn.text().includes("Admin Panel"))).toBe(false);
   });
 
-  it("wires explicit active classes for home and admin navigation", () => {
+  it("only wires an active class for admin navigation", () => {
     const wrapper = mount(AppBar, {
       props: {
         user: {
@@ -248,9 +248,7 @@ describe("AppBar.vue", () => {
       },
     });
 
-    expect(wrapper.get(".router-link").attributes("data-active-class")).toBe(
-      "app-bar__nav-link--active",
-    );
+    expect(wrapper.get(".router-link").attributes("data-active-class")).toBeUndefined();
     const admin = wrapper
       .findAllComponents(VBtnStub)
       .find((button) => button.text().includes("Admin Panel"));
