@@ -80,6 +80,7 @@ function administrationBar() {
       items: [
         { text: "Prepping your System", link: "/sysAdmin/" },
         { text: "Quickstart", link: "/quickstart" },
+        { text: "User Administration", link: "/sysAdmin/users" },
         { text: "Maintenance", link: "/sysAdmin/maintenance" },
         { text: "Configuring S3 Storage", link: "/sysAdmin/s3" },
         { text: "Retention Policies", link: "/sysAdmin/retention" },

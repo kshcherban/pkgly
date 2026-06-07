@@ -274,6 +274,7 @@ pub(super) async fn create_user(
             username,
             email: Some(email),
             password: None,
+            permissions: None,
         };
 
         match new_user.insert(&site.database).await {

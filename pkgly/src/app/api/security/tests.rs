@@ -1,3 +1,5 @@
+// ABOUTME: Tests security administration authorization and settings endpoints.
+// ABOUTME: Exercises manager permissions using real database-backed users.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::app::authentication::{AuthenticationRaw, session::Session};
@@ -93,6 +95,7 @@ fn sample_user(system_manager: bool) -> NewUserRequest {
         username: Username::new(format!("test_{suffix}")).expect("username"),
         email: Some(Email::new(format!("{suffix}@example.com")).expect("email")),
         password: None,
+        permissions: None,
     }
 }
 

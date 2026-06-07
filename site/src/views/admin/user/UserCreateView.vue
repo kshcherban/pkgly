@@ -1,3 +1,5 @@
+<!-- ABOUTME: Provides the administration form for creating a local user account. -->
+<!-- ABOUTME: Submits identity, password, and initial permissions in one request. -->
 <template>
   <v-container class="py-6">
     <v-alert
@@ -62,9 +64,17 @@
                 id="password"
                 :passwordRules="passwordRules"
                 v-model="password"
-                :disabled="isSubmitting" />
+                :disabled="isSubmitting">
+                Password
+              </NewPasswordInput>
             </v-col>
           </v-row>
+
+          <v-divider class="my-4" />
+
+          <UserPermissionFields
+            v-model="permissions"
+            :disabled="isSubmitting" />
 
           <div class="d-flex justify-start mt-6">
             <SubmitButton
@@ -82,6 +92,7 @@
   </v-container>
 </template>
 <script lang="ts" setup>
+import UserPermissionFields from "@/components/admin/user/UserPermissionFields.vue";
 import SubmitButton from "@/components/form/SubmitButton.vue";
 import NewPasswordInput from "@/components/form/text/NewPasswordInput.vue";
 import TextInput from "@/components/form/text/TextInput.vue";
@@ -94,7 +105,10 @@ import {
 import http from "@/http";
 import router from "@/router";
 import { siteStore } from "@/stores/site";
-import type { PasswordRules } from "@/types/base";
+import {
+  RepositoryActions,
+  type InitialUserPermissions,
+} from "@/types/base";
 import { isAxiosError } from "axios";
 import { computed, watch, type Ref, ref } from "vue";
 const user = ref({
@@ -109,6 +123,12 @@ if (!site.siteInfo) {
 const passwordRules = computed(() => site.getPasswordRulesOrDefault());
 
 const password: Ref<string | undefined> = ref(undefined);
+const permissions = ref<InitialUserPermissions>({
+  admin: false,
+  user_manager: false,
+  system_manager: false,
+  default_repository_actions: [RepositoryActions.Read],
+});
 
 const errorBanner = ref({
   visible: false,
@@ -131,9 +151,13 @@ watch(
     user.value.name,
     user.value.email,
     user.value.username,
-  password.value,
-  emailValid.value,
-  usernameValid.value,
+    password.value,
+    emailValid.value,
+    usernameValid.value,
+    permissions.value.admin,
+    permissions.value.user_manager,
+    permissions.value.system_manager,
+    permissions.value.default_repository_actions.join(","),
   ],
   () => {
     if (errorBanner.value.visible) {
@@ -166,6 +190,7 @@ async function create() {
     email: user.value.email || null,
     username: user.value.username,
     password: password.value,
+    permissions: permissions.value,
   };
 
   resetError();

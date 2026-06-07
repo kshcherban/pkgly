@@ -1,3 +1,5 @@
+// ABOUTME: Defines top-level API routes, installation, and instance information endpoints.
+// ABOUTME: Converts installation requests into persisted administrator accounts.
 use axum::{
     Json,
     extract::{Extension, Request, State},
@@ -101,6 +103,7 @@ impl InstallUserRequest {
             username: self.username,
             email: Some(Email::new(DEFAULT_FIRST_ADMIN_EMAIL.to_string())?),
             password: self.password,
+            permissions: None,
         })
     }
 }

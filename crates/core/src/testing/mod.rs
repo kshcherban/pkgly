@@ -1,3 +1,5 @@
+// ABOUTME: Provides shared database and logging setup for core integration tests.
+// ABOUTME: Creates reusable test users and tracks persistent test execution state.
 use std::str::FromStr;
 
 use env_file::EnvFile;
@@ -81,6 +83,7 @@ impl TestCore {
                 username: Username::from_str(TEST_USER_USERNAME)?,
                 email: Some(Email::from_str("testing@example.com")?),
                 password: Some(TEST_USER_PASSWORD_HASHED.to_owned()),
+                permissions: None,
             };
             let user = user.insert_admin(&self.db).await?;
             Ok(Some(user.into()))

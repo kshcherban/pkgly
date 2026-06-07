@@ -203,6 +203,7 @@ async fn insert_user(
         username: Username::new(username.to_string()).expect("username"),
         email: Some(Email::new(email.to_string()).expect("email")),
         password: None,
+        permissions: None,
     }
     .insert(pool)
     .await

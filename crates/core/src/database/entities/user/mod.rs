@@ -1,3 +1,5 @@
+// ABOUTME: Defines persisted user entities and their database operations.
+// ABOUTME: Supports atomic user creation with identity and initial permissions.
 use pg_extended_sqlx_queries::prelude::*;
 use serde::{Deserialize, Serialize};
 use sqlx::{FromRow, PgPool, postgres::PgRow, types::Json};
@@ -5,7 +7,7 @@ use utoipa::ToSchema;
 
 use crate::user::{
     Email, Username,
-    permissions::{HasPermissions, RepositoryActions, UserPermissions},
+    permissions::{HasPermissions, InitialUserPermissions, RepositoryActions, UserPermissions},
 };
 
 pub mod auth_token;
@@ -292,6 +294,7 @@ pub struct NewUserRequest {
     pub username: Username,
     pub email: Option<Email>,
     pub password: Option<String>,
+    pub permissions: Option<InitialUserPermissions>,
 }
 impl NewUserRequest {
     pub async fn insert(self, database: &PgPool) -> sqlx::Result<User> {
@@ -300,15 +303,31 @@ impl NewUserRequest {
             username,
             email,
             password,
+            permissions,
         } = self;
+        let permissions = permissions.unwrap_or_default();
         let user = sqlx::query_as(
-            r#"INSERT INTO users (name, username, email, password) VALUES ($1, $2, $3, $4) RETURNING *"#,
+            r#"INSERT INTO users (
+                name,
+                username,
+                email,
+                password,
+                admin,
+                user_manager,
+                system_manager,
+                default_repository_actions
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8) RETURNING *"#,
         )
         .bind(name)
         .bind(username)
         .bind(email)
         .bind(password)
-        .fetch_one(database).await?;
+        .bind(permissions.admin)
+        .bind(permissions.user_manager)
+        .bind(permissions.system_manager)
+        .bind(permissions.default_repository_actions)
+        .fetch_one(database)
+        .await?;
         Ok(user)
     }
     pub async fn insert_admin(self, database: &PgPool) -> sqlx::Result<User> {
@@ -317,6 +336,7 @@ impl NewUserRequest {
             username,
             email,
             password,
+            permissions: _,
         } = self;
         let user = sqlx::query_as(
             r#"INSERT INTO users (name, username, email, password, admin, user_manager, system_manager) VALUES ($1, $2, $3, $4, true, true, true) RETURNING *"#,

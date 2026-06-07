@@ -1,5 +1,5 @@
 // ABOUTME: Verifies user creation form layout, behavior, and API error feedback.
-// ABOUTME: Covers password controls and field-specific user creation failures.
+// ABOUTME: Covers permission defaults, complete payloads, and field-specific failures.
 import { flushPromises, mount } from "@vue/test-utils";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, ref } from "vue";
@@ -126,7 +126,9 @@ const formFieldStubs = {
     emits: ["update:modelValue"],
     template: `
       <div data-testid="password-input">
+        <label for="password"><slot /></label>
         <input
+          id="password"
           type="password"
           :value="modelValue"
           @input="$emit('update:modelValue', $event.target.value)" />
@@ -212,6 +214,63 @@ describe("UserCreateView.vue", () => {
 
     expect(wrapper.find('[data-testid="user-create-card"]').exists()).toBe(true);
     expect(wrapper.find(".v-btn").text()).toContain("Create User");
+    expect(wrapper.get('label[for="password"]').text()).toBe("Password");
+  });
+
+  it("defaults new users to read-only repository access", async () => {
+    const wrapper = mount(UserCreateView, {
+      global: {
+        stubs: {
+          ...vuetifyStubs,
+          ...formFieldStubs,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    expect((wrapper.get("#admin").element as HTMLInputElement).checked).toBe(false);
+    expect((wrapper.get("#userManager").element as HTMLInputElement).checked).toBe(false);
+    expect((wrapper.get("#systemManager").element as HTMLInputElement).checked).toBe(false);
+    expect((wrapper.get("#defaultRead").element as HTMLInputElement).checked).toBe(true);
+    expect((wrapper.get("#defaultWrite").element as HTMLInputElement).checked).toBe(false);
+    expect((wrapper.get("#defaultEdit").element as HTMLInputElement).checked).toBe(false);
+  });
+
+  it("submits identity, password, and changed permissions together", async () => {
+    vi.mocked(http.post).mockResolvedValue({ data: {} });
+    const wrapper = mount(UserCreateView, {
+      global: {
+        stubs: {
+          ...vuetifyStubs,
+          ...formFieldStubs,
+        },
+      },
+    });
+
+    await flushPromises();
+
+    await wrapper.get("#username").setValue("test1");
+    await wrapper.get("#email").setValue("test@example.com");
+    await wrapper.get('input[type="password"]').setValue("P@ssw0rd!Test123");
+    await wrapper.get("#userManager").setValue(true);
+    await wrapper.get("#defaultRead").setValue(false);
+    await wrapper.get("#defaultWrite").setValue(true);
+    await wrapper.get('[data-testid="user-create-form"]').trigger("submit");
+    await flushPromises();
+
+    expect(http.post).toHaveBeenCalledWith("/api/user-management/create", {
+      name: "test1",
+      email: "test@example.com",
+      username: "test1",
+      password: "P@ssw0rd!Test123",
+      permissions: {
+        admin: false,
+        user_manager: true,
+        system_manager: false,
+        default_repository_actions: ["Write"],
+      },
+    });
   });
 
   it("shows the conflicting username returned by the create API", async () => {
@@ -249,6 +308,12 @@ describe("UserCreateView.vue", () => {
       email: "test@example.com",
       username: "test1",
       password: "P@ssw0rd!Test123",
+      permissions: {
+        admin: false,
+        user_manager: false,
+        system_manager: false,
+        default_repository_actions: ["Read"],
+      },
     });
     expect(wrapper.get('[data-testid="user-create-error"]').text()).toContain(
       "Username already exists",

@@ -1,3 +1,5 @@
+// ABOUTME: Tests repository HTTP authentication, routing, and audit behavior.
+// ABOUTME: Exercises repository permission checks against real database records.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use nr_core::{
@@ -195,6 +197,7 @@ async fn virtual_repository_auth_checks_read_permission_on_virtual_repo() {
         username: Username::new("virtual-test".to_string()).expect("username"),
         email: Some(Email::new("virtual-test@example.invalid".to_string()).expect("email")),
         password: Some("password".to_string()),
+        permissions: None,
     }
     .insert(&db.pool)
     .await

@@ -1,3 +1,5 @@
+// ABOUTME: Tests existing-user permission editing controls and save behavior.
+// ABOUTME: Verifies shared permission fields correctly enable persistence actions.
 import { flushPromises, mount } from "@vue/test-utils";
 import { describe, expect, it, vi } from "vitest";
 import { defineComponent, nextTick } from "vue";

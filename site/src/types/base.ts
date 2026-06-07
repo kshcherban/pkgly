@@ -1,3 +1,5 @@
+// ABOUTME: Defines shared frontend API models and common domain value types.
+// ABOUTME: Provides typed contracts used across Pkgly views, stores, and components.
 export interface ScopeDescription {
   key: string;
   description: string;
@@ -45,6 +47,13 @@ export interface NewUser {
   password: string | null;
   email: string | null;
   name: string;
+}
+
+export interface InitialUserPermissions {
+  admin: boolean;
+  user_manager: boolean;
+  system_manager: boolean;
+  default_repository_actions: Array<RepositoryActions>;
 }
 export interface SiteInfo {
   url?: string;

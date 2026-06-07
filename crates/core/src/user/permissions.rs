@@ -1,3 +1,5 @@
+// ABOUTME: Defines user permission models and authorization checks.
+// ABOUTME: Applies global and repository-specific permission updates.
 use std::fmt::Debug;
 
 use ahash::HashMap;
@@ -122,6 +124,14 @@ pub enum RepositoryActions {
     Read,
     Write,
     Edit,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize, ToSchema)]
+pub struct InitialUserPermissions {
+    pub admin: bool,
+    pub user_manager: bool,
+    pub system_manager: bool,
+    pub default_repository_actions: Vec<RepositoryActions>,
 }
 impl RepositoryActions {
     pub fn all() -> Vec<Self> {
