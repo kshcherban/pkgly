@@ -2,13 +2,18 @@
 // ABOUTME: Exercises repository permission checks against real database records.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
+use crate::app::authentication::session::SessionManagerConfig;
+use crate::app::config::{Mode, SecuritySettings, SiteSetting};
+use crate::repository::StagingConfig;
 use nr_core::{
+    database::DatabaseConfig,
     database::entities::storage::NewDBStorage,
     database::entities::user::NewUserRequest,
     database::{
         entities::user::permissions::NewUserRepositoryPermissions, migration::run_migrations,
     },
     repository::Visibility,
+    repository::config::RepositoryConfigType,
     storage::StorageName,
     user::{
         Email, Username,
@@ -24,6 +29,7 @@ static DB_LOCK: Lazy<tokio::sync::Mutex<()>> = Lazy::new(|| tokio::sync::Mutex::
 
 struct TestDb {
     pool: PgPool,
+    port: u16,
     _container: Container<'static, GenericImage>,
     _docker: &'static Cli,
 }
@@ -45,6 +51,7 @@ async fn fresh_db() -> TestDb {
                 run_migrations(&pool).await.expect("run migrations");
                 return TestDb {
                     pool,
+                    port,
                     _container: container,
                     _docker: docker,
                 };
@@ -386,5 +393,114 @@ async fn default_repository_actions_grants_basic_auth_read() {
     assert!(
         can_write_after_explicit,
         "explicit Write should grant write access"
+    );
+}
+
+#[tokio::test]
+async fn docker_v2_catchall_401_uses_request_host_for_realm() {
+    let _guard = DB_LOCK.lock().await;
+    let db = fresh_db().await;
+    let root = tempfile::tempdir().expect("tempdir");
+
+    // Create a storage
+    let storage_name = StorageName::new("default".to_string()).expect("storage name");
+    let storage = NewDBStorage::new(
+        "Local".into(),
+        storage_name,
+        serde_json::json!({
+            "type": "Local",
+            "settings": {
+                "path": root.path().join("storages").to_string_lossy()
+            }
+        }),
+    )
+    .insert(&db.pool)
+    .await
+    .expect("insert storage")
+    .expect("storage row");
+
+    // Create a Docker repository with auth enabled (default) and hosted config
+    use crate::repository::NewRepository;
+    use crate::repository::docker::configs::{DockerRegistryConfig, DockerRegistryConfigType};
+    use ahash::HashMap;
+    let mut configs = HashMap::with_hasher(Default::default());
+    configs.insert(
+        DockerRegistryConfigType::get_type_static().to_string(),
+        serde_json::to_value(DockerRegistryConfig::Hosted).expect("serialize docker config"),
+    );
+    let repo = NewRepository {
+        name: "test".into(),
+        uuid: Uuid::new_v4(),
+        repository_type: "docker".into(),
+        configs,
+    };
+    let _repo_id = repo
+        .insert(storage.id, &db.pool)
+        .await
+        .expect("insert docker repository");
+
+    // Create the Pkgly instance (loads storages and repos from DB)
+    let site = Pkgly::new(
+        Mode::Debug,
+        SiteSetting {
+            app_url: None, // Force fallback to Host header
+            ..Default::default()
+        },
+        SecuritySettings::default(),
+        SessionManagerConfig {
+            database_location: root.path().join("sessions.redb"),
+            ..Default::default()
+        },
+        StagingConfig {
+            staging_dir: root.path().join("staging"),
+            ..Default::default()
+        },
+        None,
+        DatabaseConfig {
+            user: "postgres".into(),
+            password: "password".into(),
+            database: "postgres".into(),
+            host: "127.0.0.1".into(),
+            port: Some(db.port),
+        },
+        Some(root.path().join("storages")),
+    )
+    .await
+    .expect("create Pkgly instance");
+
+    // Build a request with a non-default Host header
+    let request = http::Request::builder()
+        .method(http::Method::GET)
+        .uri("http://test.example.com:8080/v2/default/test/manifests/latest")
+        .header("Host", "test.example.com:8080")
+        .body(axum::body::Body::empty())
+        .expect("build request");
+
+    // Call the Docker V2 handler directly
+    let response = handle_docker_v2_any_path(
+        axum::extract::Path("default/test/manifests/latest".to_string()),
+        axum::extract::State(site),
+        None,
+        RepositoryAuthentication::NoIdentification,
+        request,
+    )
+    .await
+    .expect("handler returned error");
+
+    assert_eq!(response.status(), http::StatusCode::UNAUTHORIZED);
+
+    let www_auth = response
+        .headers()
+        .get("www-authenticate")
+        .and_then(|v| v.to_str().ok())
+        .expect("www-authenticate header");
+
+    assert!(
+        www_auth.contains("realm=\"http://test.example.com:8080/v2/token\""),
+        "expected realm to use Host header, got: {www_auth}"
+    );
+    assert!(
+        www_auth.contains("service=\"test.example.com:8080\""),
+        "expected service to use Host header, got: {www_auth}"
     );
 }
