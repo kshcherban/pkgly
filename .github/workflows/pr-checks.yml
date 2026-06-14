@@ -1,0 +1,45 @@
+# ABOUTME: Runs safe PR validation checks for Rust formatting, tests, and integration coverage.
+# ABOUTME: Avoids exposing repository credentials to code from pull request branches.
+name: PR checks
+
+on:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  cargo-fmt:
+    name: cargo fmt --all --check
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: rustup component add rustfmt
+      - run: cargo fmt --all --check
+
+  cargo-test:
+    name: cargo test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8
+      - uses: Swatinem/rust-cache@v2
+      - run: cargo test --workspace
+
+  integration-tests:
+    name: integration tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+        id: buildx
+      - run: ./tests/run_integration_tests.sh --build
+        env:
+          BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
+          PKGLY_INTEGRATION_COMPOSE_OVERRIDE: ${{ github.workspace }}/tests/docker/docker-compose.ci-cache.yml

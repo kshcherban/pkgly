@@ -1,0 +1,15 @@
+# ABOUTME: CI-only Compose override that wires BuildKit GHA cache into pkgly and test-runner images.
+# ABOUTME: Included only when PKGLY_INTEGRATION_COMPOSE_OVERRIDE is set (PR Workflow).
+services:
+  pkgly:
+    build:
+      cache_from:
+        - type=gha,scope=pkgly-image
+      cache_to:
+        - type=gha,scope=pkgly-image,mode=max
+  test-runner:
+    build:
+      cache_from:
+        - type=gha,scope=test-runner-image
+      cache_to:
+        - type=gha,scope=test-runner-image,mode=max

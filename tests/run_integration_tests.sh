@@ -10,6 +10,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DOCKER_DIR="${SCRIPT_DIR}/docker"
 INTEGRATION_DIR="${SCRIPT_DIR}/integration"
 
+if [ -n "${PKGLY_INTEGRATION_COMPOSE_OVERRIDE:-}" ] && [ -f "$PKGLY_INTEGRATION_COMPOSE_OVERRIDE" ]; then
+    COMPOSE_CMD=(docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" -f "$PKGLY_INTEGRATION_COMPOSE_OVERRIDE")
+else
+    COMPOSE_CMD=(docker compose -f "${DOCKER_DIR}/docker-compose.test.yml")
+fi
+
 # Colors
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -149,7 +155,7 @@ print_header
 # Clean up if requested
 if [ $CLEAN -eq 1 ]; then
     print_color "$YELLOW" "Cleaning up test environment..."
-    docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" down -v > /dev/null 2>&1 || true
+    "${COMPOSE_CMD[@]}" down -v > /dev/null 2>&1 || true
     print_color "$GREEN" "✓ Cleanup complete"
     echo ""
 fi
@@ -157,13 +163,13 @@ fi
 # Build images if requested
 if [ $BUILD -eq 1 ]; then
     print_color "$YELLOW" "Building Docker images..."
-    docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" build
+    "${COMPOSE_CMD[@]}" build
     print_color "$GREEN" "✓ Build complete"
     echo ""
 fi
 
 REQUIRED_SERVICES=(postgres pkgly test-runner docker)
-RUNNING_SERVICES=$(docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" ps --status running --services 2>/dev/null || true)
+RUNNING_SERVICES=$("${COMPOSE_CMD[@]}" ps --status running --services 2>/dev/null || true)
 ALL_REQUIRED_RUNNING=1
 for svc in "${REQUIRED_SERVICES[@]}"; do
     if ! grep -qx "$svc" <<<"$RUNNING_SERVICES"; then
@@ -186,7 +192,7 @@ for suite in "${TEST_SUITES[@]}"; do
 done
 
 if [ $REUSE_ENV -eq 1 ] && [ $NEEDS_ACCESS_LOG_VOLUME -eq 1 ]; then
-    if ! docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" exec -T test-runner \
+    if ! "${COMPOSE_CMD[@]}" exec -T test-runner \
        test -d /pkgly-storage 2>/dev/null; then
         REUSE_ENV=0
     fi
@@ -198,7 +204,7 @@ if [ $REUSE_ENV -eq 1 ]; then
 else
     # Start test environment
     print_color "$YELLOW" "Starting test environment..."
-    docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" up -d
+    "${COMPOSE_CMD[@]}" up -d
 
     # Wait for services to be healthy
     print_color "$YELLOW" "Waiting for services to be ready..."
@@ -206,8 +212,8 @@ else
     ELAPSED=0
 
     while [ $ELAPSED -lt $MAX_WAIT ]; do
-        if docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" ps | grep -q "healthy"; then
-            POSTGRES_HEALTHY=$(docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" ps postgres | grep -q "healthy" && echo 1 || echo 0)
+        if "${COMPOSE_CMD[@]}" ps | grep -q "healthy"; then
+            POSTGRES_HEALTHY=$("${COMPOSE_CMD[@]}" ps postgres | grep -q "healthy" && echo 1 || echo 0)
             if [ "$POSTGRES_HEALTHY" -eq 1 ]; then
                 print_color "$GREEN" "✓ All services are healthy"
                 break
@@ -224,14 +230,14 @@ else
 
     if [ $ELAPSED -ge $MAX_WAIT ]; then
         print_color "$RED" "✗ Services did not become healthy within ${MAX_WAIT} seconds"
-        docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" logs
-        docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" down
+        "${COMPOSE_CMD[@]}" logs
+        "${COMPOSE_CMD[@]}" down
         exit 1
     fi
 
     # Restart pkgly to load seeded repositories
     print_color "$YELLOW" "Restarting Pkgly to load seeded repositories..."
-    docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" restart pkgly
+    "${COMPOSE_CMD[@]}" restart pkgly
     sleep 2  # Give it time to restart
     print_color "$GREEN" "✓ Pkgly restarted"
 
@@ -261,7 +267,7 @@ for suite in "${TEST_SUITES[@]}"; do
     chmod +x "$TEST_SCRIPT"
 
     # Run test in test-runner container
-    if docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" exec -T test-runner \
+    if "${COMPOSE_CMD[@]}" exec -T test-runner \
        bash "/tests/test_${suite}.sh"; then
         print_color "$GREEN" "✓ ${suite} tests PASSED"
         ((PASSED_SUITES+=1))
@@ -294,12 +300,12 @@ echo ""
 # Stop environment if requested
 if [ $STOP -eq 1 ] && [ $KEEP_RUNNING -eq 0 ]; then
     print_color "$YELLOW" "Stopping test environment..."
-    docker compose -f "${DOCKER_DIR}/docker-compose.test.yml" down
+    "${COMPOSE_CMD[@]}" down
     print_color "$GREEN" "✓ Environment stopped"
 else
     print_color "$YELLOW" "Test environment is still running"
-    echo "  To view logs:  docker compose -f ${DOCKER_DIR}/docker-compose.test.yml logs -f"
-    echo "  To stop:       docker compose -f ${DOCKER_DIR}/docker-compose.test.yml down"
+    echo "  To view logs:  ${COMPOSE_CMD[*]} logs -f"
+    echo "  To stop:       ${COMPOSE_CMD[*]} down"
 fi
 
 echo ""
