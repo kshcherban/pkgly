@@ -7,7 +7,7 @@ This Helm chart deploys Pkgly, a universal artifact repository supporting Docker
 - **Multi-protocol support**: HTTP, OCI, and native package manager protocols
 - **Repository types**: Docker, Go proxy, Maven, NPM, PHP Composer, Python PyPI, Helm charts
 - **Database**: PostgreSQL (included as dependency)
-- **Tracing**: Jaeger integration (optional)
+- **Tracing**: OpenTelemetry export to an operator-managed collector
 - **Storage**: Local filesystem (with PVC support)
 - **Security**: Security contexts, resource limits, health checks
 - **Ingress**: Nginx ingress support with large file upload handling
@@ -25,11 +25,11 @@ Add the repository and install the chart:
 ```bash
 # Install dependencies
 helm repo add bitnami https://charts.bitnami.com/bitnami
-helm repo add jaegertracing https://jaegertracing.github.io/helm-charts
 helm repo update
 
 # Install the chart
-helm install my-pkgly ./pkgly-chart
+helm dependency build ./charts/pkgly
+helm install my-pkgly ./charts/pkgly
 ```
 
 ## Uninstalling the Chart
@@ -45,29 +45,26 @@ See `values.yaml` for configuration options. The following table shows the confi
 | Parameter | Description | Default |
 |-----------|-------------|---------|
 | `replicaCount` | Number of Pkgly replicas | `1` |
-| `image.repository` | Container image repository | `ghcr.io/sudoers/pkgly` |
+| `image.repository` | Container image repository | `ghcr.io/pkgly/pkgly` |
 | `image.tag` | Container image tag | `latest` |
 | `service.type` | Kubernetes service type | `ClusterIP` |
 | `service.port` | Service port | `6742` |
 | `ingress.enabled` | Enable ingress | `false` |
 | `postgresql.enabled` | Deploy PostgreSQL | `true` |
-| `jaeger.enabled` | Deploy Jaeger for tracing | `false` |
+| `opentelemetry.endpoint` | Operator-managed OTLP collector endpoint | `http://otel-collector.observability.svc:4317` |
 | `persistence.enabled` | Enable persistent storage | `true` |
 | `persistence.size` | Storage size | `10Gi` |
-| `rustLog` | Rust log level | `info` |
 | `env` | Custom environment variables with secret support | `[]` |
-| `externalDatabase.secretRef.enabled` | Use secret for external database URL | `false` |
+| `externalDatabase.secretRef.enabled` | Use a Secret for the external database password | `false` |
 
-### Development Mode
+### OpenTelemetry
 
-For development with Jaeger tracing enabled:
+Jaeger is not installed by this chart. Deploy an OpenTelemetry collector or Jaeger separately, then configure its OTLP endpoint:
 
 ```yaml
-tracing:
+opentelemetry:
   enabled: true
-jaeger:
-  enabled: true
-rustLog: "debug"
+  endpoint: "http://otel-collector.observability.svc:4317"
 ```
 
 ### Production Mode
@@ -94,35 +91,42 @@ postgresql:
 
 ## Persistence
 
-The chart uses a PersistentVolumeClaim for storing repository data. The PVC is created by default and uses the default storage class.
+The chart uses a PersistentVolumeClaim for repository data, sessions, staging files, and extracted frontend assets. The PVC is created by default and uses the default storage class. Helm upgrades and pod restarts reuse the same claim.
+
+The bundled PostgreSQL dependency also enables its own PersistentVolumeClaim by default.
+
+The liveness probe calls `GET /health`. Pkgly exposes this endpoint after application startup and database initialization complete.
 
 ## Database
 
 By default, the chart deploys PostgreSQL as a dependency. You can disable it and use an external database:
 
-### External Database with Secret (Recommended)
+### External Database with Secret
 
-For production environments, use a Kubernetes secret to store the database URL:
+Disable the bundled dependency and provide connection fields. Use a Kubernetes Secret for the password:
 
 ```yaml
 postgresql:
   enabled: false
 externalDatabase:
+  host: postgres.database.svc
+  port: 5432
+  user: pkgly
+  database: pkgly
   secretRef:
     enabled: true
     name: database-secret
-    key: url
-    optional: false
+    passwordKey: password
 ```
 
 Create the secret:
 
 ```bash
 kubectl create secret generic database-secret \
-  --from-literal=url="postgresql://user:password@host:5432/database"
+  --from-literal=password="replace-me"
 ```
 
-### External Database with Direct URL
+### External Database with Direct Password
 
 For development environments:
 
@@ -130,7 +134,11 @@ For development environments:
 postgresql:
   enabled: false
 externalDatabase:
-  url: "postgresql://user:password@host:5432/database"
+  host: postgres.database.svc
+  port: 5432
+  user: pkgly
+  password: pkgly
+  database: pkgly
   secretRef:
     enabled: false
 ```
@@ -170,7 +178,6 @@ env:
 
 - **Web UI**: `http://<service-name>.<namespace>.svc.cluster.local:6742`
 - **API**: Same URL, with appropriate endpoints
-- **Default credentials**: `admin` / `admin123` (change `adminPassword` in production)
 
 ## Repository URLs
 
@@ -187,6 +194,16 @@ Once deployed, repositories are accessible at:
 ```bash
 helm upgrade my-pkgly ./pkgly-chart
 ```
+
+## Testing
+
+The chart test suite expects a local kind cluster named `kind`, the default namespace, and a local `pkgly:test` image:
+
+```bash
+./charts/pkgly/tests/run.sh
+```
+
+Override the image or cluster with `PKGLY_TEST_IMAGE_REPOSITORY`, `PKGLY_TEST_IMAGE_TAG`, or `PKGLY_KIND_CLUSTER`.
 
 ## Contributing
 

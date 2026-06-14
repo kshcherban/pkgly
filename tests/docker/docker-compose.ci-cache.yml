@@ -1,0 +1,5 @@
+# ABOUTME: CI-only Compose override that adds an explicit image tag for test-runner.
+# ABOUTME: Allows docker/build-push-action to pre-build images that compose starts without rebuilding.
+services:
+  test-runner:
+    image: pkgly-test-runner:ci

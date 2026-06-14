@@ -106,13 +106,22 @@ fn parse_content_length(headers: &[u8]) -> usize {
 
 fn json_response(status: &str, body: &str) -> String {
     format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
 
 fn empty_response(status: &str) -> String {
-    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n")
+    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
+}
+
+fn login_response() -> String {
+    "HTTP/1.1 200 OK\r\nSet-Cookie: session=session123; Path=/\r\nContent-Length: 2\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}".to_string()
+}
+
+#[test]
+fn login_response_closes_connection() {
+    assert!(login_response().contains("\r\nConnection: close\r\n"));
 }
 
 fn package_entry_json(package: &str, version: &str) -> String {
@@ -205,11 +214,8 @@ async fn repo_list_command_uses_configured_server_and_token() {
 #[tokio::test]
 async fn auth_login_stores_created_token_without_password() {
     let token_body = "{\"id\":1,\"token\":\"created-token\",\"expires_at\":null}";
-    let server = MockServer::start(vec![
-        "HTTP/1.1 200 OK\r\nSet-Cookie: session=session123; Path=/\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}".to_string(),
-        json_response("200 OK", token_body),
-    ])
-    .unwrap_or_else(|err| panic!("mock server failed: {err}"));
+    let server = MockServer::start(vec![login_response(), json_response("200 OK", token_body)])
+        .unwrap_or_else(|err| panic!("mock server failed: {err}"));
     let temp = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
     let config_path = temp.path().join("config.toml");
     let mut config = ConfigFile::default();
@@ -263,11 +269,8 @@ async fn auth_login_stores_created_token_without_password() {
 #[tokio::test]
 async fn auth_login_stores_base_url_from_flag_in_new_profile() {
     let token_body = "{\"id\":1,\"token\":\"created-token\",\"expires_at\":null}";
-    let server = MockServer::start(vec![
-        "HTTP/1.1 200 OK\r\nSet-Cookie: session=session123; Path=/\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}".to_string(),
-        json_response("200 OK", token_body),
-    ])
-    .unwrap_or_else(|err| panic!("mock server failed: {err}"));
+    let server = MockServer::start(vec![login_response(), json_response("200 OK", token_body)])
+        .unwrap_or_else(|err| panic!("mock server failed: {err}"));
     let temp = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
     let config_path = temp.path().join("config.toml");
 
@@ -304,11 +307,8 @@ async fn auth_login_stores_base_url_from_flag_in_new_profile() {
 #[tokio::test]
 async fn auth_login_prompts_for_password_when_flag_is_absent() {
     let token_body = "{\"id\":1,\"token\":\"created-token\",\"expires_at\":null}";
-    let server = MockServer::start(vec![
-        "HTTP/1.1 200 OK\r\nSet-Cookie: session=session123; Path=/\r\nContent-Length: 2\r\nContent-Type: application/json\r\n\r\n{}".to_string(),
-        json_response("200 OK", token_body),
-    ])
-    .unwrap_or_else(|err| panic!("mock server failed: {err}"));
+    let server = MockServer::start(vec![login_response(), json_response("200 OK", token_body)])
+        .unwrap_or_else(|err| panic!("mock server failed: {err}"));
     let temp = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
     let config_path = temp.path().join("config.toml");
 
