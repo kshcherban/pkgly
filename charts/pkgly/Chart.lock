@@ -2,8 +2,5 @@ dependencies:
 - name: postgresql
   repository: https://charts.bitnami.com/bitnami
   version: 18.1.8
-- name: jaeger
-  repository: https://jaegertracing.github.io/helm-charts
-  version: 3.4.1
-digest: sha256:ba00edc6e27519de3e596b6c6b46a3d9855383b344d7537d5620a36573189c88
-generated: "2025-11-09T10:43:52.239090332+01:00"
+digest: sha256:18ae170b87964c4d42c923aace1bdcce6bc990f55bf62dd4ff51fc1cc966a579
+generated: "2026-06-14T16:40:59.09543+02:00"

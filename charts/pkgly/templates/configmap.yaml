@@ -14,24 +14,10 @@ data:
     # ==========================================================================
     # Database Configuration
     # ==========================================================================
+    {{- if and (not .Values.postgresql.enabled) (not .Values.externalDatabase.secretRef.enabled) }}
     [database]
-    {{- if .Values.postgresql.enabled }}
-    user = {{ .Values.postgresql.auth.username | quote }}
-    {{- if .Values.postgresql.auth.existingSecret }}
-    password = "${DB_PASSWORD}"
-    {{- else }}
-    password = {{ .Values.postgresql.auth.password | quote }}
-    {{- end }}
-    database = {{ .Values.postgresql.auth.database | quote }}
-    host = "{{ include "pkgly-chart.fullname" . }}-postgresql"
-    port = 5432
-    {{- else }}
     user = {{ .Values.externalDatabase.user | quote }}
-    {{- if .Values.externalDatabase.secretRef.enabled }}
-    password = "${DB_PASSWORD}"
-    {{- else }}
     password = {{ .Values.externalDatabase.password | quote }}
-    {{- end }}
     database = {{ .Values.externalDatabase.database | quote }}
     host = {{ .Values.externalDatabase.host | quote }}
     port = {{ .Values.externalDatabase.port }}
@@ -43,9 +29,7 @@ data:
     [web_server]
     bind_address = "0.0.0.0:{{ .Values.service.port }}"
     open_api_routes = {{ .Values.webServer.openApiRoutes }}
-
-    [web_server.max_upload]
-    max_size = {{ .Values.webServer.maxUpload | quote }}
+    max_upload = {{ .Values.webServer.maxUpload | quote }}
 
     # ==========================================================================
     # Session Configuration
@@ -58,13 +42,14 @@ data:
     # ==========================================================================
     # Site Configuration
     # ==========================================================================
-    {{- if .Values.site.appUrl }}
     [site]
-    app_url = {{ .Values.site.appUrl | quote }}
+    {{- with .Values.site.appUrl }}
+    app_url = {{ . | quote }}
+    {{- end }}
     name = {{ .Values.site.name | quote }}
     description = {{ .Values.site.description | quote }}
     is_https = {{ .Values.site.isHttps }}
-    {{- end }}
+    frontend_path = {{ .Values.site.frontendPath | quote }}
 
     # ==========================================================================
     # Security Configuration
@@ -95,10 +80,8 @@ data:
     # Staging Configuration
     # ==========================================================================
     [staging]
-    enabled = {{ .Values.staging.enabled }}
-    max_size = {{ .Values.staging.maxSize | quote }}
-    cleanup_interval = {{ .Values.staging.cleanupInterval }}
-    stale_timeout = {{ .Values.staging.staleTimeout }}
+    staging_dir = {{ .Values.staging.stagingDir | quote }}
+    time_till_cleanup = {{ .Values.staging.timeTillCleanup }}
 
     # ==========================================================================
     # S3 Storage Configuration
@@ -134,11 +117,7 @@ data:
     [opentelemetry]
     enabled = true
     protocol = {{ .Values.opentelemetry.protocol | quote }}
-    {{- if .Values.jaeger.enabled }}
-    endpoint = "http://{{ include "pkgly-chart.fullname" . }}-jaeger-collector:4317"
-    {{- else }}
     endpoint = {{ .Values.opentelemetry.endpoint | quote }}
-    {{- end }}
     traces = {{ .Values.opentelemetry.traces }}
     logs = {{ .Values.opentelemetry.logs }}
 

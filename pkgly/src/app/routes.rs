@@ -5,7 +5,7 @@ use axum::{
     extract::{DefaultBodyLimit, Path, State},
     response::{IntoResponse, Response},
 };
-use http::{HeaderName, HeaderValue};
+use http::{HeaderName, HeaderValue, StatusCode};
 use tower_http::set_header::SetResponseHeaderLayer;
 use tracing::info;
 
@@ -20,6 +20,9 @@ use crate::{
 
 use super::Pkgly;
 
+#[cfg(test)]
+mod tests;
+
 const POWERED_BY_HEADER: HeaderName = HeaderName::from_static("x-powered-by");
 const POWERED_BY_VALUE: HeaderValue = HeaderValue::from_static("Pkgly");
 
@@ -31,6 +34,7 @@ pub fn build_app_router(site: Pkgly, max_upload: MaxUpload, open_api_routes: boo
     info!("Docker V2 routes will be added at /v2");
 
     let mut app = Router::new()
+        .route("/health", axum::routing::get(health))
         // Docker Registry V2 API compatibility route
         // Handle both /v2 and /v2/ explicitly to work around Axum nesting trailing slash behavior
         .route(
@@ -77,6 +81,10 @@ pub fn build_app_router(site: Pkgly, max_upload: MaxUpload, open_api_routes: boo
         ))
         .layer(AppTracingLayer(site))
         .layer(body_limit)
+}
+
+async fn health() -> StatusCode {
+    StatusCode::OK
 }
 
 async fn direct_repository_or_frontend_request(

@@ -54,6 +54,8 @@ docker compose down -v
 
 Use this when you want a Kubernetes deployment quickly, with PostgreSQL managed by the chart.
 
+The chart uses `GET /health` as the Pkgly liveness probe. The endpoint becomes available after Pkgly initializes and connects to PostgreSQL.
+
 ### Prerequisites
 
 - Kubernetes cluster
