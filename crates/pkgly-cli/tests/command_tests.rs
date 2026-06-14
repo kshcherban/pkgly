@@ -106,13 +106,13 @@ fn parse_content_length(headers: &[u8]) -> usize {
 
 fn json_response(status: &str, body: &str) -> String {
     format!(
-        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\n\r\n{body}",
+        "HTTP/1.1 {status}\r\nContent-Length: {}\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{body}",
         body.len()
     )
 }
 
 fn empty_response(status: &str) -> String {
-    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\n\r\n")
+    format!("HTTP/1.1 {status}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n")
 }
 
 fn package_entry_json(package: &str, version: &str) -> String {

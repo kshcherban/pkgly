@@ -43,3 +43,37 @@ jobs:
         env:
           BUILDX_BUILDER: ${{ steps.buildx.outputs.name }}
           PKGLY_INTEGRATION_COMPOSE_OVERRIDE: ${{ github.workspace }}/tests/docker/docker-compose.ci-cache.yml
+
+  chart-changes:
+    name: detect chart changes
+    runs-on: ubuntu-24.04
+    outputs:
+      changed: ${{ steps.changes.outputs.changed }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - id: changes
+        run: |
+          set +e
+          git diff --quiet "${{ github.event.pull_request.base.sha }}" "${{ github.event.pull_request.head.sha }}" -- charts/
+          status=$?
+          set -e
+
+          case "$status" in
+            0) echo "changed=false" >> "$GITHUB_OUTPUT" ;;
+            1) echo "changed=true" >> "$GITHUB_OUTPUT" ;;
+            *) exit "$status" ;;
+          esac
+
+  helm-lint:
+    name: helm lint and unit
+    needs: chart-changes
+    if: needs.chart-changes.outputs.changed == 'true'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - run: ./charts/pkgly/tests/unit.sh
