@@ -78,7 +78,7 @@ impl Stream for LocalDirectoryListStream {
 
         let path = entry.map_err(LocalStorageError::from)?;
 
-        if path.is_file() && is_hidden_file(&path) {
+        if is_hidden_file(&path) {
             // I am not really sure what to do with hidden files in a stream?
             // I am guessing if return Poll::Pending now it will just skip the file?
             trace!(?path, "Skipping Meta File");

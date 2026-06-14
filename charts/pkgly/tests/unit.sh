@@ -9,6 +9,8 @@ rendered_external="$(mktemp)"
 rendered_external_secret="$(mktemp)"
 trap 'rm -f "$rendered_default" "$rendered_external" "$rendered_external_secret"' EXIT
 
+helm repo add bitnami https://charts.bitnami.com/bitnami --force-update
+helm dependency build --skip-refresh "$chart_dir"
 helm lint "$chart_dir"
 helm template pkgly "$chart_dir" --namespace default >"$rendered_default"
 helm template pkgly "$chart_dir" \

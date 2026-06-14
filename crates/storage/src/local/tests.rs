@@ -1,3 +1,5 @@
+// ABOUTME: Tests local storage filesystem behavior, locking, metadata, and repository cleanup.
+// ABOUTME: Covers eager and streamed directory listings against transient internal metadata paths.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::{
@@ -7,6 +9,7 @@ use crate::{
     testing::storage::TestingStorage,
 };
 use fs2::FileExt;
+use futures::StreamExt;
 use nr_core::storage::StoragePath;
 use tempfile::tempdir;
 use tokio::time::{Duration, sleep};
@@ -338,5 +341,70 @@ async fn directory_entries_are_relative_and_sorted() -> anyhow::Result<()> {
     ];
     assert_eq!(entries, expected);
 
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn open_folder_ignores_disappeared_temporary_metadata_files() -> anyhow::Result<()> {
+    let temp = tempdir()?;
+    let storage =
+        <LocalStorageFactory as StaticStorageFactory>::create_storage_from_config(StorageConfig {
+            storage_config: StorageConfigInner::test_config(),
+            type_config: StorageTypeConfig::Local(LocalConfig {
+                path: temp.path().to_path_buf(),
+            }),
+        })
+        .await?;
+
+    let repository = Uuid::new_v4();
+    let repository_root = temp.path().join(repository.to_string());
+    std::fs::create_dir_all(&repository_root)?;
+    std::os::unix::fs::symlink(
+        repository_root.join("metadata-already-renamed"),
+        repository_root.join(".nr-meta.tmp-race.nr-meta"),
+    )?;
+
+    let directory = storage
+        .open_file(repository, &StoragePath::default())
+        .await?
+        .expect("repository directory should exist");
+
+    assert!(directory.directory().expect("directory").0.is_empty());
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn directory_stream_ignores_disappeared_temporary_metadata_files() -> anyhow::Result<()> {
+    let temp = tempdir()?;
+    let storage =
+        <LocalStorageFactory as StaticStorageFactory>::create_storage_from_config(StorageConfig {
+            storage_config: StorageConfigInner::test_config(),
+            type_config: StorageTypeConfig::Local(LocalConfig {
+                path: temp.path().to_path_buf(),
+            }),
+        })
+        .await?;
+
+    let repository = Uuid::new_v4();
+    let repository_root = temp.path().join(repository.to_string());
+    std::fs::create_dir_all(&repository_root)?;
+    std::os::unix::fs::symlink(
+        repository_root.join("metadata-already-renamed"),
+        repository_root.join(".nr-meta.tmp-race.nr-meta"),
+    )?;
+
+    let mut stream = storage
+        .stream_directory(repository, &StoragePath::default())
+        .await?
+        .expect("repository directory should exist");
+
+    let mut entries = 0;
+    while let Some(entry) = stream.next().await {
+        assert!(entry?.is_none());
+        entries += 1;
+    }
+    assert_eq!(entries, 2);
     Ok(())
 }

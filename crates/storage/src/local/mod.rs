@@ -360,7 +360,7 @@ impl LocalStorageInner {
             };
             let entry = entry;
             let path = entry.path();
-            if path.is_file() && is_hidden_file(&path) {
+            if is_hidden_file(&path) {
                 trace!(?path, "Skipping Meta File");
                 files_skipped += 1;
                 // Check if file is a meta file

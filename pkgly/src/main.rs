@@ -84,7 +84,7 @@ enum SubCommands {
         config: PathBuf,
         /// If it should add defaults if the file already exists.
         #[clap(short, long, default_value = "false")]
-add_defaults: bool,
+        add_defaults: bool,
     },
     /// Opens an editor to edit the config file
     Config {
