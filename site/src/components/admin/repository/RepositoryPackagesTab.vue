@@ -20,7 +20,7 @@
           aria-label="Search packages" />
       </v-card-title>
 
-      <v-card-subtitle v-if="!isLoading" class="pa-4 pt-0">
+      <v-card-text v-if="!isLoading" class="pa-4 pt-0">
         <div class="d-flex align-center justify-space-between flex-wrap">
           <div class="text-body-2 text-medium-emphasis">
             {{ totalPackages }} package(s)
@@ -48,7 +48,7 @@
             </v-btn>
           </div>
         </div>
-      </v-card-subtitle>
+      </v-card-text>
 
       <v-card-text
         v-if="!isLoading && pendingDeletionCount > 0"
@@ -102,11 +102,11 @@
         </template>
 
         <template v-slot:item.cachePath="{ value }">
-          <v-code class="text-caption">{{ value }}</v-code>
+          <MonoValue :value="value" />
         </template>
 
         <template v-slot:item.blobDigest="{ value }">
-          <v-code class="text-caption">{{ value }}</v-code>
+          <MonoValue :value="value" />
         </template>
 
         <template v-slot:item.modified="{ value }">
@@ -185,6 +185,7 @@ import { computed, onMounted, ref, watch, nextTick } from "vue";
 import { useAlertsStore } from "@/stores/alerts";
 import { useResizableColumns } from "@/composables/useResizableColumns";
 import { shouldDisplayRepositoryIndexingWarning } from "@/types/repository";
+import MonoValue from "@/components/ui/MonoValue.vue";
 
 interface PackageEntry {
   name: string;

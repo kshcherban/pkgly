@@ -2,6 +2,7 @@
 <!-- ABOUTME: Keeps operational status visible while setup instructions stay collapsible. -->
 <template>
   <v-container v-if="repository" class="repository-page" fluid>
+    <v-breadcrumbs :items="breadcrumbItems" class="repository-page__breadcrumbs" />
     <v-card variant="flat" class="repository-page__header">
       <v-card-text class="repository-page__header-shell">
         <div class="repository-page__header-summary">
@@ -14,25 +15,21 @@
               class="repository-page__summary-meta">
               <span>{{ repository.repository_type.toUpperCase() }}</span>
               <span>{{ repositoryKindLabel }}</span>
-              <v-chip size="x-small" variant="outlined">
-                {{ repository.auth_enabled ? "Secured" : "Unsecured" }}
-              </v-chip>
-              <v-chip
-                size="x-small"
-                :color="repository.active ? 'success' : 'default'"
-                :variant="repository.active ? 'tonal' : 'outlined'">
-                {{ repository.active ? "Active" : "Inactive" }}
-              </v-chip>
+              <StatusChip
+                :secured="repository.auth_enabled === true"
+                :active="repository.active !== false" />
             </div>
           </div>
-          <button
-            type="button"
-            class="repository-page__header-toggle"
+          <v-btn
+            variant="tonal"
+            color="primary"
+            size="small"
+            :prepend-icon="isHeaderExpanded ? 'mdi-chevron-up' : 'mdi-cog-outline'"
             data-testid="repository-header-toggle"
             :aria-expanded="isHeaderExpanded"
             @click="isHeaderExpanded = !isHeaderExpanded">
             {{ isHeaderExpanded ? "Hide Setup" : "Show Setup" }}
-          </button>
+          </v-btn>
         </div>
 
         <div
@@ -80,6 +77,7 @@ import ErrorOnRequest from "@/components/ErrorOnRequest.vue";
 import RepositoryHelper from "@/components/nr/repository/RepositoryHelper.vue";
 import RepositoryIcon from "@/components/nr/repository/RepositoryIcon.vue";
 import RepositoryPackagesPublic from "@/components/nr/repository/RepositoryPackagesPublic.vue";
+import StatusChip from "@/components/ui/StatusChip.vue";
 import { computed, onMounted, ref } from "vue";
 import router from "@/router";
 import { useRepositoryStore } from "@/stores/repositories";
@@ -118,6 +116,14 @@ const repositoryKindLabel = computed(() => {
 const showPackages = computed(() => {
   return supportsRepositoryPackageView(repository.value?.repository_type);
 });
+
+const breadcrumbItems = computed(() => [
+  { title: "Repositories", to: { name: "home" }, disabled: false },
+  {
+    title: `${repository.value?.storage_name ?? ""}/${repository.value?.name ?? ""}`,
+    disabled: true,
+  },
+]);
 
 const url = computed(() => {
   if (!repository.value) {
@@ -176,6 +182,16 @@ onMounted(() => {
   padding-bottom: 2rem;
 }
 
+.repository-page__breadcrumbs {
+  padding: var(--nr-spacing-sm) 0;
+}
+
+.repository-page__breadcrumbs :deep(.v-breadcrumbs-item--disabled) {
+  opacity: 1;
+  font-weight: var(--nr-font-weight-medium);
+  color: var(--nr-text-primary);
+}
+
 .repository-page__header {
   border-bottom: 1px solid var(--nr-border-color);
   border-radius: 0;
@@ -206,20 +222,6 @@ onMounted(() => {
   color: var(--nr-text-secondary);
   font-size: var(--nr-font-size-sm);
   flex-wrap: wrap;
-}
-
-.repository-page__header-toggle {
-  border: 1px solid rgba(0, 0, 0, 0.12);
-  border-radius: var(--nr-radius-lg);
-  background: #fff;
-  padding: 0.45rem 0.9rem;
-  cursor: pointer;
-  font: inherit;
-  white-space: nowrap;
-}
-
-.repository-page__header-toggle:hover {
-  background: rgba(0, 0, 0, 0.04);
 }
 
 .repository-page__header-details {

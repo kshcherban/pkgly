@@ -13,6 +13,13 @@ export default defineConfig({
   ssr: {
     noExternal: ["vuetify"],
   },
+  css: {
+    preprocessorOptions: {
+      scss: {
+        api: "modern-compiler",
+      },
+    },
+  },
   test: {
     environment: "jsdom",
     globals: true,

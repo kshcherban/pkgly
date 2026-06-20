@@ -7,11 +7,7 @@
         <v-card class="elevation-4" max-width="450">
           <v-card-title class="text-center pa-6">
             <div class="d-flex flex-column align-center">
-              <v-avatar
-                :image="'/logo.svg'"
-                size="64"
-                class="mb-4" />
-              <span class="text-h4 font-weight-medium text-primary">Pkgly</span>
+              <BrandMark stacked :size="64" wordmark-class="text-h4 font-weight-medium" />
               <span class="text-body-1 text-medium-emphasis mt-1">Sign in to your account</span>
             </div>
           </v-card-title>
@@ -134,6 +130,7 @@
 <script setup lang="ts">
 import http from "@/http";
 import router from "@/router";
+import BrandMark from "@/components/layout/BrandMark.vue";
 import { sessionStore } from "@/stores/session";
 import { siteStore } from "@/stores/site";
 import { useAlertsStore } from "@/stores/alerts";

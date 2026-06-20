@@ -233,7 +233,7 @@ watch(
   width: 100%;
   border-collapse: collapse;
   table-layout: fixed;
-  background: var(--nr-background-primary, #fff);
+  background: var(--nr-background-primary);
   border: 1px solid rgba(0, 0, 0, 0.08);
   border-radius: 8px;
   overflow: hidden;
@@ -244,7 +244,7 @@ watch(
   font-weight: 600;
   font-size: 0.9rem;
   padding: 0.75rem 1rem;
-  background: var(--nr-background-tertiary, #f8f9fa);
+  background: var(--nr-background-tertiary);
   border-bottom: 1px solid rgba(0, 0, 0, 0.08);
   position: relative;
   overflow: visible;

@@ -268,9 +268,9 @@ onBeforeUnmount(() => {
   width: 2.5rem;
   height: 2.5rem;
   border-radius: var(--nr-radius-round);
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.12));
-  background: var(--nr-background-primary, #fff);
-  color: var(--nr-accent, #03a9f4);
+  border: 1px solid var(--nr-border-color);
+  background: var(--nr-background-primary);
+  color: var(--nr-accent);
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -280,8 +280,8 @@ onBeforeUnmount(() => {
 
 .search-help-button:hover,
 .search-help-button:focus-visible {
-  background: var(--nr-accent, #03a9f4);
-  color: var(--nr-background-primary, #fff);
+  background: var(--nr-accent);
+  color: var(--nr-background-primary);
   box-shadow: var(--nr-focus-ring);
 }
 
@@ -309,8 +309,8 @@ onBeforeUnmount(() => {
 }
 
 .search-help-modal {
-  background: var(--nr-background-primary, #fff);
-  color: var(--nr-text-color, #1f2937);
+  background: var(--nr-background-primary);
+  color: var(--nr-text-color);
   border-radius: var(--nr-radius-lg);
   box-shadow: 0 20px 45px rgba(15, 23, 42, 0.25);
   width: min(48rem, 100%);
@@ -347,7 +347,7 @@ onBeforeUnmount(() => {
 .modal-close:hover,
 .modal-close:focus-visible {
   transform: scale(1.1);
-  color: var(--nr-accent, #03a9f4);
+  color: var(--nr-accent);
 }
 
 .syntax-table {
@@ -379,7 +379,7 @@ onBeforeUnmount(() => {
 .example-card,
 .example-chip {
   border: 1px solid rgba(15, 23, 42, 0.12);
-  background: var(--nr-background-secondary, #f8fafc);
+  background: var(--nr-background-secondary);
   border-radius: var(--nr-radius-lg);
   padding: var(--nr-spacing-md);
   display: flex;
@@ -403,8 +403,7 @@ onBeforeUnmount(() => {
 .example-card:focus-visible,
 .example-chip:hover,
 .example-chip:focus-visible {
-  border-color: var(--nr-accent, #03a9f4);
-  box-shadow: 0 0 0 3px rgba(100, 116, 139, 0.15);
+  border-color: var(--nr-accent);
   box-shadow: var(--nr-focus-ring);
 }
 

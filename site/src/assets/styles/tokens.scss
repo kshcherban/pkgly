@@ -1,27 +1,28 @@
 /**
- * Design Tokens - Material Design Light Theme
+ * Design Tokens — Pkgly brand theme (orange + teal, from logo.svg).
  *
- * These tokens align with Vuetify's theme configuration
- * and provide CSS custom properties for use throughout the app.
+ * Single CSS source of truth for color. Vuetify reads the same values from
+ * src/theme/palette.ts; keep the two in agreement when changing a color.
  */
 
 :root {
-  /* Primary Colors - Material Blue 600 */
-  --nr-primary: #1E88E5;
-  --nr-primary-light: #42A5F5;
-  --nr-primary-dark: #1565C0;
+  /* Brand — Orange ramp (logo SVGID_1/2), tuned for WCAG AA on white */
+  --nr-primary: #C95A00;
+  --nr-primary-light: #FF8A00;
+  --nr-primary-lighter: #FFA607;
+  --nr-primary-dark: #9E4700;
   --nr-on-primary: #FFFFFF;
 
-  /* Secondary Colors - Blue Grey 700 */
-  --nr-secondary: #455A64;
-  --nr-secondary-light: #607D8B;
-  --nr-secondary-dark: #263238;
+  /* Brand — Teal ramp (logo SVGID_5/6) */
+  --nr-secondary: #145964;
+  --nr-secondary-light: #217F8F;
+  --nr-secondary-dark: #074859;
   --nr-on-secondary: #FFFFFF;
 
-  /* Accent Colors - Light Blue 500 */
-  --nr-accent: #03A9F4;
-  --nr-accent-light: #4FC3F7;
-  --nr-accent-dark: #0277BD;
+  /* Accent — logo amber */
+  --nr-accent: #FFB70B;
+  --nr-accent-light: #FFD466;
+  --nr-accent-dark: #bb870a;
 
   /* Background & Surface */
   --nr-background: #FFFFFF;
@@ -32,7 +33,7 @@
 
   /* Text Colors */
   --nr-text-primary: rgba(0, 0, 0, 0.87);
-  --nr-text-secondary: rgba(0, 0, 0, 0.60);
+  --nr-text-secondary: rgba(0, 0, 0, 0.6);
   --nr-text-disabled: rgba(0, 0, 0, 0.38);
   --nr-text-hint: rgba(0, 0, 0, 0.38);
 
@@ -47,15 +48,36 @@
   --nr-success-dark: #2E7D32;
   --nr-on-success: #FFFFFF;
 
-  --nr-warning: #FB8C00;
-  --nr-warning-light: #FFA726;
-  --nr-warning-dark: #E65100;
+  /* Warning shifted away from primary orange to stay distinct */
+  --nr-warning: #F9A825;
+  --nr-warning-light: #FBC02D;
+  --nr-warning-dark: #F57F17;
   --nr-on-warning: #FFFFFF;
 
   --nr-info: #2196F3;
-  --nr-info-light: #42A5F5;
-  --nr-info-dark: #1565C0;
+  --nr-info-light: #64B5F6;
+  --nr-info-dark: #1976D2;
   --nr-on-info: #FFFFFF;
+
+  /* Alpha variants of primary (rgb 201, 90, 0) — consumed by SCSS bridge + tokens */
+  --nr-primary-04: rgba(201, 90, 0, 0.04);
+  --nr-primary-07: rgba(201, 90, 0, 0.07);
+  --nr-primary-08: rgba(201, 90, 0, 0.08);
+  --nr-primary-16: rgba(201, 90, 0, 0.16);
+  --nr-primary-24: rgba(201, 90, 0, 0.24);
+  --nr-primary-32: rgba(201, 90, 0, 0.32);
+  --nr-primary-35: rgba(201, 90, 0, 0.35);
+  --nr-accent-46: rgba(255, 183, 11, 0.46);
+  --nr-secondary-22: rgba(20, 89, 100, 0.22);
+  --nr-secondary-32: rgba(20, 89, 100, 0.32);
+
+  /* Status badge tonal fills (used by StatusChip) */
+  --nr-badge-success-bg: rgba(67, 160, 71, 0.14);
+  --nr-badge-success-fg: #2E7D32;
+  --nr-badge-neutral-bg: rgba(0, 0, 0, 0.06);
+  --nr-badge-neutral-fg: rgba(0, 0, 0, 0.6);
+  --nr-badge-secure-bg: rgba(201, 90, 0, 0.14);
+  --nr-badge-secure-fg: #9E4700;
 
   /* Borders */
   --nr-border-color: rgba(0, 0, 0, 0.12);
@@ -128,6 +150,10 @@
   --nr-transition-base: 250ms cubic-bezier(0.4, 0, 0.2, 1);
   --nr-transition-slow: 350ms cubic-bezier(0.4, 0, 0.2, 1);
 
+  /* Interaction tokens — depth/lift for cards and interactive surfaces */
+  --nr-hover-lift: translateY(-2px);
+  --nr-surface-hover-shadow: 0px 4px 12px rgba(0, 0, 0, 0.08);
+
   /* Component-specific tokens */
   --nr-input-background: #FFFFFF;
   --nr-input-border: rgba(0, 0, 0, 0.38);
@@ -136,20 +162,21 @@
   --nr-input-placeholder: rgba(0, 0, 0, 0.38);
 
   --nr-table-header-background: #FAFAFA;
-  --nr-table-row-hover: rgba(30, 136, 229, 0.08);
+  --nr-table-row-hover: rgba(201, 90, 0, 0.08);
   --nr-table-border: rgba(0, 0, 0, 0.12);
 
   --nr-card-background: #FFFFFF;
   --nr-card-border: rgba(0, 0, 0, 0.12);
 
-  /* Focus Ring */
-  --nr-focus-ring: 0 0 0 3px rgba(30, 136, 229, 0.25);
+  /* Focus Ring (primary orange) */
+  --nr-focus-ring: 0 0 0 3px rgba(201, 90, 0, 0.25);
 }
 
-/* Legacy compatibility - map old variables to new ones */
+/* Legacy compatibility - map old variable names onto the new tokens */
 :root {
   --brand-color: var(--nr-primary);
   --nr-text-color: var(--nr-text-primary);
+  --text-secondary: var(--nr-text-secondary);
   --nr-background-primary: var(--nr-background);
   --nr-background-secondary: var(--nr-surface);
   --nr-background-tertiary: var(--nr-surface-variant);

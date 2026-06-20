@@ -131,7 +131,7 @@ function selectCell(event: MouseEvent) {
 
 <style scoped lang="scss">
 .package-results {
-  background: var(--nr-background-primary, #fff);
+  background: var(--nr-background-primary);
   border-radius: 0.75rem;
   border: 1px solid rgba(15, 23, 42, 0.08);
   padding: 1rem 1.25rem;
@@ -152,12 +152,12 @@ function selectCell(event: MouseEvent) {
   padding: 0.75rem;
   border-radius: 0.5rem;
   background: rgba(15, 23, 42, 0.04);
-  color: var(--nr-text-primary, #0f172a);
+  color: var(--nr-text-primary);
 }
 
 .package-results__state--error {
   background: rgba(220, 38, 38, 0.08);
-  color: var(--nr-error, #e53935);
+  color: var(--nr-error);
 }
 
 .package-results__table {

@@ -90,6 +90,7 @@ function administrationBar() {
       text: "Knowledge Base",
       items: [
         { text: "Architecture", link: "/knowledge/Architecture" },
+        { text: "Frontend Design System", link: "/knowledge/frontend-design-system" },
         { text: "Search", link: "/knowledge/search" },
       ],
     },

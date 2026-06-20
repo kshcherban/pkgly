@@ -41,7 +41,6 @@ import {
 } from "@fortawesome/free-solid-svg-icons";
 
 import { autoAnimatePlugin } from "@formkit/auto-animate/vue";
-import { applyThemeTokens } from "@/utils/themeTokens";
 import vuetify from "./plugins/vuetify";
 import { installAwareAuthGuard } from "@/router/installGuard";
 
@@ -49,7 +48,6 @@ const pinia = createPinia();
 setActivePinia(pinia);
 const app = createApp(App);
 const vfm = createVfm();
-applyThemeTokens();
 
 router.beforeEach((to) => installAwareAuthGuard(to, pinia));
 

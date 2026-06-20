@@ -8,11 +8,11 @@
 
 <style scoped lang="scss">
 .proxy-cache-notice {
-  border-left: 4px solid var(--v-theme-primary, #4c6ef5);
+  border-left: 4px solid var(--v-theme-primary);
   padding: 0.75rem 1rem;
   border-radius: 4px;
   background: rgba(76, 110, 245, 0.06);
-  color: var(--v-theme-on-surface, inherit);
+  color: var(--v-theme-on-surface);
   font-size: 0.9rem;
   line-height: 1.4;
 

@@ -49,9 +49,8 @@
 
     <v-row v-else class="gy-6">
       <v-col cols="12">
-        <v-card v-if="loading" class="text-center py-8" variant="flat">
-          <v-progress-circular indeterminate color="primary" size="48" />
-          <div class="mt-4 text-medium-emphasis">Loading repositories…</div>
+        <v-card v-if="loading" class="elevation-0" variant="flat">
+          <TableSkeleton :rows="5" />
         </v-card>
 
         <v-card v-else-if="repositories.length >= 1" class="elevation-0">
@@ -73,15 +72,9 @@
 
             <template #[`item.access`]="{ item }">
               <div class="access-cell">
-                <v-chip size="x-small" variant="outlined">
-                  {{ item.auth_label }}
-                </v-chip>
-                <v-chip
-                  size="x-small"
-                  :color="item.active ? 'success' : 'default'"
-                  :variant="item.active ? 'tonal' : 'outlined'">
-                  {{ item.active_label }}
-                </v-chip>
+                <StatusChip
+                  :secured="item.auth_enabled === true"
+                  :active="item.active !== false" />
               </div>
             </template>
 
@@ -140,6 +133,8 @@ import type { DataTableHeader } from "vuetify";
 import type { RepositoryWithStorageName } from "@/types/repository";
 import type { StorageItem } from "@/components/nr/storage/storageTypes";
 import { useRepositoryStore } from "@/stores/repositories";
+import StatusChip from "@/components/ui/StatusChip.vue";
+import TableSkeleton from "@/components/ui/TableSkeleton.vue";
 
 const router = useRouter();
 const repositoryStore = useRepositoryStore();
@@ -167,7 +162,7 @@ const headers: DataTableHeader[] = [
     title: 'Access',
     key: 'access',
     value: 'auth_label',
-    sortable: false,
+    sortable: true,
   },
   {
     title: 'Usage',

@@ -254,7 +254,7 @@ async function confirmDelete() {
   flex-direction: column;
   gap: 0.35rem;
   padding: 0.75rem 1rem;
-  background-color: rgba($primary, 0.07);
+  background-color: var(--nr-primary-07);
   border-radius: 12px;
 
   &__label {

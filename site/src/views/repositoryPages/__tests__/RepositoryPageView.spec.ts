@@ -47,6 +47,18 @@ const simpleStub = defineComponent({
   template: "<div><slot /></div>",
 });
 
+const vBtnStub = defineComponent({
+  name: "VBtn",
+  emits: ["click"],
+  inheritAttrs: false,
+  template: `<button type="button" v-bind="$attrs" @click="$emit('click')"><slot /></button>`,
+});
+
+const vBreadcrumbsStub = defineComponent({
+  name: "VBreadcrumbs",
+  template: "<nav aria-label='breadcrumb' data-testid='breadcrumbs'><slot /></nav>",
+});
+
 describe("RepositoryPageView.vue", () => {
   it("renders packages without requiring a custom page", async () => {
     const wrapper = mount(RepositoryPageView, {
@@ -56,6 +68,8 @@ describe("RepositoryPageView.vue", () => {
           "v-card": simpleStub,
           "v-card-text": simpleStub,
           "v-chip": simpleStub,
+          "v-btn": vBtnStub,
+          "v-breadcrumbs": vBreadcrumbsStub,
           CopyURL: simpleStub,
           RepositoryHelper: simpleStub,
           RepositoryIcon: simpleStub,
@@ -79,6 +93,8 @@ describe("RepositoryPageView.vue", () => {
           "v-card": simpleStub,
           "v-card-text": simpleStub,
           "v-chip": simpleStub,
+          "v-btn": vBtnStub,
+          "v-breadcrumbs": vBreadcrumbsStub,
           CopyURL: defineComponent({
             template: "<div data-testid='copy-url'>Copy URL</div>",
           }),
@@ -125,6 +141,8 @@ describe("RepositoryPageView.vue", () => {
           "v-card": simpleStub,
           "v-card-text": simpleStub,
           "v-chip": simpleStub,
+          "v-btn": vBtnStub,
+          "v-breadcrumbs": vBreadcrumbsStub,
           CopyURL: copyStub,
           RepositoryHelper: simpleStub,
           RepositoryIcon: simpleStub,

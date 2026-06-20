@@ -7,15 +7,7 @@
     app
     class="app-bar">
     <v-container fluid class="d-flex align-center pa-0 app-bar__inner">
-      <router-link
-        to="/"
-        class="d-flex align-center text-decoration-none logo-link">
-        <v-avatar
-          :image="'/logo.svg'"
-          size="40"
-          class="mr-3" />
-        <span class="text-h6 font-weight-medium text-primary">Pkgly</span>
-      </router-link>
+      <BrandMark class="logo-link" />
 
       <v-btn
         v-if="user?.admin"
@@ -75,6 +67,7 @@
 <script setup lang="ts">
 import type { PropType } from 'vue';
 import type { UserResponseType } from '@/types/base';
+import BrandMark from '@/components/layout/BrandMark.vue';
 
 defineProps({
   user: {

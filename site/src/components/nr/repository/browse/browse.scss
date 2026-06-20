@@ -3,7 +3,7 @@
 .browse__row {
   cursor: pointer;
   border-bottom: 1px solid rgba(0, 0, 0, 0.05);
-  background: var(--nr-background-primary, #fff);
+  background: var(--nr-background-primary);
 
   &:hover {
     background: rgba(76, 110, 245, 0.08);
@@ -22,7 +22,7 @@
 .browse__cell {
   padding: 0.9rem 1rem;
   vertical-align: middle;
-  color: var(--nr-text-color, $text);
+  color: var(--nr-text-color);
 }
 
 .browse__cell--name {
@@ -31,7 +31,7 @@
 
 .browse__cell--meta {
   text-align: right;
-  color: var(--text-secondary, rgba(0, 0, 0, 0.6));
+  color: var(--text-secondary);
   width: 30%;
 }
 

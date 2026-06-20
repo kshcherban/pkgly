@@ -163,6 +163,29 @@ describe("RepositoryListView.vue", () => {
     ]);
   });
 
+  it("marks every visible column sortable so the client-side table can sort", async () => {
+    httpGet.mockResolvedValue({ data: repositories });
+
+    const wrapper = mount(RepositoryListView, {
+      global: { stubs },
+    });
+
+    await flushPromises();
+
+    const headers = wrapper.getComponent(stubs["v-data-table"]).props("headers") as Array<{
+      title: string;
+      sortable: boolean;
+      key: string;
+    }>;
+    for (const header of headers) {
+      expect(header.sortable, `${header.title} should be sortable`).toBe(true);
+    }
+    // Access sorts by the auth_label value (Secured/Unsecured).
+    const access = headers.find((header) => header.key === "access");
+    expect(access?.sortable).toBe(true);
+    expect(access?.value).toBe("auth_label");
+  });
+
   it("renders the repository table once data is loaded", async () => {
     httpGet.mockResolvedValue({ data: repositories });
 

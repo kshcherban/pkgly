@@ -97,15 +97,9 @@
             <div class="repository-card__row">
               <span class="repository-card__label">Access</span>
               <div class="repository-card__statuses">
-                <v-chip size="x-small" variant="outlined">
-                  {{ repo.auth_enabled ? "Secured" : "Unsecured" }}
-                </v-chip>
-                <v-chip
-                  size="x-small"
-                  :color="repo.active === false ? 'default' : 'success'"
-                  :variant="repo.active === false ? 'outlined' : 'tonal'">
-                  {{ repo.active === false ? "Inactive" : "Active" }}
-                </v-chip>
+                <StatusChip
+                  :secured="repo.auth_enabled === true"
+                  :active="repo.active !== false" />
               </div>
             </div>
             <div class="repository-card__row">
@@ -119,35 +113,30 @@
 
     <v-row v-else-if="repositories.length > 0" justify="center">
       <v-col cols="12" lg="10">
-        <div
+        <EmptyState
           data-testid="repository-no-match"
-          class="home-page__empty">
-          <v-icon color="medium-emphasis" size="40">mdi-magnify-close</v-icon>
-          <h2 class="text-h6">No repositories match "{{ trimmedSearch }}"</h2>
-          <p class="text-body-2 text-medium-emphasis">
-            Try a repository name, type, or storage name.
-          </p>
-        </div>
+          icon="mdi-magnify-close"
+          :title="`No repositories match &quot;${trimmedSearch}&quot;`"
+          message="Try a repository name, type, or storage name." />
       </v-col>
     </v-row>
 
     <v-row v-else justify="center">
       <v-col cols="12" lg="8">
-        <v-card class="text-center py-12" variant="outlined">
-          <v-icon color="medium-emphasis" size="64" class="mb-4">mdi-package-variant</v-icon>
-          <h2 class="text-h4 text-medium-emphasis mb-2">No repositories available</h2>
-          <p class="text-body-1 text-medium-emphasis mb-6">
-            Contact your administrator to create repositories.
-          </p>
-          <v-btn
-            v-if="isAdmin"
-            color="primary"
-            prepend-icon="mdi-plus"
-            :to="{ name: 'RepositoryCreate' }"
-            variant="flat">
-            Create Repository
-          </v-btn>
-        </v-card>
+        <EmptyState
+          icon="mdi-package-variant"
+          title="No repositories available"
+          message="Contact your administrator to create repositories.">
+          <template v-if="isAdmin" #action>
+            <v-btn
+              color="primary"
+              prepend-icon="mdi-plus"
+              :to="{ name: 'RepositoryCreate' }"
+              variant="flat">
+              Create Repository
+            </v-btn>
+          </template>
+        </EmptyState>
       </v-col>
     </v-row>
   </v-container>
@@ -156,6 +145,8 @@
 <script setup lang="ts">
 import PackageSearchResults, { type PackageResult } from "@/components/nr/repository/PackageSearchResults.vue";
 import RepositorySearchHeader from "@/components/nr/repository/RepositorySearchHeader.vue";
+import StatusChip from "@/components/ui/StatusChip.vue";
+import EmptyState from "@/components/ui/EmptyState.vue";
 import http from "@/http";
 import { shouldFetchPackages, isAdvancedQuery, formatBytes as formatBytesUtil } from "@/utils/repositorySearch";
 import { useRouter } from "vue-router";
@@ -441,9 +432,17 @@ function openPackage(pkg: PackageResult) {
   border: 1px solid var(--nr-card-border);
   border-radius: var(--nr-radius-lg);
   box-shadow: none;
-  transition: border-color var(--nr-transition-fast), box-shadow var(--nr-transition-fast);
+  transition:
+    border-color var(--nr-transition-fast),
+    box-shadow var(--nr-transition-fast),
+    transform var(--nr-transition-fast);
 
-  &:hover,
+  &:hover {
+    border-color: var(--nr-primary);
+    box-shadow: var(--nr-surface-hover-shadow);
+    transform: var(--nr-hover-lift);
+  }
+
   &:focus-visible {
     border-color: var(--nr-primary);
     box-shadow: var(--nr-focus-ring);
@@ -491,18 +490,6 @@ function openPackage(pkg: PackageResult) {
   display: flex;
   gap: var(--nr-spacing-xs);
   flex-wrap: wrap;
-}
-
-.home-page__empty {
-  display: flex;
-  min-height: 180px;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  gap: var(--nr-spacing-sm);
-  border: 1px dashed var(--nr-border-color-strong);
-  border-radius: var(--nr-radius-lg);
-  text-align: center;
 }
 
 .repository-card__brand-icon {

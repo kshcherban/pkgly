@@ -164,9 +164,12 @@
               <div
                 class="packages__cell-content"
                 :title="cellTitle(column.key, pkg)">
-                <template v-if="column.key === 'path' || column.key === 'digest'">
-                  <code>{{ cellText(column.key, pkg) }}</code>
-                </template>
+                <MonoValue
+                  v-if="column.key === 'path' || column.key === 'digest'"
+                  :value="cellText(column.key, pkg)" />
+                <MonoValue
+                  v-else-if="column.key === 'name' && isHashLike(cellText(column.key, pkg))"
+                  :value="pkg.name" />
                 <template v-else>
                   <button
                     v-if="column.key === 'package'"
@@ -227,6 +230,8 @@ import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import { useResizableColumns } from "@/composables/useResizableColumns";
 import { shouldDisplayRepositoryIndexingWarning } from "@/types/repository";
+import MonoValue from "@/components/ui/MonoValue.vue";
+import { isHashLike } from "@/utils/truncateValue";
 
 interface PackageEntry {
   name: string;
@@ -824,17 +829,17 @@ watch(
 
 .packages__search input {
   width: 100%;
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.15));
+  border: 1px solid var(--nr-border-color);
   border-radius: var(--nr-radius-lg);
   padding: 0.5rem 0.75rem;
-  background: var(--nr-background-primary, #fff);
-  color: var(--nr-text-color, inherit);
+  background: var(--nr-background-primary);
+  color: var(--nr-text-color);
   transition: border-color 0.2s ease, box-shadow 0.2s ease;
 }
 
 .packages__search input:focus-visible {
   outline: none;
-  border-color: var(--nr-primary-color, #4c6ef5);
+  border-color: var(--nr-primary-color);
   box-shadow: 0 0 0 3px rgba(76, 110, 245, 0.2);
 }
 
@@ -845,7 +850,7 @@ watch(
   transform: translateY(-50%);
   border: none;
   background: transparent;
-  color: var(--text-secondary, #6c757d);
+  color: var(--text-secondary);
   font-size: 1.1rem;
   cursor: pointer;
   padding: 0;
@@ -856,8 +861,8 @@ watch(
   top: calc(100% + 0.5rem);
   right: 0;
   padding: 0.75rem;
-  background: var(--nr-background-secondary, #f8f9fa);
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.15));
+  background: var(--nr-background-secondary);
+  border: 1px solid var(--nr-border-color);
   border-radius: 6px;
   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.15);
   z-index: 3;
@@ -886,35 +891,35 @@ watch(
 .packages__counts {
   display: flex;
   gap: 0.75rem;
-  color: var(--text-secondary, #6c757d);
+  color: var(--text-secondary);
   font-size: 0.9rem;
   flex-wrap: wrap;
 }
 
 .packages__indexing-warning {
-  border-left: 4px solid var(--nr-primary-color, #4c6ef5);
+  border-left: 4px solid var(--nr-primary-color);
   padding: 0.5rem 0.75rem;
   border-radius: 4px;
   background: rgba(76, 110, 245, 0.12);
-  color: var(--nr-primary-color, #4c6ef5);
+  color: var(--nr-primary-color);
   margin-bottom: 0.75rem;
   font-size: 0.9rem;
 }
 
 .packages__state {
-  color: var(--text-secondary, #6c757d);
+  color: var(--text-secondary);
 }
 
 .packages__state--error {
-  color: var(--error-color, #d9534f);
+  color: var(--error-color);
 }
 
 .packages__table-container {
   overflow-x: auto;
   border-radius: 8px;
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--nr-border-color);
   padding: 0.25rem 0.75rem 0.75rem;
-  background: var(--nr-background-primary, #fff);
+  background: var(--nr-background-primary);
   position: relative;
 }
 
@@ -922,9 +927,9 @@ watch(
   width: 2.25rem;
   height: 2.25rem;
   border-radius: 50%;
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.15));
-  background: var(--nr-background-tertiary, #f5f6fb);
-  color: var(--nr-text-color, inherit);
+  border: 1px solid var(--nr-border-color);
+  background: var(--nr-background-tertiary);
+  color: var(--nr-text-color);
   font-size: 1.1rem;
   display: inline-flex;
   align-items: center;
@@ -936,9 +941,9 @@ watch(
 .packages__options-button:hover,
 .packages__options-button:focus-visible {
   outline: none;
-  background: var(--nr-primary-color, #4c6ef5);
+  background: var(--nr-primary-color);
   color: #fff;
-  border-color: var(--nr-primary-color, #4c6ef5);
+  border-color: var(--nr-primary-color);
 }
 
 .packages__table {
@@ -946,7 +951,7 @@ watch(
   min-width: 720px;
   border-collapse: collapse;
   table-layout: auto;
-  color: var(--nr-text-color, inherit);
+  color: var(--nr-text-color);
 }
 
 .column-resizer {
@@ -966,13 +971,13 @@ watch(
 
 .packages__header-cell {
   padding: 0;
-  background: var(--nr-background-tertiary, #f8f9fa);
-  border-bottom: 2px solid var(--nr-border-color, rgba(0, 0, 0, 0.1));
+  background: var(--nr-background-tertiary);
+  border-bottom: 2px solid var(--nr-border-color);
   position: relative;
 }
 
 .packages__header-cell--sorted {
-  background: var(--nr-background-tertiary-emphasis, rgba(0, 0, 0, 0.02));
+  background: var(--nr-surface-variant);
 }
 
 .packages__column--size {
@@ -1012,7 +1017,7 @@ watch(
 
 .packages__sort-button:hover,
 .packages__sort-button--active {
-  background: var(--nr-table-row-hover, rgba(30, 136, 229, 0.08));
+  background: var(--nr-table-row-hover);
 }
 
 .packages__sort-button--numeric {
@@ -1036,7 +1041,7 @@ watch(
 
 .packages__cell {
   padding: 0.6rem 0.75rem;
-  border-bottom: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.08));
+  border-bottom: 1px solid var(--nr-border-color);
 }
 
 .packages__cell--numeric {
@@ -1057,7 +1062,7 @@ watch(
   padding: 0;
   border: none;
   background: transparent;
-  color: $accent;
+  color: var(--nr-accent-dark);
   cursor: pointer;
   font: inherit;
 }
@@ -1067,13 +1072,13 @@ watch(
 }
 
 .packages__cell code {
-  font-family: var(--nr-font-mono, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace);
+  font-family: var(--nr-font-mono);
   font-size: 0.85rem;
-  background: var(--nr-background-tertiary, #f8f9fa);
+  background: var(--nr-background-tertiary);
   color: inherit;
   padding: 0.15rem 0.25rem;
   border-radius: 4px;
-  border: 1px solid var(--nr-border-color, rgba(0, 0, 0, 0.1));
+  border: 1px solid var(--nr-border-color);
   display: inline-block;
   max-width: 100%;
 }

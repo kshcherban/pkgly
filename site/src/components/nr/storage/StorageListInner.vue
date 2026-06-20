@@ -138,7 +138,7 @@ function clearSearch() {
       color: $primary-400;
 
       &:hover {
-        color: $accent;
+        color: var(--nr-accent-dark);
       }
     }
   }

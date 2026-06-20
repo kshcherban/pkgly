@@ -212,6 +212,26 @@ describe("RepositoryPackagesTab.vue", () => {
     expect(wrapper.vm.searchTerm).toBe("");
   });
 
+  it("keeps the delete selected button out of muted subtitle content", async () => {
+    const wrapper = mount(RepositoryPackagesTab, {
+      props: {
+        repositoryId: "1",
+        repositoryType: "npm",
+      },
+      global: {
+        stubs: vuetifyStubs,
+      },
+    });
+
+    await flushPromises();
+
+    const deleteButton = wrapper
+      .findAll("button")
+      .find((button) => button.text().includes("Delete Selected"));
+    expect(deleteButton).toBeDefined();
+    expect(deleteButton!.element.closest(".v-card-subtitle")).toBeNull();
+  });
+
   it("reloads packages when items per page changes", async () => {
     const wrapper = mount(RepositoryPackagesTab, {
       props: {

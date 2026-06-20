@@ -222,8 +222,8 @@ watch(
 .storage-card__panel {
   padding: 0.75rem 0.9rem;
   border-radius: 10px;
-  background: rgba($primary, 0.04);
-  border: 1px dashed rgba($primary, 0.35);
+  background: var(--nr-primary-04);
+  border: 1px dashed var(--nr-primary-35);
 }
 
 .storage-card__panel-title {
