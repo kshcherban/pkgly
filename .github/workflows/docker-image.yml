@@ -1,5 +1,5 @@
 # ABOUTME: Publishes pkgly Docker images and release binaries for supported platforms.
-# ABOUTME: Shares Docker build cache through GHCR so GitHub runners reuse Rust layers.
+# ABOUTME: Shares Docker build cache through GitHub Actions and GHCR for faster Rust rebuilds.
 name: Publish Docker image
 
 on:
@@ -60,8 +60,12 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             CARGO_INCREMENTAL=0
-          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
-          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
+          cache-from: |
+            type=gha,scope=pkgly-${{ matrix.arch }}
+            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
+          cache-to: |
+            type=gha,scope=pkgly-${{ matrix.arch }},mode=min
+            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
 
   extract-binaries:
     name: Extract pkgly binary (${{ matrix.arch }})
@@ -126,6 +130,10 @@ jobs:
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@29eef336d9b2848a0b548edc03f92a220660cdb8 # stable branch
+
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        with:
+          cache-on-failure: "true"
 
       - name: Build pkglyctl
         run: cargo build --release -p pkgly-cli --bin pkglyctl
