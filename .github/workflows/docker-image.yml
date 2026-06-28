@@ -1,5 +1,5 @@
 # ABOUTME: Publishes pkgly Docker images and release binaries for supported platforms.
-# ABOUTME: Shares Docker build cache through GitHub Actions and GHCR for faster Rust rebuilds.
+# ABOUTME: Shares Docker build cache through GHCR for faster Rust rebuilds.
 name: Publish Docker image
 
 on:
@@ -60,12 +60,8 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             CARGO_INCREMENTAL=0
-          cache-from: |
-            type=gha,scope=pkgly-${{ matrix.arch }}
-            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
-          cache-to: |
-            type=gha,scope=pkgly-${{ matrix.arch }},mode=min
-            type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
+          cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
+          cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
 
   extract-binaries:
     name: Extract pkgly binary (${{ matrix.arch }})
