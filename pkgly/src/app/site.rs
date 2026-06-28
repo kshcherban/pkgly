@@ -321,9 +321,11 @@ impl Pkgly {
         };
 
         let is_installed = user_utils::does_user_exist(&database).await?;
+        let build_info = crate::app::build_info::current_build_info();
         let mut instance = Instance {
             mode,
             version: current_semver!(),
+            commit_id: build_info.commit_id,
             app_url: site.app_url.unwrap_or_default(),
             is_installed,
             name: site.name,

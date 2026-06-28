@@ -1,7 +1,11 @@
+// ABOUTME: Verifies admin side navigation links, active states, and metadata footer.
+// ABOUTME: Keeps admin navigation behavior stable across route and instance changes.
 import { mount } from "@vue/test-utils";
+import { createPinia, setActivePinia } from "pinia";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
 import AdminNav from "@/components/nav/AdminNav.vue";
+import { siteStore } from "@/stores/site";
 
 let currentRoute = {
   name: "RepositoriesList",
@@ -35,6 +39,7 @@ const stubs = {
 
 describe("AdminNav.vue", () => {
   beforeEach(() => {
+    setActivePinia(createPinia());
     currentRoute = {
       name: "RepositoriesList",
       meta: {
@@ -96,5 +101,39 @@ describe("AdminNav.vue", () => {
 
     expect(wrapper.get('a[href="/admin/system/webhooks"]').attributes("data-active")).toBe("true");
     expect(wrapper.get('a[href="/admin/system/sso"]').attributes("data-active")).toBe("false");
+  });
+
+  it("renders the package version and commit id in the footer", () => {
+    siteStore().siteInfo = {
+      mode: "debug",
+      name: "Pkgly",
+      description: "Repository server",
+      is_installed: true,
+      version: "1.2.3",
+      commit_id: "abc1234",
+    };
+
+    const wrapper = mount(AdminNav, {
+      global: { stubs },
+    });
+
+    expect(wrapper.get(".adminNav__version").text()).toBe("Pkgly v1.2.3 (abc1234)");
+  });
+
+  it("renders only the package version when commit id is unavailable", () => {
+    siteStore().siteInfo = {
+      mode: "debug",
+      name: "Pkgly",
+      description: "Repository server",
+      is_installed: true,
+      version: "1.2.3",
+      commit_id: null,
+    };
+
+    const wrapper = mount(AdminNav, {
+      global: { stubs },
+    });
+
+    expect(wrapper.get(".adminNav__version").text()).toBe("Pkgly v1.2.3");
   });
 });

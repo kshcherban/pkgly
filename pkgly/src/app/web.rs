@@ -1,3 +1,5 @@
+// ABOUTME: Starts the HTTP/TLS server and coordinates graceful shutdown.
+// ABOUTME: Logs startup build metadata and owns runtime worker configuration.
 use std::{
     fs::File,
     io::BufReader,
@@ -21,6 +23,7 @@ use tracing::{debug, error, info, warn};
 
 use super::Pkgly;
 use super::routes;
+use crate::app::build_info::{BuildInfo, current_build_info};
 use crate::app::config::WebServer;
 use crate::config::{PkglyConfig, load_config};
 /// Decide how many Tokio worker threads to start.
@@ -28,6 +31,11 @@ pub(crate) fn resolve_worker_threads(web_server: &WebServer) -> usize {
     let configured = web_server.worker_threads.unwrap_or_else(num_cpus::get);
     if configured == 0 { 1 } else { configured }
 }
+
+pub(crate) fn startup_build_info() -> BuildInfo {
+    current_build_info()
+}
+
 #[allow(dead_code)] // Useful for callers that already hold a runtime
 pub(crate) async fn start(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let config = load_config(config_path)?;
@@ -57,6 +65,12 @@ pub(crate) async fn start_with_config(config: PkglyConfig) -> anyhow::Result<()>
     } = web_server;
 
     let logger = crate::logging::init(log, opentelemetry)?;
+    let build_info = startup_build_info();
+    info!(
+        version = build_info.version,
+        commit_id = build_info.commit_id.as_deref().unwrap_or("unknown"),
+        "Starting pkgly"
+    );
 
     let site = Pkgly::new(
         mode,

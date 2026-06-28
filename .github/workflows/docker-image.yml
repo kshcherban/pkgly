@@ -60,6 +60,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
           build-args: |
             CARGO_INCREMENTAL=0
+            PKGLY_COMMIT_ID=${{ github.sha }}
           cache-from: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }}
           cache-to: type=registry,ref=${{ env.IMAGE_NAME }}:buildcache-${{ matrix.arch }},mode=max
 

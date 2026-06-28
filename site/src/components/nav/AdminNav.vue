@@ -1,3 +1,5 @@
+<!-- ABOUTME: Renders admin section navigation and instance version metadata. -->
+<!-- ABOUTME: Keeps admin users oriented across management and system pages. -->
 <template>
   <SideNav>
     <SideNavElement
@@ -45,16 +47,36 @@
         <span>Password Rules</span>
       </SideNavElement>
     </div>
+
+    <div
+      v-if="versionLabel"
+      class="adminNav__version">
+      {{ versionLabel }}
+    </div>
   </SideNav>
 </template>
 
 <script setup lang="ts">
-import { type PropType } from "vue";
+import { computed, type PropType } from "vue";
 import type { UserResponseType } from "@/types/base";
+import { siteStore } from "@/stores/site";
 import SideNav from "./sideNav/SideNav.vue";
 import SideNavElement from "./sideNav/SideNavElement.vue";
 defineProps({
   user: Object as PropType<UserResponseType>,
+});
+
+const site = siteStore();
+const versionLabel = computed(() => {
+  const version = site.siteInfo?.version;
+  if (!version) {
+    return "";
+  }
+  const commitId = site.siteInfo?.commit_id;
+  if (commitId) {
+    return `Pkgly v${version} (${commitId})`;
+  }
+  return `Pkgly v${version}`;
 });
 </script>
 
@@ -76,5 +98,14 @@ defineProps({
 
 .navGroup :deep(.navLink) {
   margin-left: 1.5rem;
+}
+
+.adminNav__version {
+  margin-top: auto;
+  padding: 0.75rem 0.5rem;
+  color: var(--nr-text-secondary);
+  font-size: 0.75rem;
+  line-height: 1.2;
+  word-break: break-word;
 }
 </style>

@@ -52,6 +52,7 @@ COPY --from=frontend-builder /app/site/dist ./site/dist
 ENV FRONTEND_DIST=/app/site/dist
 
 ARG CARGO_INCREMENTAL=1
+ARG PKGLY_COMMIT_ID
 ARG TARGETPLATFORM
 
 RUN --mount=type=cache,target=/usr/local/cargo/registry \
@@ -60,7 +61,7 @@ RUN --mount=type=cache,target=/usr/local/cargo/registry \
     --mount=type=cache,target=/app/target/release/deps,sharing=locked,id=pkgly-target-${TARGETPLATFORM}-deps-${CARGO_INCREMENTAL},from=rust-deps,source=/app/target/release/deps \
     --mount=type=cache,target=/app/target/release/incremental,sharing=locked,id=pkgly-target-${TARGETPLATFORM}-incremental-${CARGO_INCREMENTAL},from=rust-deps,source=/app/target/release/incremental \
     --mount=type=cache,target=/app/target/release/.fingerprint,sharing=locked,id=pkgly-target-${TARGETPLATFORM}-fingerprint-${CARGO_INCREMENTAL},from=rust-deps,source=/app/target/release/.fingerprint \
-    CARGO_INCREMENTAL="${CARGO_INCREMENTAL}" cargo build --release --features frontend
+    CARGO_INCREMENTAL="${CARGO_INCREMENTAL}" PKGLY_COMMIT_ID="${PKGLY_COMMIT_ID}" cargo build --release --features frontend
 
 ############################
 # Runtime stage

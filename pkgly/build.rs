@@ -1,3 +1,5 @@
+// ABOUTME: Prepares compile-time assets and build metadata for the pkgly binary.
+// ABOUTME: Embeds the frontend bundle and optional source commit identifier.
 #![allow(dead_code)]
 use std::{
     env,
@@ -5,6 +7,7 @@ use std::{
     io::{Seek, Write, prelude::*},
     iter::Iterator,
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use anyhow::Context;
@@ -12,9 +15,60 @@ use walkdir::{DirEntry, WalkDir};
 use zip::{ZipWriter, write::SimpleFileOptions};
 
 fn main() -> anyhow::Result<()> {
+    expose_commit_id();
     #[cfg(feature = "frontend")]
     build_frontend()?;
     Ok(())
+}
+
+fn expose_commit_id() {
+    println!("cargo::rerun-if-env-changed=PKGLY_COMMIT_ID");
+    rerun_if_git_head_changes();
+    if let Some(commit_id) = env::var("PKGLY_COMMIT_ID")
+        .ok()
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty())
+        .or_else(git_commit_id)
+    {
+        println!("cargo::rustc-env=PKGLY_COMMIT_ID={commit_id}");
+    }
+}
+
+fn rerun_if_git_head_changes() {
+    let Some(workspace_dir) = env::var_os("CARGO_MANIFEST_DIR")
+        .map(PathBuf::from)
+        .and_then(|path| path.parent().map(Path::to_path_buf))
+    else {
+        return;
+    };
+    let head_path = workspace_dir.join(".git").join("HEAD");
+    println!("cargo::rerun-if-changed={}", head_path.display());
+    let Ok(head) = std::fs::read_to_string(&head_path) else {
+        return;
+    };
+    let Some(ref_path) = head.trim().strip_prefix("ref: ") else {
+        return;
+    };
+    println!(
+        "cargo::rerun-if-changed={}",
+        workspace_dir.join(".git").join(ref_path).display()
+    );
+}
+
+fn git_commit_id() -> Option<String> {
+    let output = Command::new("git")
+        .args(["rev-parse", "--short=7", "HEAD"])
+        .output()
+        .ok()?;
+    if !output.status.success() {
+        return None;
+    }
+    let commit_id = String::from_utf8(output.stdout).ok()?;
+    let commit_id = commit_id.trim();
+    if commit_id.is_empty() {
+        return None;
+    }
+    Some(commit_id.to_string())
 }
 fn build_frontend() -> anyhow::Result<()> {
     let ignore_dir_not_found = env::var_os("IGNORE_DIR_NOT_FOUND").is_some();

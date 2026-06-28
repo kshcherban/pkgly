@@ -157,6 +157,7 @@ fn instance_with_app_url(app_url: &str) -> Instance {
         is_https: false,
         is_installed: true,
         version: Version::new(0, 0, 0),
+        commit_id: None,
         mode: Mode::Debug,
         password_rules: None,
         sso: None,

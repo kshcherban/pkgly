@@ -10,6 +10,7 @@ use sha2::Sha256;
 use sha3::Sha3_256;
 pub mod api;
 pub mod authentication;
+pub mod build_info;
 pub mod config;
 pub mod email;
 pub mod email_service;

@@ -1,3 +1,5 @@
+// ABOUTME: Defines public app state models exposed through API responses.
+// ABOUTME: Carries instance metadata, OAuth settings, and repository path identifiers.
 use serde::{Deserialize, Serialize};
 use sqlx::PgPool;
 use utoipa::{IntoParams, ToSchema};
@@ -15,6 +17,7 @@ pub struct Instance {
     pub is_installed: bool,
     #[schema(value_type = String)]
     pub version: semver::Version,
+    pub commit_id: Option<String>,
     pub mode: Mode,
     pub password_rules: Option<PasswordRules>,
     pub sso: Option<InstanceSsoSettings>,
@@ -132,3 +135,6 @@ impl From<(String, String)> for RepositoryStorageName {
         }
     }
 }
+
+#[cfg(test)]
+mod tests;
