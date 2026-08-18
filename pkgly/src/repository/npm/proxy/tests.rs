@@ -37,6 +37,26 @@ fn cache_path_requires_tarball_segment() {
 }
 
 #[test]
+fn metadata_cache_path_is_separate_from_scoped_package_paths() {
+    let path = StoragePath::from("@babel/code-frame");
+    let cache = metadata_cache_path_for_npm_proxy(&path);
+
+    assert_eq!(cache.to_string(), "metadata/@babel/code-frame");
+}
+
+#[test]
+fn metadata_cache_path_uses_a_file_for_the_registry_root() {
+    let cache = metadata_cache_path_for_npm_proxy(&StoragePath::default());
+
+    assert_eq!(cache.to_string(), "metadata/root.json");
+}
+
+#[test]
+fn strip_suffix_ignore_ascii_case_rejects_non_utf8_boundaries() {
+    assert_eq!(strip_suffix_ignore_ascii_case("é", "x"), None);
+}
+
+#[test]
 fn normalize_routes_adds_default_when_empty() {
     let routes = normalize_routes(Vec::new());
     assert_eq!(routes.len(), 1);
@@ -212,10 +232,59 @@ async fn metadata_tarball_urls_rewritten_to_proxy_base() {
 }
 
 #[tokio::test]
+async fn metadata_tarball_urls_rewritten_for_yarn_escaped_scoped_request() {
+    let (parts, _) = Request::builder()
+        .uri("https://pkgly.test/abc/npm-proxy/@scope%2fpkg")
+        .header(http::header::HOST, "pkgly.test")
+        .body(())
+        .unwrap()
+        .into_parts();
+
+    let body = r#"{
+        "name": "@scope/pkg",
+        "versions": {
+            "1.0.0": { "dist": { "tarball": "https://registry.npmjs.org/@scope/pkg/-/pkg-1.0.0.tgz" } }
+        }
+    }"#;
+
+    let tempdir = tempdir().unwrap();
+    let meta_path = tempdir.path().join("package.json");
+    std::fs::write(&meta_path, body).unwrap();
+    let meta = nr_storage::StorageFileMeta::read_from_file(&meta_path).unwrap();
+
+    let file = StorageFile::File {
+        meta,
+        content: nr_storage::StorageFileReader::Bytes(nr_storage::FileContentBytes::Bytes(
+            Bytes::from(body),
+        )),
+    };
+
+    let path = StoragePath::from("@scope/pkg");
+    let response = super::rewrite_metadata_tarballs(&parts, &path, file)
+        .await
+        .expect("rewrite works")
+        .expect("metadata response");
+
+    let RepoResponse::Other(response) = response else {
+        panic!("expected Other response");
+    };
+    let bytes = to_bytes(response.into_body(), usize::MAX)
+        .await
+        .expect("read body bytes");
+    let rewritten: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(
+        rewritten["versions"]["1.0.0"]["dist"]["tarball"].as_str(),
+        Some("https://pkgly.test/repositories/abc/npm-proxy/@scope/pkg/-/pkg-1.0.0.tgz")
+    );
+}
+
+#[tokio::test]
 async fn serve_cached_response_rewrites_metadata_tarballs() {
     let repository_id = Uuid::new_v4();
     let storage = test_storage().await;
     let path = StoragePath::from("@scope/pkg");
+    let cache_path = metadata_cache_path_for_npm_proxy(&path);
     let metadata = br#"{
         "name": "@scope/pkg",
         "versions": {
@@ -227,7 +296,7 @@ async fn serve_cached_response_rewrites_metadata_tarballs() {
         .save_file(
             repository_id,
             FileContent::Bytes(Bytes::from_static(metadata)),
-            &path,
+            &cache_path,
         )
         .await
         .expect("write metadata");
@@ -239,10 +308,11 @@ async fn serve_cached_response_rewrites_metadata_tarballs() {
         .unwrap()
         .into_parts();
 
-    let response = super::serve_cached_response(&parts, &storage, repository_id, &path, None)
-        .await
-        .expect("rewrite succeeds")
-        .expect("response exists");
+    let response =
+        super::serve_cached_response(&parts, &storage, repository_id, &path, &cache_path, true)
+            .await
+            .expect("rewrite succeeds")
+            .expect("response exists");
 
     let RepoResponse::Other(resp) = response else {
         panic!("expected Other response");
@@ -260,6 +330,37 @@ async fn serve_cached_response_rewrites_metadata_tarballs() {
         tarball,
         "https://pkgly.test/repositories/abc/npm-proxy/@scope/pkg/-/pkg-1.0.0.tgz"
     );
+}
+
+#[tokio::test]
+async fn serve_cached_response_ignores_a_directory_at_cache_path() {
+    let repository_id = Uuid::new_v4();
+    let storage = test_storage().await;
+    let path = StoragePath::from("@scope/pkg");
+    let cache_path = metadata_cache_path_for_npm_proxy(&path);
+    let nested_path = cache_path.clone().push("unexpected.json");
+
+    storage
+        .save_file(
+            repository_id,
+            FileContent::Bytes(Bytes::from_static(b"unexpected")),
+            &nested_path,
+        )
+        .await
+        .expect("seed malformed cache directory");
+
+    let (parts, _) = Request::builder()
+        .uri("https://pkgly.test/repositories/abc/npm-proxy/@scope%2fpkg")
+        .body(())
+        .unwrap()
+        .into_parts();
+
+    let response =
+        super::serve_cached_response(&parts, &storage, repository_id, &path, &cache_path, true)
+            .await
+            .expect("cache lookup succeeds");
+
+    assert!(response.is_none());
 }
 
 #[derive(Clone, Default)]

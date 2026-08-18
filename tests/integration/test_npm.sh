@@ -230,6 +230,28 @@ else
     fail "Failed to retrieve cached package"
 fi
 
+# Test 12: Yarn Classic requests scoped package metadata using an encoded slash.
+print_test "Proxy: install scoped package with Yarn Classic"
+YARN_PROXY_DIR="$WORKSPACE/yarn-proxy-test"
+mkdir -p "$YARN_PROXY_DIR"
+cd "$YARN_PROXY_DIR"
+
+cat > "$YARN_PROXY_DIR/.npmrc" <<EOF
+//${PKGLY_REGISTRY_HOST}/repositories/${NPM_PROXY_REPO}/:_authToken=${TEST_TOKEN}
+registry=${PKGLY_URL}/repositories/${NPM_PROXY_REPO}/
+always-auth=true
+EOF
+
+YARN_TARBALL_URL="${PKGLY_URL}/repositories/${NPM_PROXY_REPO}/@babel/code-frame/-/code-frame-7.29.0.tgz"
+if run_cmd yarn init --yes && \
+   run_cmd yarn add @babel/code-frame@7.29.0 && \
+   [ -d "node_modules/@babel/code-frame" ] && \
+   grep -Fq "$YARN_TARBALL_URL" yarn.lock; then
+    pass
+else
+    fail "Yarn Classic did not retrieve scoped packages through the NPM proxy"
+fi
+
 # Virtual repository setup
 print_test "Ensure npm-virtual repository exists with hosted+proxy members"
 REPO_LIST=$(api_get "/api/repository/list" || echo "[]")
@@ -340,7 +362,7 @@ else
     fail "Virtual repo failed to proxy lodash"
 fi
 
-# Test 12: Authentication required for publish
+# Test 16: Authentication required for publish
 print_test "Verify authentication required for publish"
 cd "$WORKSPACE/hello-pkg"
 
@@ -357,7 +379,7 @@ else
     fail "Expected 401/403 without auth, got $STATUS"
 fi
 
-# Test 13: Not found for non-existent package
+# Test 17: Not found for non-existent package
 print_test "Verify 404 for non-existent package"
 NONEXISTENT_PATH="/repositories/${NPM_HOSTED_REPO}/@nonexistent/package-does-not-exist"
 
@@ -369,7 +391,7 @@ else
     fail "Expected 404, got $STATUS"
 fi
 
-# Test 14: NPM scoped package support
+# Test 18: NPM scoped package support
 print_test "Verify scoped package support"
 record_output "$METADATA"
 set +e

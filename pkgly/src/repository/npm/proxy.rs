@@ -100,31 +100,26 @@ async fn serve_cached_response(
     storage: &DynStorage,
     repository_id: Uuid,
     path: &StoragePath,
-    cache_path: Option<&StoragePath>,
+    cache_path: &StoragePath,
+    is_metadata: bool,
 ) -> Result<Option<RepoResponse>, NPMRegistryError> {
-    if let Some(file) = storage.open_file(repository_id, path).await? {
-        if cache_path.is_none() {
-            if let Some(response) = rewrite_metadata_tarballs(parts, path, file).await? {
-                return Ok(Some(response));
-            }
-            if let Some(file) = storage.open_file(repository_id, path).await? {
-                return Ok(Some(file.into()));
-            }
-            return Ok(Some(RepoResponse::basic_text_response(
-                StatusCode::NOT_FOUND,
-                "File not found",
-            )));
-        }
+    let Some(file) = storage.open_file(repository_id, cache_path).await? else {
+        return Ok(None);
+    };
+    if matches!(file, StorageFile::Directory { .. }) {
+        return Ok(None);
+    }
+    if !is_metadata {
         return Ok(Some(file.into()));
     }
-
-    if let Some(cache_path) = cache_path {
-        if let Some(file) = storage.open_file(repository_id, cache_path).await? {
-            return Ok(Some(file.into()));
-        }
+    if let Some(response) = rewrite_metadata_tarballs(parts, path, file).await? {
+        return Ok(Some(response));
     }
 
-    Ok(None)
+    Ok(storage
+        .open_file(repository_id, cache_path)
+        .await?
+        .map(Into::into))
 }
 
 impl NpmProxyRegistry {
@@ -212,57 +207,26 @@ impl NpmProxyRegistry {
                                     url: url.to_string(),
                                     error: err.to_string(),
                                 })?;
+                        let tarball_cache_path = cache_path_for_npm_proxy(path);
+                        let cache_path = tarball_cache_path
+                            .clone()
+                            .unwrap_or_else(|| metadata_cache_path_for_npm_proxy(path));
                         match self
                             .storage()
-                            .save_file(self.0.id, FileContent::Bytes(bytes.clone()), path)
+                            .save_file(self.0.id, FileContent::Bytes(bytes.clone()), &cache_path)
                             .await
                         {
                             Ok(_) => {}
                             Err(nr_storage::StorageError::PathCollision(_)) => {
-                                debug!(%url, "Skipping cache write for existing npm metadata file");
+                                debug!(%url, ?cache_path, "Skipping cache write for existing npm resource");
                             }
                             Err(other) => return Err(other.into()),
                         }
 
-                        let cache_path = cache_path_for_npm_proxy(path);
-                        let canonical_path = if let Some(cache_path) = &cache_path {
-                            if cache_path != path {
-                                if let Err(err) = self
-                                    .storage()
-                                    .save_file(
-                                        self.0.id,
-                                        FileContent::Bytes(bytes.clone()),
-                                        cache_path,
-                                    )
-                                    .await
-                                {
-                                    match err {
-                                        nr_storage::StorageError::PathCollision(_) => {
-                                            debug!(
-                                                ?cache_path,
-                                                "Cache file already exists, skipping overwrite"
-                                            );
-                                        }
-                                        other => {
-                                            warn!(
-                                                ?other,
-                                                ?cache_path,
-                                                "Failed to persist npm proxy cache entry"
-                                            );
-                                            return Err(other.into());
-                                        }
-                                    }
-                                }
-                            }
-                            cache_path.clone()
-                        } else {
-                            path.clone()
-                        };
-
-                        if cache_path.is_some() {
+                        if tarball_cache_path.is_some() {
                             record_npm_proxy_cache_hit(
                                 self.indexer().as_ref(),
-                                &canonical_path,
+                                &cache_path,
                                 bytes.len() as u64,
                                 Some(&url),
                             )
@@ -455,7 +419,11 @@ impl Repository for NpmProxyRegistry {
 
             let path = request.path.clone();
 
-            let cache_path = cache_path_for_npm_proxy(&path);
+            let tarball_cache_path = cache_path_for_npm_proxy(&path);
+            let cache_path = tarball_cache_path
+                .clone()
+                .unwrap_or_else(|| metadata_cache_path_for_npm_proxy(&path));
+            let is_metadata = tarball_cache_path.is_none();
             let storage = this.storage();
 
             if path.is_directory() {
@@ -476,7 +444,8 @@ impl Repository for NpmProxyRegistry {
                 &storage,
                 this.id(),
                 &path,
-                cache_path.as_ref(),
+                &cache_path,
+                is_metadata,
             )
             .await?
             {
@@ -489,7 +458,8 @@ impl Repository for NpmProxyRegistry {
                     &storage,
                     this.id(),
                     &path,
-                    cache_path.as_ref(),
+                    &cache_path,
+                    is_metadata,
                 )
                 .await?
                 {
@@ -535,7 +505,8 @@ impl Repository for NpmProxyRegistry {
 
             let path = request.path;
 
-            let cache_path = cache_path_for_npm_proxy(&path);
+            let cache_path = cache_path_for_npm_proxy(&path)
+                .unwrap_or_else(|| metadata_cache_path_for_npm_proxy(&path));
 
             if path.is_directory() {
                 if let Some(response) = this
@@ -552,38 +523,19 @@ impl Repository for NpmProxyRegistry {
 
             if let Some(meta) = this
                 .storage()
-                .get_file_information(this.id(), &path)
+                .get_file_information(this.id(), &cache_path)
                 .await?
             {
                 return Ok(meta.into());
             }
 
-            if let Some(cache_path) = &cache_path {
-                if let Some(meta) = this
-                    .storage()
-                    .get_file_information(this.id(), cache_path)
-                    .await?
-                {
-                    return Ok(meta.into());
-                }
-            }
-
             if this.download_and_cache(&path, query.as_deref()).await? {
                 if let Some(meta) = this
                     .storage()
-                    .get_file_information(this.id(), &path)
+                    .get_file_information(this.id(), &cache_path)
                     .await?
                 {
                     return Ok(meta.into());
-                }
-                if let Some(cache_path) = &cache_path {
-                    if let Some(meta) = this
-                        .storage()
-                        .get_file_information(this.id(), cache_path)
-                        .await?
-                    {
-                        return Ok(meta.into());
-                    }
                 }
             }
 
@@ -633,6 +585,15 @@ fn cache_path_for_npm_proxy(path: &StoragePath) -> Option<StoragePath> {
         "packages/{}/{}",
         package_path, file_name
     )))
+}
+
+fn metadata_cache_path_for_npm_proxy(path: &StoragePath) -> StoragePath {
+    let path = path.to_string();
+    if path.is_empty() {
+        StoragePath::from("metadata/root.json")
+    } else {
+        StoragePath::from(format!("metadata/{path}"))
+    }
 }
 
 #[cfg(test)]
@@ -825,15 +786,11 @@ async fn rewrite_metadata_tarballs(
     };
     let scheme = parts.uri.scheme_str().unwrap_or("http");
 
-    // Compute repository base: full request path minus the requested package path.
-    let full_path = parts.uri.path();
-    let suffix = format!("/{}", requested_path.to_string());
-    let base_path = if let Some(stripped) = full_path.strip_suffix(&suffix) {
-        stripped
-    } else {
+    // Yarn Classic percent-encodes the slash in scoped package metadata paths.
+    let Some(base_path) = repository_base_path(parts.uri.path(), requested_path) else {
         return Ok(None);
     };
-    let mut base_path = base_path.to_string();
+    let mut base_path = base_path;
     if !base_path.ends_with('/') {
         base_path.push('/');
     }
@@ -877,6 +834,48 @@ async fn rewrite_metadata_tarballs(
         builder = builder.header(CONTENT_TYPE, "application/json");
     }
     Ok(Some(RepoResponse::Other(builder.body(bytes))))
+}
+
+fn repository_base_path(full_path: &str, requested_path: &StoragePath) -> Option<String> {
+    let mut suffixes = vec![format!("/{requested_path}")];
+    let components: Vec<String> = requested_path
+        .clone()
+        .into_iter()
+        .map(String::from)
+        .collect();
+    if let [scope, package, rest @ ..] = components.as_slice()
+        && scope.starts_with('@')
+    {
+        let rest = rest
+            .iter()
+            .map(|part| format!("/{part}"))
+            .collect::<String>();
+        suffixes.push(format!("/{scope}%2f{package}{rest}"));
+    }
+
+    let base_path = suffixes
+        .into_iter()
+        .find_map(|suffix| strip_suffix_ignore_ascii_case(full_path, &suffix))?;
+
+    // Axum strips `/repositories` before invoking the nested repository router.
+    // Return the canonical public endpoint so clients receive the same base they configure.
+    if base_path == "/repositories" || base_path.starts_with("/repositories/") {
+        Some(base_path.to_string())
+    } else {
+        Some(format!(
+            "/repositories/{}",
+            base_path.trim_start_matches('/')
+        ))
+    }
+}
+
+fn strip_suffix_ignore_ascii_case<'a>(value: &'a str, suffix: &str) -> Option<&'a str> {
+    let start = value.len().checked_sub(suffix.len())?;
+    let prefix = value.get(..start)?;
+    value
+        .get(start..)?
+        .eq_ignore_ascii_case(suffix)
+        .then_some(prefix)
 }
 
 fn build_head_response(response: reqwest::Response) -> RepoResponse {

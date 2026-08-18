@@ -23,3 +23,16 @@ in front of public registries.
 Any user with read access can install packages using the standard NPM tooling by pointing to the
 repository endpoint. Cached assets are returned immediately; proxy mode automatically refreshes
 missing packages from the configured upstreams.
+
+### Yarn Classic
+
+Yarn 1.x is supported for proxy repositories, including scoped packages. Configure the same
+registry URL with a trailing slash:
+
+```bash
+yarn config set registry https://your-pkgly.example.com/repositories/storage/npm-proxy/
+```
+
+Yarn Classic requests scoped metadata using an encoded slash (for example,
+`@babel%2Fcode-frame`). Pkgly rewrites the returned tarball URLs to the proxy, so both metadata
+and archives are cached locally.

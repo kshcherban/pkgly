@@ -46,7 +46,7 @@ tests/
 | Package Type | Hosted | Proxy | Tests |
 |-------------|--------|-------|-------|
 | Maven       | ✅     | ✅    | 12    |
-| NPM         | ✅     | ✅    | 14    |
+| NPM         | ✅     | ✅    | 18    |
 | Docker      | ⚠️     | ✅    | 8     |
 | Python      | ✅     | ✅    | 11    |
 | Python (Virtual) | ✅ | ✅ | 10 |
@@ -159,7 +159,7 @@ All containers communicate on the `test-network` bridge network. Tests run insid
 11. ✅ Proxy caching verification
 12. ✅ Authentication and error handling
 
-### NPM Tests (14 tests)
+### NPM Tests (18 tests)
 
 1. ✅ Create NPM package tarball
 2. ✅ Publish package to hosted repository
@@ -172,9 +172,13 @@ All containers communicate on the `test-network` bridge network. Tests run insid
 9. ✅ Install latest version
 10. ✅ Proxy package from npmjs.org
 11. ✅ Proxy caching verification
-12. ✅ Authentication required for publish
-13. ✅ 404 for non-existent package
-14. ✅ Scoped package support
+12. ✅ Yarn Classic scoped-package proxy install
+13. ✅ Configure npm virtual repository members
+14. ✅ Install hosted package through npm virtual repository
+15. ✅ Install proxied package through npm virtual repository
+16. ✅ Authentication required for publish
+17. ✅ 404 for non-existent package
+18. ✅ Scoped package support
 
 ### Docker Tests (8 tests)
 
