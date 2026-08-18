@@ -17,10 +17,6 @@ password = "pkgly"
 database = "pkgly"
 host = "postgres"
 port = 5432
-# Optional: SSL mode for database connection
-# ssl_mode = "prefer"
-# Optional: Connection pool size
-# max_connections = 10
 
 # ============================================================================
 # Web Server Configuration
@@ -28,21 +24,15 @@ port = 5432
 [web_server]
 bind_address = "0.0.0.0:6742"
 open_api_routes = true
+max_upload = "100MiB"
 # Worker threads for the HTTP runtime (default: number of CPU cores). Set to a positive integer to override.
 # worker_threads = 8
-
-# Maximum upload size configuration
-[web_server.max_upload]
-# You can specify sizes in various formats:
-# - "100MB" for 100 megabytes
-# - "1GB" for 1 gigabyte
-# - "unlimited" for no limit
-max_size = "100MB"
+# Upload size also accepts values such as "1GiB" and "unlimited".
 
 # Optional: TLS configuration
 # [web_server.tls]
-# cert_path = "/path/to/cert.pem"
-# key_path = "/path/to/key.pem"
+# private_key = "/path/to/key.pem"
+# certificate_chain = "/path/to/cert.pem"
 
 # ============================================================================
 # Session Management
@@ -70,6 +60,13 @@ is_https = true
 [security]
 allow_basic_without_tokens = true
 
+[security.password_rules]
+min_length = 8
+require_uppercase = true
+require_lowercase = true
+require_number = true
+require_symbol = true
+
 # Optional: Single Sign-On (SSO) Configuration
 # [security.sso]
 # enabled = true
@@ -77,10 +74,45 @@ allow_basic_without_tokens = true
 # login_button_text = "Sign in with Cloudflare"
 # provider_login_url = "https://repo.pkgly.dev/cdn-cgi/access/login"
 # provider_redirect_param = "redirect_url"
-# username_header = "CF-Access-Authenticated-User-Email"
-# email_header = "CF-Access-Authenticated-User-Email"
-# display_name_header = "CF-Access-Authenticated-User-Name"
 # auto_create_users = true
+# role_claims = ["roles", "groups"]
+#
+# [[security.sso.providers]]
+# name = "cloudflare"
+# issuer = "https://example.cloudflareaccess.com"
+# audience = "application-audience"
+# jwks_url = "https://example.cloudflareaccess.com/cdn-cgi/access/certs"
+# subject_claim = "email"
+# email_claim = "email"
+# display_name_claim = "name"
+# role_claims = ["roles", "groups"]
+# token_source = { kind = "header", name = "Cf-Access-Jwt-Assertion" }
+
+# Optional: interactive OAuth2 login configuration
+# [security.oauth2]
+# enabled = true
+# login_path = "/api/user/oauth2/login"
+# callback_path = "/api/user/oauth2/callback"
+# redirect_base_url = "https://repo.pkgly.dev"
+# auto_create_users = true
+#
+# [security.oauth2.google]
+# client_id = "google-client-id"
+# client_secret = "google-client-secret"
+# scopes = ["openid", "profile", "email"]
+# redirect_path = "/api/user/oauth2/callback/google"
+#
+# [security.oauth2.microsoft]
+# client_id = "microsoft-client-id"
+# client_secret = "microsoft-client-secret"
+# tenant_id = "common"
+# scopes = ["openid", "profile", "email"]
+# redirect_path = "/api/user/oauth2/callback/microsoft"
+#
+# [[security.oauth2.group_role_mappings]]
+# provider = "google"
+# group = "artifact-admins"
+# roles = ["admin"]
 
 # ============================================================================
 # OpenTelemetry Configuration (Tracing & Metrics)
@@ -177,38 +209,146 @@ include_thread_names = false
 # ============================================================================
 [staging]
 # Staging is a temporary area for uploaded files before they are processed
-enabled = true
-max_size = "1GB"
-cleanup_interval = 3600  # seconds
-stale_timeout = 86400   # seconds (24 hours)
+staging_dir = "/data/staging"
+time_till_cleanup = 3600  # seconds
 
 # ============================================================================
 # Email Configuration (Optional)
 # ============================================================================
 # Email configuration for notifications, password resets, etc.
-# [email]
-# smtp_server = "smtp.gmail.com"
-# smtp_port = 587
-# username = "your-email@gmail.com"
-# password = "your-app-password"
-# from_address = "noreply@yourdomain.com"
-# use_tls = true
+[email]
+host = "smtp.example.com"
+username = "admin@example.com"
+password = "change-me"
+# Options: "NONE", "StartTLS", "TLS"
+encryption = "StartTLS"
+from = "admin@example.com"
+reply_to = "support@example.com"
 
 # ============================================================================
 # Environment Variables
 # ============================================================================
-# Additional configuration can be provided via environment variables:
+# Server configuration can be provided via environment variables. `serde-env`
+# uses a single underscore as the path separator; comma-separated values are
+# used for arrays. Empty values are ignored.
+#
+# Supported scalar and array variables:
+#   PKGLY_MODE
+#   PKGLY_SUGGESTED_LOCAL_STORAGE_PATH
+#   PKGLY_DATABASE_USER
+#   PKGLY_DATABASE_PASSWORD
+#   PKGLY_DATABASE_DATABASE
+#   PKGLY_DATABASE_HOST
+#   PKGLY_DATABASE_PORT
+#   PKGLY_WEB_SERVER_BIND_ADDRESS
+#   PKGLY_WEB_SERVER_OPEN_API_ROUTES
+#   PKGLY_WEB_SERVER_WORKER_THREADS
+#   PKGLY_WEB_SERVER_TLS_PRIVATE_KEY
+#   PKGLY_WEB_SERVER_TLS_CERTIFICATE_CHAIN
+#   PKGLY_SESSIONS_LIFESPAN
+#   PKGLY_SESSIONS_CLEANUP_INTERVAL
+#   PKGLY_SESSIONS_DATABASE_LOCATION
+#   PKGLY_SITE_APP_URL
+#   PKGLY_SITE_NAME
+#   PKGLY_SITE_DESCRIPTION
+#   PKGLY_SITE_IS_HTTPS
+#   PKGLY_SITE_FRONTEND_PATH                 (only with the `frontend` feature)
+#   PKGLY_SECURITY_ALLOW_BASIC_WITHOUT_TOKENS
+#   PKGLY_SECURITY_PASSWORD_RULES_MIN_LENGTH
+#   PKGLY_SECURITY_PASSWORD_RULES_REQUIRE_UPPERCASE
+#   PKGLY_SECURITY_PASSWORD_RULES_REQUIRE_LOWERCASE
+#   PKGLY_SECURITY_PASSWORD_RULES_REQUIRE_NUMBER
+#   PKGLY_SECURITY_PASSWORD_RULES_REQUIRE_SYMBOL
+#   PKGLY_SECURITY_SSO_ENABLED
+#   PKGLY_SECURITY_SSO_LOGIN_PATH
+#   PKGLY_SECURITY_SSO_LOGIN_BUTTON_TEXT
+#   PKGLY_SECURITY_SSO_PROVIDER_LOGIN_URL
+#   PKGLY_SECURITY_SSO_PROVIDER_REDIRECT_PARAM
+#   PKGLY_SECURITY_SSO_AUTO_CREATE_USERS
+#   PKGLY_SECURITY_SSO_ROLE_CLAIMS           (comma-separated)
+#   PKGLY_SECURITY_OAUTH2_ENABLED
+#   PKGLY_SECURITY_OAUTH2_LOGIN_PATH
+#   PKGLY_SECURITY_OAUTH2_CALLBACK_PATH
+#   PKGLY_SECURITY_OAUTH2_REDIRECT_BASE_URL
+#   PKGLY_SECURITY_OAUTH2_AUTO_CREATE_USERS
+#   PKGLY_SECURITY_OAUTH2_GOOGLE_CLIENT_ID
+#   PKGLY_SECURITY_OAUTH2_GOOGLE_CLIENT_SECRET
+#   PKGLY_SECURITY_OAUTH2_GOOGLE_SCOPES      (comma-separated)
+#   PKGLY_SECURITY_OAUTH2_GOOGLE_REDIRECT_PATH
+#   PKGLY_SECURITY_OAUTH2_MICROSOFT_CLIENT_ID
+#   PKGLY_SECURITY_OAUTH2_MICROSOFT_CLIENT_SECRET
+#   PKGLY_SECURITY_OAUTH2_MICROSOFT_TENANT_ID
+#   PKGLY_SECURITY_OAUTH2_MICROSOFT_SCOPES   (comma-separated)
+#   PKGLY_SECURITY_OAUTH2_MICROSOFT_REDIRECT_PATH
+#   PKGLY_STAGING_STAGING_DIR
+#   PKGLY_STAGING_TIME_TILL_CLEANUP
+#   PKGLY_EMAIL_USERNAME
+#   PKGLY_EMAIL_PASSWORD
+#   PKGLY_EMAIL_HOST
+#   PKGLY_EMAIL_ENCRYPTION
+#   PKGLY_EMAIL_FROM
+#   PKGLY_EMAIL_REPLY_TO
+#   PKGLY_OPENTELEMETRY_ENABLED
+#   PKGLY_OPENTELEMETRY_PROTOCOL
+#   PKGLY_OPENTELEMETRY_ENDPOINT
+#   PKGLY_OPENTELEMETRY_TRACES
+#   PKGLY_OPENTELEMETRY_LOGS
+#   PKGLY_OPENTELEMETRY_LEVELS_DEFAULT
+#   PKGLY_LOG_METRICS_ENABLED
+#   PKGLY_LOG_METRICS_PROTOCOL
+#   PKGLY_LOG_METRICS_ENDPOINT
+#   PKGLY_LOG_LEVELS_DEFAULT
+#
+# Dynamic map entries use the same path convention:
+#   PKGLY_LOG_LEVELS_OTHERS_<CRATE>=Info
+#   PKGLY_OPENTELEMETRY_LEVELS_OTHERS_<CRATE>=Debug
+#   PKGLY_OPENTELEMETRY_CONFIG_<RESOURCE_ATTRIBUTE>=value
+#   PKGLY_LOG_METRICS_CONFIG_<RESOURCE_ATTRIBUTE>=value
+# Resource attributes containing dots must be passed through `env`, for example:
+#   env 'PKGLY_OPENTELEMETRY_CONFIG_SERVICE.NAME=pkgly' pkgly start
+#
+# Logger maps can also be built through environment variables. The logger
+# variable selects the tagged enum variant; its child variables configure it:
+#   PKGLY_LOG_LOGGERS_CONSOLE=Console
+#   PKGLY_LOG_LOGGERS_CONSOLE_FORMAT=compact
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_TIME=true
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_LEVEL=true
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_LINE_NUMBERS=false
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_FILE=false
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_TARGET=true
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_SPAN_CONTEXT=false
+#   PKGLY_LOG_LOGGERS_CONSOLE_ANSI_COLOR=true
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_THREAD_IDS=false
+#   PKGLY_LOG_LOGGERS_CONSOLE_INCLUDE_THREAD_NAMES=false
+#   PKGLY_LOG_LOGGERS_CONSOLE_LEVELS_DEFAULT=Info
+#   PKGLY_LOG_LOGGERS_CONSOLE_LEVELS_OTHERS_<CRATE>=Debug
+# RollingFile additionally supports PATH, FILE_PREFIX, and INTERVAL; Otel uses
+# the same fields as the top-level `[opentelemetry]` section.
+#
+# The following values must be configured in TOML because `serde-env` cannot
+# deserialize their current representation:
+#   web_server.max_upload
+#   security.sso.providers
+#   security.oauth2.group_role_mappings
+# A complete TLS, staging, email, or security section must include all of its
+# required fields; see the corresponding TOML examples above.
+#
+# OpenTelemetry also recognizes these dedicated variables:
+#   PKGLY_TRACING_ENABLED                    (presence enables tracing by default)
+#   OTEL_EXPORTER_OTLP_ENDPOINT              (fallback collector endpoint)
 #
 # Example:
 #   env \
-#     PKGLY_DATABASE__HOST=postgres \
-#     PKGLY_DATABASE__PORT=5432 \
-#     PKGLY_DATABASE__USER=pkgly \
-#     PKGLY_DATABASE__PASSWORD=pkgly \
-#     PKGLY_DATABASE__DATABASE=pkgly \
-#     PKGLY_WEB_SERVER__BIND_ADDRESS=0.0.0.0:6742 \
+#     PKGLY_DATABASE_HOST=postgres \
+#     PKGLY_DATABASE_PORT=5432 \
+#     PKGLY_DATABASE_USER=pkgly \
+#     PKGLY_DATABASE_PASSWORD=pkgly \
+#     PKGLY_DATABASE_DATABASE=pkgly \
+#     PKGLY_WEB_SERVER_BIND_ADDRESS=0.0.0.0:6742 \
+#     PKGLY_SECURITY_SSO_ROLE_CLAIMS=roles,groups \
 #     PKGLY_TRACING_ENABLED=1 \
-#     pkgly --config /etc/pkgly/config.toml
+#     pkgly start
 #
-# Note: Environment variables take precedence over config file values,
-# except for `opentelemetry.enabled`, where the config file overrides the env.
+# Values in the config file take precedence over environment variables for the
+# whole top-level section. For example, a `[database]` table causes all
+# `PKGLY_DATABASE_*` values to be ignored.
