@@ -361,6 +361,13 @@ async fn resolve_repository_kind(
             crate::repository::npm::NPMRegistryConfigType::get_type_static(),
         )
         .await
+    } else if repo_type.eq_ignore_ascii_case(crate::repository::nuget::REPOSITORY_TYPE_ID) {
+        load_proxy_kind::<crate::repository::nuget::NugetRepositoryConfig>(
+            repository,
+            site,
+            crate::repository::nuget::NugetRepositoryConfigType::get_type_static(),
+        )
+        .await
     } else if repo_type.eq_ignore_ascii_case("go") {
         load_proxy_kind::<crate::repository::go::GoRepositoryConfig>(
             repository,
@@ -452,6 +459,16 @@ impl ProxyKindClassifier for crate::repository::npm::NPMRegistryConfig {
     }
 }
 
+impl ProxyKindClassifier for crate::repository::nuget::NugetRepositoryConfig {
+    fn proxy_kind_label(&self) -> Option<&'static str> {
+        match self {
+            Self::Hosted => Some("hosted"),
+            Self::Proxy(_) => Some("proxy"),
+            Self::Virtual(_) => Some("virtual"),
+        }
+    }
+}
+
 impl ProxyKindClassifier for crate::repository::go::GoRepositoryConfig {
     fn proxy_kind_label(&self) -> Option<&'static str> {
         match self {
@@ -499,6 +516,7 @@ mod repository_kind_tests {
             NPMRegistryConfig, NpmProxyConfig,
             npm_virtual::{NpmVirtualConfig, VirtualResolutionOrder},
         },
+        nuget::NugetRepositoryConfig,
         python::{PythonProxyConfig, PythonRepositoryConfig},
         ruby::RubyRepositoryConfig,
     };
@@ -574,6 +592,25 @@ mod repository_kind_tests {
             cache_ttl_seconds: 60,
             publish_to: None,
         });
+        assert_eq!(config.proxy_kind_label(), Some("virtual"));
+    }
+
+    #[test]
+    fn nuget_proxy_reports_proxy_kind() {
+        let config = serde_json::from_value(serde_json::json!({
+            "type": "Proxy",
+            "config": { "upstream_url": "https://api.nuget.org/v3/index.json" }
+        }));
+        let config: NugetRepositoryConfig = match config {
+            Ok(config) => config,
+            Err(error) => panic!("NuGet proxy config must deserialize: {error}"),
+        };
+        assert_eq!(config.proxy_kind_label(), Some("proxy"));
+    }
+
+    #[test]
+    fn nuget_virtual_reports_virtual_kind() {
+        let config = NugetRepositoryConfig::Virtual(Default::default());
         assert_eq!(config.proxy_kind_label(), Some("virtual"));
     }
 
