@@ -1,3 +1,5 @@
+// ABOUTME: Implements hosted and proxy Docker Registry V2 and OCI repositories.
+// ABOUTME: Defines Docker repository construction, dispatch, and typed error handling.
 //! Docker Registry V2 and OCI Image Format Implementation
 //!
 //! This module implements the Docker Registry HTTP API V2 specification
@@ -136,6 +138,7 @@ impl_from_error_for_other!(sqlx::Error);
 impl_from_error_for_other!(serde_json::Error);
 impl_from_error_for_other!(std::io::Error);
 impl_from_error_for_other!(reqwest::Error);
+impl_from_error_for_other!(crate::utils::upstream::UpstreamError);
 impl_from_error_for_other!(AuthenticationError);
 impl_from_error_for_other!(RepositoryHandlerError);
 impl_from_error_for_other!(nr_storage::StorageError);

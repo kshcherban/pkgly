@@ -91,6 +91,18 @@ fn merge_headers_rejects_new_header_without_secret() {
 }
 
 #[test]
+fn merge_headers_rejects_reserved_transport_headers() {
+    let headers = vec![WebhookHeaderInput {
+        name: "Host".into(),
+        value: Some("internal.example".into()),
+        configured: false,
+    }];
+
+    let err = merge_headers(None, headers).expect_err("Host must not be user-controlled");
+    assert!(err.to_string().contains("reserved"));
+}
+
+#[test]
 fn next_retry_at_uses_exponential_backoff() {
     let now = DateTime::parse_from_rfc3339("2026-04-22T10:00:00Z")
         .expect("time")

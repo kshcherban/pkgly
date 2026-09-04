@@ -1,3 +1,5 @@
+// ABOUTME: Defines hosted, proxy, and virtual NuGet repository implementations.
+// ABOUTME: Provides NuGet repository construction, dispatch, and typed error conversion.
 use ahash::HashMap;
 use futures::future::BoxFuture;
 use nr_core::{
@@ -111,6 +113,11 @@ impl From<zip::result::ZipError> for NugetError {
 impl From<reqwest::Error> for NugetError {
     fn from(value: reqwest::Error) -> Self {
         NugetError::Other(Box::new(OtherInternalError::new(value)))
+    }
+}
+impl From<crate::utils::upstream::UpstreamError> for NugetError {
+    fn from(value: crate::utils::upstream::UpstreamError) -> Self {
+        NugetError::Other(Box::new(value))
     }
 }
 impl From<std::string::FromUtf8Error> for NugetError {

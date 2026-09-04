@@ -1,3 +1,5 @@
+// ABOUTME: Manages webhook definitions, event delivery queues, retries, and audit logging.
+// ABOUTME: Enforces safe outbound headers and non-retryable egress policy failures.
 use std::{
     collections::{BTreeMap, HashMap, HashSet},
     sync::Arc,
@@ -226,9 +228,10 @@ impl WebhookService {
         let notify_shutdown = Arc::new(Notify::new());
         let worker_notify = notify_new_work.clone();
         let shutdown_notify = notify_shutdown.clone();
-        let client = Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .timeout(DELIVERY_TIMEOUT)
             .user_agent("Pkgly Webhooks")
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("Failed to build webhook HTTP client")?;
         let handle = tokio::spawn(async move {
@@ -545,6 +548,8 @@ fn validate_webhook_input(
     if !matches!(parsed.scheme(), "http" | "https") {
         return Err(anyhow!("Webhook target URL must use http or https"));
     }
+    crate::utils::egress::validate_url(&parsed)
+        .map_err(|error| anyhow!("Webhook target URL is blocked: {error}"))?;
 
     let mut seen_events = HashSet::new();
     let mut events = Vec::new();
@@ -590,6 +595,9 @@ fn merge_headers(
         }
         HeaderName::from_bytes(trimmed_name.as_bytes())
             .map_err(|_| anyhow!("Invalid webhook header name `{trimmed_name}`"))?;
+        if is_forbidden_webhook_header(trimmed_name) {
+            return Err(anyhow!("Webhook header `{trimmed_name}` is reserved"));
+        }
         let normalized = trimmed_name.to_ascii_lowercase();
         if !seen.insert(normalized.clone()) {
             return Err(anyhow!("Duplicate webhook header `{trimmed_name}`"));
@@ -622,6 +630,23 @@ fn merge_headers(
     }
 
     Ok(merged)
+}
+
+fn is_forbidden_webhook_header(name: &str) -> bool {
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "host"
+            | "content-length"
+            | "transfer-encoding"
+            | "connection"
+            | "proxy-authorization"
+            | "proxy-connection"
+            | "forwarded"
+            | "via"
+            | "x-forwarded-for"
+            | "x-forwarded-host"
+            | "x-forwarded-proto"
+    )
 }
 
 fn webhook_summary_from_row(row: sqlx::postgres::PgRow) -> anyhow::Result<WebhookSummary> {
@@ -1022,7 +1047,7 @@ async fn deliver_once(client: &Client, delivery: &ClaimedDelivery) -> DeliveryAt
         request = request.header(name, value);
     }
 
-    let outcome = match request.send().await {
+    let outcome = match crate::utils::upstream::send(client, request).await {
         Ok(response) => classify_http_response(attempt_number, response.status().as_u16()),
         Err(err) => classify_transport_error(attempt_number, err),
     };
@@ -1236,7 +1261,16 @@ fn classify_http_response(attempt_number: i32, status: u16) -> DeliveryAttemptOu
     }
 }
 
-fn classify_transport_error(attempt_number: i32, error: reqwest::Error) -> DeliveryAttemptOutcome {
+fn classify_transport_error(
+    attempt_number: i32,
+    error: crate::utils::upstream::UpstreamError,
+) -> DeliveryAttemptOutcome {
+    if crate::utils::egress::is_egress_blocked(&error) {
+        return DeliveryAttemptOutcome::Failed {
+            http_status: error.status().map(|value| value.as_u16() as i32),
+            error: "Webhook target is blocked by egress policy".to_string(),
+        };
+    }
     if error.is_timeout() || error.is_connect() || error.status().is_none() {
         if let Some(next_attempt_at) = next_retry_at(Utc::now(), attempt_number) {
             return DeliveryAttemptOutcome::Retryable {

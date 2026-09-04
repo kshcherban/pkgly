@@ -4,6 +4,7 @@ use sha2_0_11::Digest;
 pub mod requests;
 pub mod response;
 pub use response::*;
+pub mod egress;
 pub mod header;
 pub mod other;
 pub mod request_logging;

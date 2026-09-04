@@ -23,6 +23,8 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      mailpit:
+        condition: service_healthy
     environment:
       - RUST_LOG=debug
       - DATABASE_URL=postgresql://pkgly:pkgly@postgres:5432/pkgly_test
@@ -31,6 +33,14 @@ services:
     volumes:
       - ./config/pkgly.test.toml:/config/pkgly.test.toml:ro
       - test-storage:/storage
+    networks:
+      - integration
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      - MP_SMTP_BIND_ADDR=0.0.0.0:1025
+      - MP_HTTP_BIND_ADDR=0.0.0.0:8025
     networks:
       - integration
 

@@ -1,3 +1,10 @@
+// ABOUTME: Tests outbound HTTP tracing, log sanitization, and egress enforcement.
+// ABOUTME: Uses a real loopback listener to prove blocked literals are never contacted.
+use std::sync::{
+    Arc,
+    atomic::{AtomicUsize, Ordering},
+};
+
 use opentelemetry::trace::TraceContextExt as _;
 use opentelemetry::{
     Context as OtelContext, global,
@@ -35,4 +42,37 @@ fn inject_trace_headers_adds_traceparent() {
     let mut headers = HeaderMap::new();
     inject_trace_headers(&cx, &mut headers);
     assert!(headers.contains_key("traceparent"));
+}
+
+#[tokio::test]
+async fn send_blocks_initial_non_global_literal_before_connecting() {
+    crate::utils::egress::install(&crate::app::config::EgressSettings::default())
+        .expect("default egress policy");
+    let listener = tokio::net::TcpListener::bind("0.0.0.0:0")
+        .await
+        .expect("bind loopback listener");
+    let address = listener.local_addr().expect("listener address");
+    let accepted = Arc::new(AtomicUsize::new(0));
+    let accepted_for_server = Arc::clone(&accepted);
+    let server = tokio::spawn(async move {
+        if let Ok((mut stream, _)) = listener.accept().await {
+            accepted_for_server.fetch_add(1, Ordering::SeqCst);
+            use tokio::io::AsyncWriteExt as _;
+            let _ = stream
+                .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 0\r\n\r\n")
+                .await;
+        }
+    });
+
+    let client = super::client_builder().build().expect("egress HTTP client");
+    let error = super::send(&client, client.get(format!("http://{address}/")))
+        .await
+        .expect_err("non-global literal must be blocked");
+
+    server.abort();
+    assert!(
+        crate::utils::egress::is_egress_blocked(&error),
+        "unexpected error chain: {error:?}"
+    );
+    assert_eq!(accepted.load(Ordering::SeqCst), 0);
 }

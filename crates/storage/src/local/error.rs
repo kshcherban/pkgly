@@ -1,5 +1,6 @@
 use super::{ExtensionError, ParentDirectoryDoesNotExist, PathCollisionError};
 use crate::error::WrongFileType;
+use nr_core::storage::InvalidStoragePath;
 
 #[derive(Debug, thiserror::Error)]
 pub enum LocalStorageError {
@@ -21,6 +22,8 @@ pub enum LocalStorageError {
     InvalidConfigType(#[from] crate::InvalidConfigType),
     #[error("Metadata update channel closed")]
     MetaUpdateChannelClosed,
+    #[error(transparent)]
+    InvalidStoragePath(#[from] InvalidStoragePath),
     #[error("Internal Unknown Error {0}")]
     Other(Box<dyn std::error::Error + Send + Sync>),
 }

@@ -27,7 +27,8 @@ tests/
 │   ├── test_go.sh                  # Go module integration tests
 │   ├── test_debian.sh              # Debian repository integration tests
 │   ├── test_cargo.sh               # Cargo registry integration tests
-│   └── test_helm.sh                # Helm chart integration tests
+│   ├── test_helm.sh                # Helm chart integration tests
+│   ├── test_security.sh            # Security hardening integration tests (CORS, traversal, egress, reset poisoning)
 ├── fixtures/                        # Test packages
 │   ├── maven/simple-lib/           # Maven test library
 │   ├── npm/hello-pkg/              # NPM test package

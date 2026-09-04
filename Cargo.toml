@@ -82,6 +82,7 @@ http-body = "1"
 bytes = "1"
 pin-project = "1"
 url = "2"
+ipnet = "2"
 ## Hashing
 digestible = { git = "https://github.com/kshcherban/digestible.git", features = [
     "base64",

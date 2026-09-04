@@ -40,6 +40,20 @@ fn double_slash() {
     let path = StoragePath::from("test/test2//test3/");
     assert_eq!(path.to_string(), "test/test2/test3/");
 }
+
+#[test]
+fn rejects_traversal_components() {
+    for value in ["../secret", "a/../secret", "a/./secret", "a\\..\\secret"] {
+        assert!(StoragePath::from(value).validate().is_err());
+    }
+    assert!(StoragePath::from("safe/path.txt").validate().is_ok());
+}
+
+#[test]
+fn accepts_repository_root_path() {
+    assert_eq!(StoragePath::from_untrusted("/").unwrap().to_string(), "/");
+    assert_eq!(StoragePath::from_untrusted("").unwrap().to_string(), "");
+}
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 struct Test {
     path: StoragePath,

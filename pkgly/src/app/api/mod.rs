@@ -15,7 +15,6 @@ use nr_core::{
 };
 use serde::{Deserialize, Serialize, ser::SerializeStruct};
 use strum::IntoEnumIterator;
-use tower_http::cors::CorsLayer;
 use tracing::{error, instrument};
 use utoipa::ToSchema;
 pub mod artipie;
@@ -53,7 +52,6 @@ pub fn api_routes() -> axum::Router<Pkgly> {
         .nest("/project", project::project_routes())
         .merge(artipie::routes())
         .fallback(route_not_found)
-        .layer(CorsLayer::very_permissive())
 }
 #[utoipa::path(
     get,

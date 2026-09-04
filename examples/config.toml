@@ -60,6 +60,12 @@ is_https = true
 [security]
 allow_basic_without_tokens = true
 
+# Outbound requests may use public addresses by default. Add exact hostnames
+# or CIDRs only for private proxy, webhook, OIDC, or S3 destinations.
+[security.egress]
+allowed_hosts = []
+allowed_cidrs = []
+
 [security.password_rules]
 min_length = 8
 require_uppercase = true
@@ -222,6 +228,8 @@ username = "admin@example.com"
 password = "change-me"
 # Options: "NONE", "StartTLS", "TLS"
 encryption = "StartTLS"
+# Optional custom port. Defaults: NONE=25, StartTLS=587, TLS=465.
+# port = 2525
 from = "admin@example.com"
 reply_to = "support@example.com"
 

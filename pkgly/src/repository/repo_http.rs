@@ -599,14 +599,46 @@ impl From<Option<StorageFileMeta<FileType>>> for RepoResponse {
     }
 }
 #[allow(dead_code)]
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Debug, Clone)]
 pub struct RepoRequestPath {
     storage: String,
     repository: String,
-    #[serde(default)]
     path: Option<StoragePath>,
+    docker_scope: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RawRepoRequestPath {
+    storage: String,
+    repository: String,
+    #[serde(default)]
+    path: Option<String>,
     #[serde(default)]
     docker_scope: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for RepoRequestPath {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        let raw = RawRepoRequestPath::deserialize(deserializer)?;
+        let path = raw
+            .path
+            .map(|path| {
+                // Axum may retain the separator between the repository and wildcard.
+                let path = path.strip_prefix('/').unwrap_or(&path);
+                StoragePath::from_untrusted(path)
+            })
+            .transpose()
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self {
+            storage: raw.storage,
+            repository: raw.repository,
+            path,
+            docker_scope: raw.docker_scope,
+        })
+    }
 }
 
 /// Core repository request handler logic (extracted for reuse)

@@ -17,6 +17,69 @@ use tracing::warn;
 use uuid::Uuid;
 
 #[tokio::test]
+async fn rejects_paths_that_escape_repository_root() -> anyhow::Result<()> {
+    let temp = tempdir()?;
+    let storage =
+        <LocalStorageFactory as StaticStorageFactory>::create_storage_from_config(StorageConfig {
+            storage_config: StorageConfigInner::test_config(),
+            type_config: StorageTypeConfig::Local(LocalConfig {
+                path: temp.path().to_path_buf(),
+            }),
+        })
+        .await?;
+    let repository = Uuid::new_v4();
+    let outside = temp.path().join("outside.txt");
+    std::fs::write(&outside, b"sentinel")?;
+
+    let result = storage
+        .save_file(
+            repository,
+            FileContent::from(b"overwrite".as_slice()),
+            &StoragePath::from("../outside.txt"),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(&outside)?, b"sentinel");
+    Ok(())
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn rejects_symlink_paths_that_escape_repository_root() -> anyhow::Result<()> {
+    use std::os::unix::fs::symlink;
+
+    let temp = tempdir()?;
+    let storage =
+        <LocalStorageFactory as StaticStorageFactory>::create_storage_from_config(StorageConfig {
+            storage_config: StorageConfigInner::test_config(),
+            type_config: StorageTypeConfig::Local(LocalConfig {
+                path: temp.path().to_path_buf(),
+            }),
+        })
+        .await?;
+    let repository = Uuid::new_v4();
+    let outside = temp.path().join("outside");
+    let repository_root = temp.path().join(repository.to_string());
+    std::fs::create_dir_all(&outside)?;
+    std::fs::create_dir_all(&repository_root)?;
+    std::fs::write(outside.join("sentinel.txt"), b"sentinel")?;
+    symlink(&outside, repository_root.join("link"))?;
+
+    let result = storage
+        .save_file(
+            repository,
+            FileContent::from(b"overwrite".as_slice()),
+            &StoragePath::from("link/sentinel.txt"),
+        )
+        .await;
+
+    assert!(result.is_err());
+    assert_eq!(std::fs::read(outside.join("sentinel.txt"))?, b"sentinel");
+    Ok(())
+}
+
+#[tokio::test]
 pub async fn generic_test() -> anyhow::Result<()> {
     let Some(config) = crate::testing::start_storage_test("Local")? else {
         warn!("Local Storage Test Skipped");

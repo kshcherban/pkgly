@@ -1,7 +1,16 @@
 #![allow(dead_code)]
 use std::{
-    borrow::Cow, collections::VecDeque, env, io::ErrorKind, num::NonZeroUsize, ops::Deref,
-    path::PathBuf, pin::Pin, str::FromStr, sync::Arc,
+    borrow::Cow,
+    collections::VecDeque,
+    env,
+    io::ErrorKind,
+    net::IpAddr,
+    num::NonZeroUsize,
+    ops::Deref,
+    path::PathBuf,
+    pin::Pin,
+    str::FromStr,
+    sync::{Arc, OnceLock},
 };
 
 use aws_config::BehaviorVersion;
@@ -11,6 +20,7 @@ use aws_sdk_s3::{
     Client as AwsS3Client,
     types::{CommonPrefix, Tag},
 };
+use aws_smithy_runtime_api::client::dns::{DnsFuture, ResolveDns, ResolveDnsError};
 use aws_smithy_runtime_api::client::result::SdkError;
 use aws_smithy_types::byte_stream::ByteStream;
 use aws_types::{SdkConfig, region::Region};
@@ -31,13 +41,16 @@ use tokio::{
     task,
     time::{Duration, Instant},
 };
-use url::Url;
+use url::{Host, Url};
 
 pub mod regions;
 use serde::{Deserialize, Serialize};
 use tracing::{debug, error, info, instrument, warn};
 use utoipa::ToSchema;
 pub mod tags;
+use ahash::HashSet;
+use ipnet::IpNet;
+use parking_lot::RwLock;
 use uuid::Uuid;
 #[derive(Debug, thiserror::Error)]
 pub enum S3StorageError {
@@ -59,6 +72,8 @@ pub enum S3StorageError {
 
     #[error(transparent)]
     PathCollision(#[from] PathCollisionError),
+    #[error("S3 endpoint is blocked by egress policy")]
+    BlockedEndpoint,
 }
 impl S3StorageError {
     pub fn static_missing_tag(tag: &'static str) -> Self {
@@ -66,6 +81,70 @@ impl S3StorageError {
     }
     pub fn from_sdk_error(err: impl std::fmt::Display) -> Self {
         S3StorageError::AwsSdkError(err.to_string())
+    }
+}
+
+#[derive(Debug, Clone, Default)]
+struct S3EgressPolicy {
+    allowed_hosts: HashSet<String>,
+    allowed_cidrs: Vec<IpNet>,
+}
+
+static S3_EGRESS_POLICY: OnceLock<RwLock<S3EgressPolicy>> = OnceLock::new();
+
+pub fn install_egress_policy(
+    allowed_hosts: &[String],
+    allowed_cidrs: &[String],
+) -> Result<(), String> {
+    let policy = S3EgressPolicy {
+        allowed_hosts: allowed_hosts
+            .iter()
+            .map(|host| host.trim_end_matches('.').to_ascii_lowercase())
+            .collect(),
+        allowed_cidrs: allowed_cidrs
+            .iter()
+            .map(|cidr| cidr.parse().map_err(|_| cidr.clone()))
+            .collect::<Result<_, _>>()?,
+    };
+    let lock = S3_EGRESS_POLICY.get_or_init(|| RwLock::new(policy.clone()));
+    *lock.write() = policy;
+    Ok(())
+}
+
+fn s3_egress_policy() -> S3EgressPolicy {
+    let lock = S3_EGRESS_POLICY.get_or_init(|| RwLock::new(S3EgressPolicy::default()));
+    lock.read().clone()
+}
+
+#[derive(Debug, Clone)]
+struct S3DnsResolver;
+
+impl ResolveDns for S3DnsResolver {
+    fn resolve_dns<'a>(&'a self, name: &'a str) -> DnsFuture<'a> {
+        let host = name.to_owned();
+        let policy = s3_egress_policy();
+        DnsFuture::new(async move {
+            let addresses = tokio::net::lookup_host((host.as_str(), 0))
+                .await
+                .map_err(ResolveDnsError::new)?
+                .map(|address| address.ip())
+                .collect::<Vec<_>>();
+            if addresses.is_empty()
+                || addresses.iter().any(|address| {
+                    !nr_core::egress::is_global(*address)
+                        && !policy.allowed_hosts.contains(&host.to_ascii_lowercase())
+                        && !policy
+                            .allowed_cidrs
+                            .iter()
+                            .any(|cidr| cidr.contains(address))
+                })
+            {
+                return Err(ResolveDnsError::new(std::io::Error::other(
+                    "S3 destination blocked by egress policy",
+                )));
+            }
+            Ok(addresses)
+        })
     }
 }
 use crate::{
@@ -652,7 +731,36 @@ impl S3StorageInner {
         let mut builder =
             aws_sdk_s3::config::Builder::from(&base_config).force_path_style(config.path_style);
 
+        let http_client = aws_smithy_http_client::Builder::new()
+            .tls_provider(aws_smithy_http_client::tls::Provider::rustls(
+                aws_smithy_http_client::tls::rustls_provider::CryptoMode::Ring,
+            ))
+            .build_with_resolver(S3DnsResolver);
+        builder = builder.http_client(http_client);
+
         if let Some(endpoint) = config.custom_endpoint() {
+            let host = endpoint.host_str().ok_or(S3StorageError::BlockedEndpoint)?;
+            let host_ip = match endpoint.host() {
+                Some(Host::Ipv4(ip)) => Some(IpAddr::V4(ip)),
+                Some(Host::Ipv6(ip)) => Some(IpAddr::V6(ip)),
+                _ => None,
+            };
+            if !matches!(endpoint.scheme(), "http" | "https")
+                || !endpoint.username().is_empty()
+                || endpoint.password().is_some()
+                || host_ip.is_some_and(|ip| {
+                    !nr_core::egress::is_global(ip)
+                        && !s3_egress_policy()
+                            .allowed_hosts
+                            .contains(&host.to_ascii_lowercase())
+                        && !s3_egress_policy()
+                            .allowed_cidrs
+                            .iter()
+                            .any(|cidr| cidr.contains(&ip))
+                })
+            {
+                return Err(S3StorageError::BlockedEndpoint);
+            }
             builder = builder.endpoint_url(endpoint.to_string());
         }
 

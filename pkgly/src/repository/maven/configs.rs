@@ -43,7 +43,15 @@ impl RepositoryConfigType for MavenRepositoryConfigType {
         Some(schema_for!(MavenRepositoryConfig))
     }
     fn validate_config(&self, config: Value) -> Result<(), RepositoryConfigError> {
-        let _config: MavenRepositoryConfig = serde_json::from_value(config)?;
+        let config: MavenRepositoryConfig = serde_json::from_value(config)?;
+        if let MavenRepositoryConfig::Proxy(proxy_cfg) = &config {
+            crate::utils::egress::validate_proxy_urls(
+                proxy_cfg.routes.iter().map(|route| &route.url),
+            )
+            .map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
     fn validate_change(&self, old: Value, new: Value) -> Result<(), RepositoryConfigError> {

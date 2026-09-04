@@ -47,6 +47,11 @@ impl RepositoryConfigType for NugetRepositoryConfigType {
             crate::repository::r#virtual::config::validate_virtual_repository_config(virtual_cfg)
                 .map_err(|_| RepositoryConfigError::InvalidConfig("Invalid virtual config"))?;
         }
+        if let NugetRepositoryConfig::Proxy(proxy_cfg) = &parsed {
+            crate::utils::egress::validate_proxy_url(&proxy_cfg.upstream_url).map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
 

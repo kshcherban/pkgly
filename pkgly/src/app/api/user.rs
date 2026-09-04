@@ -214,7 +214,7 @@ fn login_success_response(cookie: Cookie<'static>, user_with_session: MeWithSess
 fn session_cookie(session_id: String, is_https: bool) -> Cookie<'static> {
     Cookie::build(("session", session_id))
         .secure(is_https)
-        .same_site(session_same_site(is_https))
+        .same_site(session_same_site())
         .path("/")
         .http_only(true)
         .expires(Expiration::Session)
@@ -224,19 +224,15 @@ fn session_cookie(session_id: String, is_https: bool) -> Cookie<'static> {
 fn session_removal_cookie(is_https: bool) -> Cookie<'static> {
     Cookie::build("session")
         .secure(is_https)
-        .same_site(session_same_site(is_https))
+        .same_site(session_same_site())
         .path("/")
         .http_only(true)
         .removal()
         .build()
 }
 
-fn session_same_site(is_https: bool) -> SameSite {
-    if is_https {
-        SameSite::None
-    } else {
-        SameSite::Lax
-    }
+fn session_same_site() -> SameSite {
+    SameSite::Lax
 }
 
 #[utoipa::path(

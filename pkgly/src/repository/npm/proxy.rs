@@ -179,7 +179,7 @@ impl NpmProxyRegistry {
         repository: DBRepository,
         config: NpmProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly NPM Proxy")
             .build()
             .map_err(|err| {

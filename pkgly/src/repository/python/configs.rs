@@ -55,6 +55,14 @@ impl RepositoryConfigType for PythonRepositoryConfigType {
             crate::repository::r#virtual::config::validate_virtual_repository_config(virtual_cfg)
                 .map_err(|_| RepositoryConfigError::InvalidConfig("Invalid virtual config"))?;
         }
+        if let PythonRepositoryConfig::Proxy(proxy_cfg) = &parsed {
+            crate::utils::egress::validate_proxy_urls(
+                proxy_cfg.routes.iter().map(|route| &route.url),
+            )
+            .map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
 

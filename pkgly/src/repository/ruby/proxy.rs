@@ -68,7 +68,7 @@ impl RubyProxy {
         repository: DBRepository,
         config: RubyProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly Ruby Proxy")
             .build()
             .map_err(|err| {

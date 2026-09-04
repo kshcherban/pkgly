@@ -1,3 +1,5 @@
+// ABOUTME: Persists password reset requests and validates their one-time tokens.
+// ABOUTME: Tracks token expiry and the timestamp of terminal state changes.
 use chrono::Local;
 use rand::{SeedableRng, rngs::StdRng};
 use serde::{Deserialize, Serialize};
@@ -30,7 +32,7 @@ pub struct UserPasswordReset {
     pub state: PasswordResetState,
     pub token: String,
     pub expires_at: DateTime,
-    pub used_at: DateTime,
+    pub state_changed_at: Option<DateTime>,
     pub created_at: DateTime,
 }
 impl UserPasswordReset {
@@ -103,7 +105,7 @@ impl UserPasswordReset {
     }
     pub async fn set_used(&self, database: &PgPool) -> Result<(), sqlx::Error> {
         sqlx::query(
-            r#"UPDATE user_password_reset_tokens SET state = 'Used', used_at = NOW() WHERE id = $1"#,
+            r#"UPDATE user_password_reset_tokens SET state = 'Used', state_changed_at = NOW() WHERE id = $1"#,
         )
         .bind(self.id)
         .execute(database)

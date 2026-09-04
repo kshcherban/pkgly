@@ -58,7 +58,10 @@ use super::{
         oauth::{OAuth2Rbac, OAuth2Service},
         session::{SessionManager, SessionManagerConfig},
     },
-    config::{Mode, OAuth2Settings, PasswordRules, SecuritySettings, SiteSetting, SsoSettings},
+    config::{
+        Mode, OAuth2Settings, PasswordRules, SecuritySettings, SiteSetting, SsoSettings,
+        normalize_app_url,
+    },
     email::EmailSetting,
     email_service::{EmailAccess, EmailService},
     state::{Instance, InstanceOAuth2Settings, InstanceSsoSettings, RepositoryStorageName},
@@ -263,6 +266,24 @@ impl Pkgly {
         database: DatabaseConfig,
         suggested_local_storage_path: Option<PathBuf>,
     ) -> anyhow::Result<Self> {
+        let app_url = site
+            .app_url
+            .as_deref()
+            .map(normalize_app_url)
+            .transpose()
+            .context("Invalid site app_url")?;
+        if email_settings.is_some() && app_url.is_none() {
+            return Err(anyhow!(
+                "site.app_url must be configured when email delivery is enabled"
+            ));
+        }
+        crate::utils::egress::install(&security.egress)
+            .context("Invalid outbound egress policy configuration")?;
+        nr_storage::s3::install_egress_policy(
+            &security.egress.allowed_hosts,
+            &security.egress.allowed_cidrs,
+        )
+        .map_err(|error| anyhow::anyhow!("Invalid S3 egress policy configuration: {error}"))?;
         let database = Self::load_database(database).await?;
         let stored_sso = ApplicationSettings::get::<SsoSettings>("security.sso", &database)
             .await
@@ -326,7 +347,7 @@ impl Pkgly {
             mode,
             version: current_semver!(),
             commit_id: build_info.commit_id,
-            app_url: site.app_url.unwrap_or_default(),
+            app_url: app_url.unwrap_or_default(),
             is_installed,
             name: site.name,
             description: site.description,

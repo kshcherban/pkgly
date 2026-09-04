@@ -19,8 +19,21 @@ app_url = "http://pkgly:8888"
 [web_server]
 bind_address = "0.0.0.0:8888"
 
+[email]
+username = ""
+password = ""
+host = "mailpit"
+port = 1025
+encryption = "NONE"
+from = "pkgly@test.local"
+
 [security]
 allow_basic_without_tokens = false
+
+[security.egress]
+# Proxy fixtures intentionally point back to the in-stack Pkgly service.
+allowed_hosts = ["pkgly"]
+allowed_cidrs = []
 
 [log.levels]
 default = "Debug"

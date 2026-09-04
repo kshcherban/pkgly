@@ -95,7 +95,7 @@ impl GoProxy {
         repository: DBRepository,
         config: GoProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly Go Proxy/1.0")
             .timeout(Duration::from_secs(30))
             .build()

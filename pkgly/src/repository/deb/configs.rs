@@ -232,6 +232,12 @@ impl RepositoryConfigType for DebRepositoryConfigType {
                 if let Some(refresh) = proxy.refresh.as_ref() {
                     validate_refresh_config(refresh)?;
                 }
+
+                crate::utils::egress::validate_proxy_url(&proxy.upstream_url).map_err(|_| {
+                    RepositoryConfigError::InvalidConfig(
+                        "Proxy route URL is blocked by egress policy",
+                    )
+                })?;
             }
         }
         Ok(())

@@ -52,6 +52,14 @@ impl RepositoryConfigType for NPMRegistryConfigType {
             validate_virtual_config(virtual_cfg)
                 .map_err(|_| RepositoryConfigError::InvalidConfig("Invalid virtual config"))?;
         }
+        if let NPMRegistryConfig::Proxy(proxy_cfg) = &parsed {
+            crate::utils::egress::validate_proxy_urls(
+                proxy_cfg.routes.iter().map(|route| &route.url),
+            )
+            .map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
     fn validate_change(&self, _old: Value, new: Value) -> Result<(), RepositoryConfigError> {

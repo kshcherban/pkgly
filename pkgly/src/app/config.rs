@@ -5,6 +5,8 @@ use tuxs_config_types::size_config::InvalidSizeError;
 use utoipa::ToSchema;
 mod max_upload;
 mod security;
+#[cfg(test)]
+mod tests;
 pub use max_upload::*;
 pub use security::*;
 pub const CONFIG_PREFIX: &str = "PKGLY";
@@ -19,6 +21,27 @@ pub enum ConfigError {
         error: InvalidSizeError,
         value: String,
     },
+    #[error("Invalid site app_url: {0}")]
+    InvalidAppUrl(String),
+}
+
+pub fn normalize_app_url(value: &str) -> Result<String, ConfigError> {
+    let mut url =
+        url::Url::parse(value).map_err(|error| ConfigError::InvalidAppUrl(error.to_string()))?;
+    if !matches!(url.scheme(), "http" | "https")
+        || url.host_str().is_none()
+        || !url.username().is_empty()
+        || url.password().is_some()
+        || url.query().is_some()
+        || url.fragment().is_some()
+    {
+        return Err(ConfigError::InvalidAppUrl(value.to_owned()));
+    }
+    if !url.path().ends_with('/') {
+        let path = format!("{}/", url.path());
+        url.set_path(&path);
+    }
+    Ok(url.to_string())
 }
 #[derive(Debug, Deserialize, Serialize, Clone, Copy, PartialEq, Eq, EnumIs, ToSchema)]
 pub enum Mode {
@@ -65,7 +88,7 @@ impl Default for WebServer {
 #[derive(Debug, Deserialize, Serialize, Clone)]
 #[serde(default)]
 pub struct SiteSetting {
-    /// If not set, the app will load the url from the request.
+    /// Canonical public URL used for links sent by the application.
     pub app_url: Option<String>,
     pub name: String,
     pub description: String,

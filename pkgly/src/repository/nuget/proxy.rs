@@ -62,7 +62,7 @@ impl NugetProxy {
         repository: DBRepository,
         config: NugetProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly NuGet Proxy")
             .build()
             .map_err(|err| {

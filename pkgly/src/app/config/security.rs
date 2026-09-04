@@ -12,6 +12,8 @@ pub struct SecuritySettings {
     pub password_rules: Option<PasswordRules>,
     pub sso: Option<SsoSettings>,
     pub oauth2: Option<OAuth2Settings>,
+    #[serde(default)]
+    pub egress: EgressSettings,
 }
 impl Default for SecuritySettings {
     fn default() -> Self {
@@ -20,8 +22,18 @@ impl Default for SecuritySettings {
             password_rules: Some(PasswordRules::default()),
             sso: None,
             oauth2: None,
+            egress: EgressSettings::default(),
         }
     }
+}
+
+#[derive(Debug, Deserialize, Serialize, Clone, Default, ToSchema)]
+#[serde(default)]
+pub struct EgressSettings {
+    /// Exact hostnames allowed to resolve to private addresses.
+    pub allowed_hosts: Vec<String>,
+    /// CIDR ranges allowed for outbound connections.
+    pub allowed_cidrs: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone, ToSchema)]

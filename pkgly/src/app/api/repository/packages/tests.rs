@@ -1376,6 +1376,7 @@ mod catalog_db_tests {
     use nr_core::{database::DatabaseConfig, repository::config::RepositoryConfigType};
     use sqlx::{PgPool, postgres::PgPoolOptions};
     use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
+    use tower::ServiceExt;
 
     use nr_core::{
         database::entities::{
@@ -1608,6 +1609,42 @@ mod catalog_db_tests {
         .expect("create site")
     }
 
+    #[tokio::test]
+    async fn api_preflight_returns_no_cors_headers() {
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        reset_database(&db).await;
+        let root = tempfile::tempdir().expect("tempdir");
+        let site = build_site(&db, root.path()).await;
+        let app = crate::app::api::api_routes().with_state(site);
+
+        let response = app
+            .oneshot(
+                axum::http::Request::builder()
+                    .method("OPTIONS")
+                    .uri("/api/user/token/create")
+                    .header("origin", "https://evil.example")
+                    .header("access-control-request-method", "POST")
+                    .body(axum::body::Body::empty())
+                    .expect("build preflight request"),
+            )
+            .await
+            .expect("send preflight request");
+
+        assert!(
+            !response
+                .headers()
+                .contains_key(http::header::ACCESS_CONTROL_ALLOW_ORIGIN),
+            "foreign-origin preflight must not receive Access-Control-Allow-Origin"
+        );
+        assert!(
+            !response
+                .headers()
+                .contains_key(http::header::ACCESS_CONTROL_ALLOW_CREDENTIALS),
+            "foreign-origin preflight must not receive Access-Control-Allow-Credentials"
+        );
+    }
+
     fn sample_auth() -> Authentication {
         let fixed_time =
             chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
@@ -1703,6 +1740,12 @@ mod catalog_db_tests {
         let _guard = DB_TEST_LOCK.lock().await;
         let db = fresh_pool().await;
         reset_database(&db).await;
+        let mut webhook_security = SecuritySettings::default();
+        webhook_security
+            .egress
+            .allowed_cidrs
+            .push("127.0.0.0/8".into());
+        crate::utils::egress::install(&webhook_security.egress).expect("test egress policy");
         let root = tempfile::tempdir().expect("tempdir");
         let storage_id = insert_storage_at(db.pool(), root.path()).await;
         let repository_id = insert_deb_repository(db.pool(), storage_id).await;

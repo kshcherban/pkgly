@@ -1,3 +1,5 @@
+// ABOUTME: Implements Composer proxy routing, metadata aggregation, and artifact caching.
+// ABOUTME: Fetches upstream package metadata and distributions through guarded HTTP clients.
 use std::sync::{Arc, LazyLock};
 
 use chrono::Utc;
@@ -90,7 +92,7 @@ impl PhpProxy {
         repository: DBRepository,
         config: PhpProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly PHP Proxy")
             .build()
             .map_err(|err| {
@@ -568,7 +570,10 @@ impl PhpProxy {
         RepoResponse::Other(builder.body(body))
     }
 
-    async fn fetch_upstream_dist(&self, url: &str) -> Result<reqwest::Response, reqwest::Error> {
+    async fn fetch_upstream_dist(
+        &self,
+        url: &str,
+    ) -> Result<reqwest::Response, crate::utils::upstream::UpstreamError> {
         crate::utils::upstream::send(
             self.client(),
             self.client()

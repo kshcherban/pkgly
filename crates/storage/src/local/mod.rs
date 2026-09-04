@@ -13,7 +13,7 @@ pub use stream::*;
 pub mod error;
 mod stream;
 use error::LocalStorageError;
-use nr_core::storage::StoragePath;
+use nr_core::storage::{InvalidStoragePath, StoragePath};
 use serde::{Deserialize, Serialize};
 use tokio::{
     sync::Mutex,
@@ -182,7 +182,9 @@ impl LocalStorage {
         location: &StoragePath,
         hashes: FileHashes,
     ) {
-        let path = self.get_path(&repository, location);
+        let Ok(path) = self.0.checked_path(&repository, location) else {
+            return;
+        };
         store_precomputed_hash(path, hashes);
     }
 
@@ -273,6 +275,7 @@ impl LocalStorageInner {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<CreatePath, LocalStorageError> {
+        location.validate()?;
         let mut path = self.config.path.join(repository.to_string());
         let mut parent_directory = path.clone();
         let mut new_directory_start = None;
@@ -318,6 +321,7 @@ impl LocalStorageInner {
                 .into());
             }
         }
+        self.ensure_path_within_repository(&path, repository)?;
         Ok(CreatePath {
             path,
             parent_directory,
@@ -329,6 +333,35 @@ impl LocalStorageInner {
         let location: PathBuf = location.into();
         let path = self.config.path.join(repository.to_string());
         path.join(location)
+    }
+
+    fn checked_path(
+        &self,
+        repository: &Uuid,
+        location: &StoragePath,
+    ) -> Result<PathBuf, LocalStorageError> {
+        location.validate()?;
+        let root = self.config.path.join(repository.to_string());
+        let path = root.join(PathBuf::from(location));
+        if !path.starts_with(&root) {
+            return Err(InvalidStoragePath::InvalidPath.into());
+        }
+        self.ensure_path_within_repository(&path, *repository)?;
+        Ok(path)
+    }
+
+    fn ensure_path_within_repository(
+        &self,
+        path: &Path,
+        repository: Uuid,
+    ) -> Result<(), LocalStorageError> {
+        let root = self.config.path.join(repository.to_string());
+        let canonical_root = canonicalize_existing(&root)?;
+        let canonical_path = canonicalize_existing(path)?;
+        if !canonical_path.starts_with(&canonical_root) {
+            return Err(InvalidStoragePath::InvalidPath.into());
+        }
+        Ok(())
     }
 
     #[instrument]
@@ -625,7 +658,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<bool, LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
         if !path.exists() {
             debug!(?path, "File does not exist");
             return Ok(false);
@@ -653,7 +686,7 @@ impl Storage for LocalStorage {
         from: &StoragePath,
         to: &StoragePath,
     ) -> Result<bool, LocalStorageError> {
-        let from_path = self.get_path(&repository, from);
+        let from_path = self.0.checked_path(&repository, from)?;
         if !from_path.exists() {
             debug!(?from_path, "Source file does not exist");
             return Ok(false);
@@ -713,7 +746,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<Option<StorageFileMeta<FileType>>, LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
 
         if !path.exists() {
             debug!(?path, "File does not exist");
@@ -735,7 +768,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<Option<StorageFile>, LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
         if !path.exists() {
             debug!(?path, "File does not exist");
             return Ok(None);
@@ -802,7 +835,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<Option<RepositoryMeta>, LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
         if !path.exists() {
             return Ok(None);
         }
@@ -823,7 +856,7 @@ impl Storage for LocalStorage {
         location: &StoragePath,
         value: RepositoryMeta,
     ) -> Result<(), LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
 
         if !path.exists() {
             return Err(LocalStorageError::IOError(io::Error::new(
@@ -848,7 +881,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<bool, LocalStorageError> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
         Ok(path.exists())
     }
 
@@ -907,7 +940,7 @@ impl Storage for LocalStorage {
         repository: Uuid,
         location: &StoragePath,
     ) -> Result<Option<Self::DirectoryStream>, Self::Error> {
-        let path = self.get_path(&repository, location);
+        let path = self.0.checked_path(&repository, location)?;
         let stream = {
             let meta = path.metadata();
             match meta {
@@ -936,6 +969,25 @@ impl Storage for LocalStorage {
         Ok(Some(stream))
     }
 }
+
+fn canonicalize_existing(path: &Path) -> Result<PathBuf, LocalStorageError> {
+    let mut current = path;
+    loop {
+        match fs::canonicalize(current) {
+            Ok(path) => return Ok(path),
+            Err(error) if error.kind() == ErrorKind::NotFound => {
+                current = current.parent().ok_or_else(|| {
+                    LocalStorageError::IOError(io::Error::new(
+                        ErrorKind::NotFound,
+                        "storage path has no existing parent",
+                    ))
+                })?;
+            }
+            Err(error) => return Err(LocalStorageError::IOError(error)),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct LocalStorageFactory;
 impl StaticStorageFactory for LocalStorageFactory {

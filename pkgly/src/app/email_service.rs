@@ -1,3 +1,5 @@
+// ABOUTME: Renders and sends queued application email through configured SMTP transports.
+// ABOUTME: Supports plaintext, STARTTLS, and implicit TLS with optional authentication.
 use std::{
     fmt::{Debug, Formatter},
     io,
@@ -304,13 +306,20 @@ impl EmailService {
     }
     #[instrument(name = "Connect To Email Server")]
     async fn build_connection(email: EmailSetting) -> Option<Transport> {
-        let credentials = Credentials::new(email.username.clone(), email.password.clone());
-        let transport = match email.encryption {
-            EmailEncryption::StartTLS => Transport::starttls_relay(email.host.as_str())
-                .map(|builder| builder.credentials(credentials).build()),
-            _ => Transport::relay(email.host.as_str())
-                .map(|builder| builder.credentials(credentials).build()),
+        let builder = match email.encryption {
+            EmailEncryption::NONE => Ok(Transport::builder_dangerous(email.host.as_str())),
+            EmailEncryption::StartTLS => Transport::starttls_relay(email.host.as_str()),
+            EmailEncryption::TLS => Transport::relay(email.host.as_str()),
         };
+        let transport = builder.map(|mut builder| {
+            if let Some(port) = email.port {
+                builder = builder.port(port);
+            }
+            if !email.username.is_empty() || !email.password.is_empty() {
+                builder = builder.credentials(Credentials::new(email.username, email.password));
+            }
+            builder.build()
+        });
         match transport {
             Ok(transport) => {
                 let test = match transport.test_connection().await {

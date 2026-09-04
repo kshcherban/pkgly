@@ -47,7 +47,15 @@ impl RepositoryConfigType for PhpRepositoryConfigType {
     }
 
     fn validate_config(&self, config: Value) -> Result<(), RepositoryConfigError> {
-        serde_json::from_value::<PhpRepositoryConfig>(config)?;
+        let parsed = serde_json::from_value::<PhpRepositoryConfig>(config)?;
+        if let PhpRepositoryConfig::Proxy(proxy_cfg) = &parsed {
+            crate::utils::egress::validate_proxy_urls(
+                proxy_cfg.routes.iter().map(|route| &route.url),
+            )
+            .map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
 

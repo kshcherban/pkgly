@@ -25,6 +25,20 @@ use std::sync::LazyLock;
 use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
 use uuid::Uuid;
 
+#[test]
+fn repository_request_rejects_traversal_path() {
+    let result: Result<RepoRequestPath, _> =
+        serde_json::from_str(r#"{"storage":"local","repository":"repo","path":"../secret"}"#);
+    assert!(result.is_err());
+}
+
+#[test]
+fn repository_request_accepts_router_separator_before_path() {
+    let result: Result<RepoRequestPath, _> =
+        serde_json::from_str(r#"{"storage":"local","repository":"repo","path":"/api/v1/gems"}"#);
+    assert!(result.is_ok());
+}
+
 static DB_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
 
 struct TestDb {

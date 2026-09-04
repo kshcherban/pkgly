@@ -51,6 +51,9 @@ aws-smithy-runtime-api = "1"
 lru = "0.16"
 hex = "0.4"
 url = { version = "2.4", features = ["serde"] }
+ipnet.workspace = true
+aws-smithy-http-client = { version = "1", features = ["rustls-ring"] }
+parking_lot.workspace = true
 [lints]
 workspace = true
 

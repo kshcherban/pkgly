@@ -48,7 +48,17 @@ impl RepositoryConfigType for DockerRegistryConfigType {
     }
 
     fn validate_config(&self, config: Value) -> Result<(), RepositoryConfigError> {
-        let _config: DockerRegistryConfig = serde_json::from_value(config)?;
+        let config: DockerRegistryConfig = serde_json::from_value(config)?;
+        if let DockerRegistryConfig::Proxy(proxy_cfg) = &config {
+            let url = url::Url::parse(&proxy_cfg.upstream_url).map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy upstream URL is invalid")
+            })?;
+            crate::utils::egress::validate_url(&url).map_err(|_| {
+                RepositoryConfigError::InvalidConfig(
+                    "Proxy upstream URL is blocked by egress policy",
+                )
+            })?;
+        }
         Ok(())
     }
 

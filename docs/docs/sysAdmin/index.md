@@ -47,6 +47,39 @@ Finally Restart Pkgly
 - [Package Webhooks](./webhooks.md) — configure outbound publish/delete notifications and delivery retries.
 - [Package Retention](./retention.md) — configure per-repository cleanup for old package files.
 
+## Security-sensitive configuration
+
+Set `[site].app_url` to the canonical HTTPS URL of the installation. Password-reset links use this configured value and never use request `Origin` or `Host` headers. Session cookies are `HttpOnly`, `Secure` when HTTPS is enabled, and always `SameSite=Lax`; the API is same-origin only.
+
+Outbound proxy, webhook, OIDC/JWKS, and custom S3 requests are restricted to globally routable addresses. Private destinations require explicit exact-host or CIDR exceptions:
+
+```toml
+[security.egress]
+allowed_hosts = ["s3.internal.example"]
+allowed_cidrs = ["10.20.0.0/16"]
+```
+
+The policy rejects loopback, private, link-local, multicast, and metadata addresses by default.
+
+Blocked destinations are enforced for the initial request as well as every redirect hop. Webhook deliveries that are blocked at runtime are marked as failed without retries.
+
+## Email
+
+Outbound email (e.g. password reset) uses the `[email]` section:
+
+```toml
+[email]
+username = ""
+password = ""
+host = "smtp.example.com"
+encryption = "TLS" # NONE, StartTLS, or TLS
+from = "admin@pkgly.dev"
+```
+
+When `port` is omitted, the transport default is selected from `encryption`: `25` for `NONE`,
+`587` for `StartTLS`, and `465` for `TLS`. Set `port` only for a non-standard SMTP port.
+`NONE` uses plaintext SMTP and should only be used on a trusted network.
+
 ## Enabling SSO Login
 Pkgly can delegate authentication to an upstream SSO provider (Cloudflare Access, Okta, Auth0, etc.) that issues signed JWT/ID tokens. Configure the security section in `cfg/pkgly.toml` to enable the feature:
 

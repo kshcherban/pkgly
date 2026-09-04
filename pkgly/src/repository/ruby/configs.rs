@@ -44,7 +44,12 @@ impl RepositoryConfigType for RubyRepositoryConfigType {
     }
 
     fn validate_config(&self, config: Value) -> Result<(), RepositoryConfigError> {
-        serde_json::from_value::<RubyRepositoryConfig>(config)?;
+        let parsed = serde_json::from_value::<RubyRepositoryConfig>(config)?;
+        if let RubyRepositoryConfig::Proxy(proxy_cfg) = &parsed {
+            crate::utils::egress::validate_proxy_url(&proxy_cfg.upstream_url).map_err(|_| {
+                RepositoryConfigError::InvalidConfig("Proxy route URL is blocked by egress policy")
+            })?;
+        }
         Ok(())
     }
 

@@ -132,6 +132,15 @@ impl RepositoryConfigType for GoRepositoryConfigType {
                     }
                 }
 
+                crate::utils::egress::validate_proxy_urls(
+                    proxy_config.routes.iter().map(|route| &route.url),
+                )
+                .map_err(|_| {
+                    RepositoryConfigError::InvalidConfig(
+                        "Proxy route URL is blocked by egress policy",
+                    )
+                })?;
+
                 // Check for duplicate priorities
                 let mut priorities = HashSet::new();
                 for route in proxy_config.routes.iter() {

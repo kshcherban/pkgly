@@ -201,7 +201,7 @@ impl MavenProxy {
         site: Pkgly,
         proxy_config: MavenProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let http_client = reqwest::Client::builder()
+        let http_client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly")
             .build()
             .map_err(|err| RepositoryFactoryError::InvalidConfig("maven/proxy", err.to_string()))?;
@@ -393,7 +393,9 @@ impl MavenProxy {
         path: StoragePath,
     ) -> Result<Option<RepoResponse>, MavenError> {
         let proxy_config = self.config.read().clone();
-        let http_client = reqwest::Client::builder().user_agent("Pkgly").build()?;
+        let http_client = crate::utils::upstream::client_builder()
+            .user_agent("Pkgly")
+            .build()?;
 
         for route in proxy_config.routes {
             let mut path_as_string = path.to_string();

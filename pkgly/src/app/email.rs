@@ -1,4 +1,9 @@
+// ABOUTME: Defines serialized SMTP settings and supported transport encryption modes.
+// ABOUTME: Keeps custom SMTP ports optional so lettre can select secure defaults.
 use serde::{Deserialize, Serialize};
+
+#[cfg(test)]
+mod tests;
 
 #[derive(Debug, Deserialize, Serialize, Clone, Default)]
 pub enum EmailEncryption {
@@ -15,6 +20,8 @@ pub struct EmailSetting {
     pub username: String,
     pub password: String,
     pub host: String,
+    #[serde(default)]
+    pub port: Option<u16>,
     pub encryption: EmailEncryption,
     pub from: String,
     pub reply_to: Option<String>,
@@ -39,6 +46,7 @@ impl Default for EmailSetting {
             username: "username".to_string(),
             password: "password".to_string(),
             host: "smtp.example.com".to_string(),
+            port: None,
             encryption: EmailEncryption::NONE,
             from: "admin@pkgly.dev".to_owned(),
             reply_to: None,

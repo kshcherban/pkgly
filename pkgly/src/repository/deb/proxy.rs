@@ -61,7 +61,7 @@ impl DebProxyRepository {
         repository: DBRepository,
         config: DebProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly Debian Proxy")
             .build()
             .map_err(|err| RepositoryFactoryError::InvalidConfig("deb", err.to_string()))?;

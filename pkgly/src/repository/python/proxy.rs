@@ -86,7 +86,7 @@ impl PythonProxy {
         repository: DBRepository,
         config: PythonProxyConfig,
     ) -> Result<Self, RepositoryFactoryError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .user_agent("Pkgly Python Proxy")
             .build()
             .map_err(|err| {

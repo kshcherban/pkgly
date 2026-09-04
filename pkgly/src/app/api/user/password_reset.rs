@@ -1,4 +1,4 @@
-use std::{net::SocketAddr, str::FromStr};
+use std::{io, net::SocketAddr, str::FromStr};
 
 use axum::{
     Json,
@@ -6,10 +6,8 @@ use axum::{
     response::Response,
     routing::{get, post},
 };
-use axum_extra::{
-    TypedHeader,
-    headers::{Origin, UserAgent},
-};
+use axum_extra::{TypedHeader, headers::UserAgent};
+use http::StatusCode;
 use lettre::Address;
 use nr_core::database::entities::user::{
     ChangePasswordNoCheck, User, UserSafeData, UserType,
@@ -17,17 +15,22 @@ use nr_core::database::entities::user::{
 };
 use serde::{Deserialize, Serialize};
 use tracing::{debug, warn};
+use url::Url;
 use utoipa::ToSchema;
 
 use crate::{
     app::{
         Pkgly,
         authentication::password,
+        config::normalize_app_url,
         email_service::{Email, EmailDebug, template},
     },
-    error::InternalError,
+    error::{InternalError, OtherInternalError},
     utils::{ResponseBuilder, request_logging::access_log::AccessLogContext},
 };
+
+#[cfg(test)]
+mod tests;
 
 pub fn password_reset_routes() -> axum::Router<Pkgly> {
     axum::Router::new()
@@ -42,9 +45,21 @@ pub struct RequestPasswordReset {
 #[derive(Debug, Serialize)]
 pub struct PasswordResetEmail {
     pub token: UserPasswordReset,
-    pub panel_url: String,
+    pub reset_url: String,
     pub username: String,
     pub required: bool,
+}
+
+fn build_reset_url(panel_url: &str, token: &str) -> Result<String, OtherInternalError> {
+    let mut reset_url = Url::parse(panel_url).map_err(OtherInternalError::new)?;
+    {
+        let mut path = reset_url
+            .path_segments_mut()
+            .map_err(|_| OtherInternalError::new(io::Error::other("Invalid password reset URL")))?;
+        path.pop().push("reset-password");
+    }
+    reset_url.query_pairs_mut().append_pair("token", token);
+    Ok(reset_url.to_string())
 }
 
 impl Email for PasswordResetEmail {
@@ -72,11 +87,22 @@ impl Email for PasswordResetEmail {
 async fn request_password_reset(
     State(site): State<Pkgly>,
     Extension(access_log): Extension<AccessLogContext>,
-    TypedHeader(origin): TypedHeader<Origin>,
     TypedHeader(user_agent): TypedHeader<UserAgent>,
     ConnectInfo(addr): ConnectInfo<SocketAddr>,
     Json(password_reset): Json<RequestPasswordReset>,
 ) -> Result<Response, InternalError> {
+    let panel_url = {
+        let instance = site.instance.lock();
+        match normalize_app_url(&instance.app_url) {
+            Ok(url) => url,
+            Err(error) => {
+                warn!(%error, "Password reset is unavailable because site.app_url is invalid");
+                return Ok(ResponseBuilder::default()
+                    .status(StatusCode::SERVICE_UNAVAILABLE)
+                    .empty());
+            }
+        }
+    };
     let address = match Address::from_str(&password_reset.email) {
         Ok(ok) => ok,
         Err(err) => {
@@ -88,20 +114,16 @@ async fn request_password_reset(
         ip_address: addr.ip().to_string(),
         user_agent: user_agent.to_string(),
     };
-    let origin = if origin.is_null() {
-        return Ok(ResponseBuilder::bad_request().empty());
-    } else {
-        origin.to_string()
-    };
-    debug!(?request_details, ?origin, "Requesting password reset");
+    debug!(?request_details, "Requesting password reset");
     let user = User::get_by_email(&password_reset.email, &site.database).await?;
     if let Some(user) = user {
         access_log.set_user(user.username.as_ref().to_string());
         access_log.set_user_id(user.id);
         let token = UserPasswordReset::create(user.id, request_details, &site.database).await?;
+        let reset_url = build_reset_url(&panel_url, &token.token)?;
         let email: PasswordResetEmail = PasswordResetEmail {
             token,
-            panel_url: origin,
+            reset_url: reset_url.to_string(),
             username: user.username.into(),
             required: false,
         };

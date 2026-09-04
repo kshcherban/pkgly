@@ -60,14 +60,14 @@ fn sample_session_for_user(user_id: i32) -> Session {
 }
 
 #[test]
-fn session_cookie_uses_secure_none_for_https() {
+fn session_cookie_uses_secure_lax_for_https() {
     let cookie = session_cookie("session-id".to_string(), true);
     let encoded = cookie.encoded().to_string();
 
     assert!(encoded.contains("HttpOnly"));
     assert!(encoded.contains("Path=/"));
     assert!(encoded.contains("Secure"));
-    assert!(encoded.contains("SameSite=None"));
+    assert!(encoded.contains("SameSite=Lax"));
 }
 
 #[test]
@@ -86,7 +86,7 @@ fn session_removal_cookie_matches_transport_attributes() {
     let https_cookie = session_removal_cookie(true).encoded().to_string();
     assert!(https_cookie.contains("Path=/"));
     assert!(https_cookie.contains("Secure"));
-    assert!(https_cookie.contains("SameSite=None"));
+    assert!(https_cookie.contains("SameSite=Lax"));
 
     let http_cookie = session_removal_cookie(false).encoded().to_string();
     assert!(http_cookie.contains("Path=/"));

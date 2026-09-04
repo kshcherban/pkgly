@@ -97,6 +97,29 @@ impl utoipa::ToSchema for StoragePath {
 }
 
 impl StoragePath {
+    /// Validates that all components are safe to use below a repository root.
+    pub fn validate(&self) -> Result<(), InvalidStoragePath> {
+        if self.components.iter().any(|component| {
+            matches!(component.as_ref(), "." | "..") || component.as_ref().contains(['\\', '\0'])
+        }) {
+            return Err(InvalidStoragePath::InvalidPath);
+        }
+        Ok(())
+    }
+
+    /// Parses a path received from an external request without normalizing it.
+    pub fn from_untrusted(value: &str) -> Result<Self, InvalidStoragePath> {
+        if value.is_empty() || value == "/" {
+            return Ok(Self::from(value));
+        }
+        if value.starts_with(['/', '\\']) || value.contains("//") {
+            return Err(InvalidStoragePath::InvalidPath);
+        }
+        let path = Self::from(value);
+        path.validate()?;
+        Ok(path)
+    }
+
     /// The parent of the path is always a directory.
     pub fn parent(self) -> Self {
         let mut path = self.components;

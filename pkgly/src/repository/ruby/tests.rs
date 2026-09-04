@@ -198,6 +198,12 @@ async fn ruby_yank_enqueues_delete_webhook_before_catalog_row_is_removed() {
     let db = fresh_db().await;
     let root = tempfile::tempdir().expect("tempdir");
     let site = build_site(&db, root.path()).await;
+    let mut webhook_security = SecuritySettings::default();
+    webhook_security
+        .egress
+        .allowed_cidrs
+        .push("127.0.0.0/8".into());
+    crate::utils::egress::install(&webhook_security.egress).expect("test egress policy");
     let storage = test_storage().await;
     let storage_id = Uuid::new_v4();
     let repository_id = Uuid::new_v4();

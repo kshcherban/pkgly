@@ -46,6 +46,49 @@ INSERT INTO repository_configs (repository_id, key, value) VALUES
     ('11111111-0000-0000-0000-000000000001'::uuid, 'auth', '{"enabled": false}'::jsonb)
 ON CONFLICT (repository_id, key) DO NOTHING;
 
+-- Persisted pre-hardening webhook used to verify runtime egress enforcement.
+INSERT INTO webhooks (id, name, enabled, target_url, events, headers)
+VALUES (
+    'eeeeeeee-0000-0000-0000-000000000001'::uuid,
+    'runtime-loopback-security-test',
+    false,
+    'http://127.0.0.1:8888/api/health',
+    '["package.published"]'::jsonb,
+    '{}'::jsonb
+)
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO webhook_deliveries (
+    webhook_id,
+    webhook_name,
+    event_type,
+    subscription_key,
+    target_url,
+    headers,
+    payload,
+    status,
+    attempts,
+    max_attempts,
+    next_attempt_at
+)
+SELECT
+    'eeeeeeee-0000-0000-0000-000000000001'::uuid,
+    'runtime-loopback-security-test',
+    'package.published',
+    'runtime-loopback-security-test',
+    'http://127.0.0.1:8888/api/health',
+    '{}'::jsonb,
+    '{"event_type":"package.published"}'::jsonb,
+    'pending',
+    0,
+    5,
+    NOW()
+WHERE NOT EXISTS (
+    SELECT 1
+    FROM webhook_deliveries
+    WHERE subscription_key = 'runtime-loopback-security-test'
+);
+
 -- Maven Proxy Repository
 INSERT INTO repositories (id, storage_id, name, repository_type, visibility, active)
 VALUES (

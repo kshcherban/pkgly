@@ -173,7 +173,7 @@ pub struct ReqwestJwksFetcher {
 
 impl ReqwestJwksFetcher {
     pub fn new() -> Result<Self, JwksError> {
-        let client = reqwest::Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .timeout(Duration::from_secs(5))
             .build()
             .map_err(|err| JwksError::FetchFailed(err.to_string()))?;
@@ -184,10 +184,7 @@ impl ReqwestJwksFetcher {
 #[async_trait]
 impl JwksFetcher for ReqwestJwksFetcher {
     async fn fetch(&self, url: &str) -> Result<JwkDocument, JwksError> {
-        let response = self
-            .client
-            .get(url)
-            .send()
+        let response = crate::utils::upstream::send(&self.client, self.client.get(url))
             .await
             .map_err(|err| JwksError::FetchFailed(err.to_string()))?;
         let status = response.status();
@@ -208,10 +205,7 @@ impl JwksResolver for ReqwestJwksFetcher {
             "{}/.well-known/openid-configuration",
             issuer.trim_end_matches('/')
         );
-        let response = self
-            .client
-            .get(&discovery_url)
-            .send()
+        let response = crate::utils::upstream::send(&self.client, self.client.get(&discovery_url))
             .await
             .map_err(|err| JwksError::FetchFailed(err.to_string()))?;
         let status = response.status();

@@ -1,3 +1,5 @@
+// ABOUTME: Refreshes Debian proxy metadata and packages from configured upstreams.
+// ABOUTME: Verifies upstream status, package size, and SHA-256 before persistence.
 use bytes::Bytes;
 use http::StatusCode;
 use nr_core::{repository::proxy_url::ProxyURL, storage::StoragePath};
@@ -22,7 +24,9 @@ pub enum DebProxyRefreshError {
     #[error(transparent)]
     Storage(#[from] nr_storage::StorageError),
     #[error(transparent)]
-    Upstream(#[from] reqwest::Error),
+    Upstream(#[from] crate::utils::upstream::UpstreamError),
+    #[error(transparent)]
+    UpstreamBody(#[from] reqwest::Error),
     #[error("invalid upstream url")]
     InvalidUpstreamUrl,
     #[error("upstream returned status {0}")]

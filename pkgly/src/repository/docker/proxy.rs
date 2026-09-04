@@ -109,7 +109,7 @@ pub struct ProxyUpstream {
 impl ProxyUpstream {
     pub(crate) fn new(config: &DockerProxyConfig) -> Result<Self, DockerError> {
         let base = Url::parse(&config.upstream_url)?;
-        let client = Client::builder()
+        let client = crate::utils::upstream::client_builder()
             .connect_timeout(Duration::from_secs(10))
             .timeout(Duration::from_secs(300))
             .build()?;

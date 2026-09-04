@@ -67,6 +67,7 @@ TEST_SUITES:
     nuget       Run NuGet integration tests
     web_refresh Run web route refresh integration tests
     access_logs Run HTTP access log enrichment integration tests
+    security    Run security hardening integration tests
     all         Run all test suites (default)
 
 EXAMPLES:
@@ -124,12 +125,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs)
+        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs)
+            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
             shift
             ;;
         *)
@@ -142,7 +143,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs)
+    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
 fi
 
 # Enable verbose mode
@@ -168,7 +169,7 @@ if [ $BUILD -eq 1 ]; then
     echo ""
 fi
 
-REQUIRED_SERVICES=(postgres pkgly test-runner docker)
+REQUIRED_SERVICES=(postgres pkgly test-runner docker mailpit)
 RUNNING_SERVICES=$("${COMPOSE_CMD[@]}" ps --status running --services 2>/dev/null || true)
 ALL_REQUIRED_RUNNING=1
 for svc in "${REQUIRED_SERVICES[@]}"; do

@@ -1,3 +1,5 @@
+// ABOUTME: Builds policy-enforced outbound HTTP clients and records upstream traces.
+// ABOUTME: Rejects blocked initial URLs and redirects before any network connection.
 use std::time::Instant;
 
 use http::HeaderValue;
@@ -8,6 +10,66 @@ use reqwest::header::HeaderMap;
 use tracing::{Instrument as _, Span, info_span};
 use tracing_opentelemetry::OpenTelemetrySpanExt as _;
 use url::Url;
+
+#[derive(Debug, thiserror::Error)]
+pub enum UpstreamError {
+    #[error(transparent)]
+    Request(#[from] reqwest::Error),
+    #[error("outbound destination is blocked by egress policy")]
+    Blocked(#[source] crate::utils::egress::EgressBlockedError),
+}
+
+impl UpstreamError {
+    fn blocked() -> Self {
+        Self::Blocked(crate::utils::egress::EgressBlockedError)
+    }
+
+    pub fn status(&self) -> Option<reqwest::StatusCode> {
+        match self {
+            Self::Request(error) => error.status(),
+            Self::Blocked(_) => None,
+        }
+    }
+
+    pub fn is_timeout(&self) -> bool {
+        matches!(self, Self::Request(error) if error.is_timeout())
+    }
+
+    pub fn is_connect(&self) -> bool {
+        matches!(self, Self::Request(error) if error.is_connect())
+    }
+
+    pub fn is_body(&self) -> bool {
+        matches!(self, Self::Request(error) if error.is_body())
+    }
+
+    pub fn is_decode(&self) -> bool {
+        matches!(self, Self::Request(error) if error.is_decode())
+    }
+}
+
+impl crate::utils::IntoErrorResponse for UpstreamError {
+    fn into_response_boxed(self: Box<Self>) -> axum::response::Response {
+        crate::utils::ResponseBuilder::default()
+            .status(http::StatusCode::BAD_GATEWAY)
+            .body("Upstream request failed")
+    }
+}
+
+pub fn client_builder() -> reqwest::ClientBuilder {
+    reqwest::Client::builder()
+        .no_proxy()
+        .dns_resolver(crate::utils::egress::resolver())
+        .redirect(reqwest::redirect::Policy::custom(|attempt| {
+            if attempt.previous().len() >= 5 {
+                attempt.stop()
+            } else if crate::utils::egress::validate_url(attempt.url()).is_err() {
+                attempt.error(crate::utils::egress::EgressBlockedError)
+            } else {
+                attempt.follow()
+            }
+        }))
+}
 
 struct HeaderMapInjector<'a>(&'a mut HeaderMap);
 
@@ -92,7 +154,7 @@ fn is_sensitive_query_key(key_lower: &str) -> bool {
 pub async fn send(
     client: &reqwest::Client,
     builder: reqwest::RequestBuilder,
-) -> Result<reqwest::Response, reqwest::Error> {
+) -> Result<reqwest::Response, UpstreamError> {
     let request = builder.build()?;
     execute(client, request).await
 }
@@ -100,9 +162,10 @@ pub async fn send(
 pub async fn execute(
     client: &reqwest::Client,
     mut request: reqwest::Request,
-) -> Result<reqwest::Response, reqwest::Error> {
+) -> Result<reqwest::Response, UpstreamError> {
     let method = request.method().as_str().to_string();
     let url = request.url().clone();
+    crate::utils::egress::validate_url(&url).map_err(|_| UpstreamError::blocked())?;
     let sanitized_url = sanitize_url_for_logging(&url);
 
     let host = url.host_str().unwrap_or("");
@@ -155,7 +218,7 @@ pub async fn execute(
         }
     }
 
-    response
+    response.map_err(UpstreamError::from)
 }
 
 #[cfg(test)]
