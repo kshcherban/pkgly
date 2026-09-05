@@ -1,3 +1,5 @@
+// ABOUTME: Exercises Docker proxy caching, upstream requests, and manifest validation.
+// ABOUTME: Checks request resource bounds and cache behavior across registry operations.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::repository::{
@@ -292,6 +294,50 @@ impl ProxyIndexing for RecordingIndexer {
     async fn evict_cached_artifact(&self, key: ProxyArtifactKey) -> Result<(), ProxyIndexingError> {
         self.evicted.lock().await.push(key);
         Ok(())
+    }
+}
+
+#[tokio::test]
+async fn manifest_future_fits_worker_stack() -> anyhow::Result<()> {
+    let storage = test_storage().await;
+    let upstream = ProxyUpstream::new(&DockerProxyConfig {
+        upstream_url: "https://registry-1.docker.io".into(),
+        upstream_auth: None,
+        revalidation_ttl_seconds: default_revalidation_ttl(),
+        skip_tag_revalidation: false,
+    })?;
+    let future = fetch_and_cache_manifest(
+        &upstream,
+        &storage,
+        Uuid::new_v4(),
+        "library/nginx",
+        "alpine",
+        None,
+        None,
+    );
+    let size = std::mem::size_of_val(&future);
+    assert!(
+        size < 16 * 1024,
+        "manifest future occupies {size} bytes on the request stack"
+    );
+    Ok(())
+}
+
+#[test]
+fn repository_read_futures_fit_worker_stack() {
+    fn size<F: std::future::Future>(
+        _: impl Fn(&'static crate::repository::DynRepository, RepositoryRequest) -> F,
+    ) -> usize {
+        std::mem::size_of::<F>()
+    }
+    for (method, size) in [
+        ("GET", size(|repo, request| repo.handle_get(request))),
+        ("HEAD", size(|repo, request| repo.handle_head(request))),
+    ] {
+        assert!(
+            size < 16 * 1024,
+            "repository {method} future occupies {size} bytes"
+        );
     }
 }
 

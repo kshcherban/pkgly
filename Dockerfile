@@ -15,7 +15,7 @@ RUN --mount=type=cache,target=/root/.npm npm run build
 ############################
 # Rust build stage
 ############################
-FROM rust:1.95.0 AS rust-base
+FROM rust:1.98.0 AS rust-base
 WORKDIR /app
 
 RUN apt-get update \

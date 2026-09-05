@@ -1,3 +1,5 @@
+// ABOUTME: Implements Docker pull-through caching and upstream authentication.
+// ABOUTME: Serves manifests and blobs through the shared repository storage interface.
 //! Docker proxy (pull-through cache) support.
 //!
 //! This module implements a read-only proxy repository that forwards
@@ -1206,6 +1208,8 @@ pub(crate) async fn fetch_and_cache_manifest(
     );
     let manifest_path =
         StoragePath::from(format!("v2/{}/manifests/{}", repository_name, reference));
+    // Refresh/download futures contain nested SDK operations. Keep them heap-allocated so
+    // their state does not accumulate in the surrounding HTTP request's stack frames.
     if let Some(cached) =
         load_cached_manifest(storage, repository_id, &manifest_path, reference).await?
     {
@@ -1226,7 +1230,7 @@ pub(crate) async fn fetch_and_cache_manifest(
                 return Err(DockerError::ManifestNotFound(reference.to_string()));
             }
         } else {
-            match revalidate_manifest_tag(
+            match Box::pin(revalidate_manifest_tag(
                 upstream,
                 storage,
                 repository_id,
@@ -1235,7 +1239,7 @@ pub(crate) async fn fetch_and_cache_manifest(
                 &manifest_path,
                 cached,
                 indexer,
-            )
+            ))
             .await?
             {
                 RevalidationOutcome::Unchanged(cached) => {
@@ -1254,7 +1258,7 @@ pub(crate) async fn fetch_and_cache_manifest(
         } else {
             accept
         };
-        match download_manifest_from_upstream(
+        match Box::pin(download_manifest_from_upstream(
             upstream,
             storage,
             repository_id,
@@ -1263,7 +1267,7 @@ pub(crate) async fn fetch_and_cache_manifest(
             override_accept,
             &manifest_path,
             indexer,
-        )
+        ))
         .await
         {
             Ok(manifest) => return Ok(manifest),
@@ -1279,7 +1283,7 @@ pub(crate) async fn fetch_and_cache_manifest(
     }
 
     info!("fetch_and_cache_manifest: cache miss or refresh failed, downloading");
-    download_manifest_from_upstream(
+    Box::pin(download_manifest_from_upstream(
         upstream,
         storage,
         repository_id,
@@ -1288,7 +1292,7 @@ pub(crate) async fn fetch_and_cache_manifest(
         Some(MODERN_UPSTREAM_ACCEPT),
         &manifest_path,
         indexer,
-    )
+    ))
     .await
 }
 

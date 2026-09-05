@@ -15,6 +15,7 @@ if [ -n "${PKGLY_INTEGRATION_COMPOSE_OVERRIDE:-}" ] && [ -f "$PKGLY_INTEGRATION_
 else
     COMPOSE_CMD=(docker compose -f "${DOCKER_DIR}/docker-compose.test.yml")
 fi
+PKGLY_INTERNAL_URL="${PKGLY_URL:-http://pkgly:8888}"
 
 # Colors
 RED='\033[0;31m'
@@ -55,6 +56,7 @@ TEST_SUITES:
     maven       Run Maven integration tests
     npm         Run NPM integration tests
     docker      Run Docker hosted registry integration tests
+    s3          Run MinIO-backed S3 storage and Docker repository tests
     docker_proxy Run Docker proxy cache integration tests
     python      Run Python/PyPI integration tests
     python_virtual Run Python virtual repository integration tests
@@ -125,12 +127,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security)
+        maven|npm|docker|s3|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
+            TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
             shift
             ;;
         *)
@@ -143,7 +145,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
+    TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
 fi
 
 # Enable verbose mode
@@ -169,7 +171,7 @@ if [ $BUILD -eq 1 ]; then
     echo ""
 fi
 
-REQUIRED_SERVICES=(postgres pkgly test-runner docker mailpit)
+REQUIRED_SERVICES=(postgres pkgly test-runner docker mailpit minio)
 RUNNING_SERVICES=$("${COMPOSE_CMD[@]}" ps --status running --services 2>/dev/null || true)
 ALL_REQUIRED_RUNNING=1
 for svc in "${REQUIRED_SERVICES[@]}"; do
@@ -213,9 +215,10 @@ else
     ELAPSED=0
 
     while [ $ELAPSED -lt $MAX_WAIT ]; do
-        if "${COMPOSE_CMD[@]}" ps | grep -q "healthy"; then
-            POSTGRES_HEALTHY=$("${COMPOSE_CMD[@]}" ps postgres | grep -q "healthy" && echo 1 || echo 0)
-            if [ "$POSTGRES_HEALTHY" -eq 1 ]; then
+        COMPOSE_STATUS=$("${COMPOSE_CMD[@]}" ps 2>/dev/null || true)
+        if grep -q "healthy" <<<"$COMPOSE_STATUS"; then
+            POSTGRES_STATUS=$("${COMPOSE_CMD[@]}" ps postgres 2>/dev/null || true)
+            if grep -q "healthy" <<<"$POSTGRES_STATUS"; then
                 print_color "$GREEN" "✓ All services are healthy"
                 break
             fi
@@ -268,8 +271,71 @@ for suite in "${TEST_SUITES[@]}"; do
     chmod +x "$TEST_SCRIPT"
 
     # Run test in test-runner container
+    suite_passed=0
     if "${COMPOSE_CMD[@]}" exec -T test-runner \
        bash "/tests/test_${suite}.sh"; then
+        suite_passed=1
+    fi
+
+    # Restart Pkgly between the two S3 phases so the second phase verifies that the persisted
+    # MinIO-backed cache and repository configuration survive a process restart.
+    if [ "$suite" = "s3" ] && [ "$suite_passed" -eq 1 ]; then
+        print_color "$YELLOW" "Restarting Pkgly for S3 cache-recovery checks..."
+        if ! "${COMPOSE_CMD[@]}" restart pkgly; then
+            suite_passed=0
+        else
+            restarted=0
+            for _ in {1..60}; do
+                if "${COMPOSE_CMD[@]}" exec -T test-runner curl -fsS "${PKGLY_INTERNAL_URL}/" >/dev/null 2>&1; then
+                    restarted=1
+                    break
+                fi
+                sleep 1
+            done
+            if [ "$restarted" -ne 1 ]; then
+                suite_passed=0
+            elif ! "${COMPOSE_CMD[@]}" stop minio; then
+                suite_passed=0
+            else
+                if ! "${COMPOSE_CMD[@]}" exec -T -e PKGLY_S3_PHASE=post_restart test-runner \
+                    bash "/tests/test_${suite}.sh"; then
+                    suite_passed=0
+                fi
+
+                if ! "${COMPOSE_CMD[@]}" start minio; then
+                    suite_passed=0
+                else
+                    minio_ready=0
+                    for _ in {1..60}; do
+                        MINIO_STATUS=$("${COMPOSE_CMD[@]}" ps minio 2>/dev/null || true)
+                        if grep -q "healthy" <<<"$MINIO_STATUS"; then
+                            minio_ready=1
+                            break
+                        fi
+                        sleep 1
+                    done
+                    if [ "$minio_ready" -ne 1 ]; then
+                        suite_passed=0
+                    fi
+                fi
+
+                if [ "$suite_passed" -eq 1 ] && ! "${COMPOSE_CMD[@]}" exec -T -e PKGLY_S3_PHASE=cleanup test-runner \
+                    bash "/tests/test_${suite}.sh"; then
+                    suite_passed=0
+                fi
+            fi
+        fi
+    fi
+
+    if [ "$suite" = "s3" ] && [ "$suite_passed" -eq 1 ]; then
+        print_color "$YELLOW" "Checking that the S3-backed repository left no MinIO objects..."
+        if ! "${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint /bin/sh minio-init -c \
+            'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && test -z "$(mc ls --recursive local/pkgly-test)"'; then
+            suite_passed=0
+        fi
+    fi
+
+    if [ "$suite_passed" -eq 1 ]; then
         print_color "$GREEN" "✓ ${suite} tests PASSED"
         ((PASSED_SUITES+=1))
     else

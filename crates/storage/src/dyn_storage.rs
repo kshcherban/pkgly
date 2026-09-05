@@ -1,3 +1,5 @@
+// ABOUTME: Dispatches repository storage operations to local and S3 backends.
+// ABOUTME: Keeps backend-specific operations behind the shared storage interface.
 use nr_core::storage::StoragePath;
 use uuid::Uuid;
 
@@ -47,8 +49,7 @@ impl Storage for DynStorage {
                 .save_file(repository, file, location)
                 .await
                 .map_err(Into::into),
-            DynStorage::S3(storage) => storage
-                .save_file(repository, file, location)
+            DynStorage::S3(storage) => Box::pin(storage.save_file(repository, file, location))
                 .await
                 .map_err(Into::into),
         }
@@ -134,8 +135,8 @@ impl Storage for DynStorage {
                 .open_file(repository, location)
                 .await
                 .map_err(Into::into),
-            DynStorage::S3(storage) => storage
-                .open_file(repository, location)
+            // Keep the S3 read state machine out of every caller's future, including local reads.
+            DynStorage::S3(storage) => Box::pin(storage.open_file(repository, location))
                 .await
                 .map_err(Into::into),
         }

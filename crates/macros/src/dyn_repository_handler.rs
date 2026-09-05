@@ -1,3 +1,5 @@
+// ABOUTME: Generates repository dispatch implementations for repository enums.
+// ABOUTME: Bounds read-request future sizes by allocating backend handlers on the heap.
 use proc_macro2::TokenStream;
 use quote::quote;
 use syn::{
@@ -169,7 +171,7 @@ pub(crate) fn expand(derive_input: DeriveInput) -> Result<TokenStream> {
             ) -> Result<RepoResponse,  Self::Error> {
                 match self {
                     #(
-                        #ident::#variants(variant) => variant.handle_get(request).await.map_err(Self::Error::from),
+                        #ident::#variants(variant) => Box::pin(variant.handle_get(request)).await.map_err(Self::Error::from),
                     )*
                 }
             }
@@ -220,7 +222,7 @@ pub(crate) fn expand(derive_input: DeriveInput) -> Result<TokenStream> {
             ) -> Result<RepoResponse,  Self::Error> {
                 match self {
                     #(
-                        #ident::#variants(variant) => variant.handle_head(request).await.map_err(Self::Error::from),
+                        #ident::#variants(variant) => Box::pin(variant.handle_head(request)).await.map_err(Self::Error::from),
                     )*
                 }
             }

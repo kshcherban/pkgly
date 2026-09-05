@@ -1,3 +1,5 @@
+<!-- ABOUTME: Collects S3 storage settings, including raw editable provider regions. -->
+<!-- ABOUTME: Loads canonical suggestions without restricting custom identifiers. -->
 <template>
   <section class="s3-config">
     <TwoByFormBox>
@@ -10,19 +12,20 @@
         Bucket Name
       </TextInput>
       <div v-if="!useCustomEndpoint" class="stacked-field">
-        <v-autocomplete
+        <v-combobox
           id="s3-region"
           v-model="regionSelection"
           :items="regionOptions"
           item-title="label"
           item-value="value"
+          :return-object="false"
           label="AWS Region"
           variant="outlined"
           density="comfortable"
           autocomplete="off"
           clearable
           auto-select-first
-          no-data-text="No matching regions" />
+          no-data-text="Type a region identifier" />
         <p v-if="regionsLoading" class="helper">Loading regions…</p>
         <p v-else-if="regionError" class="helper error">{{ regionError }}</p>
         <p v-else class="helper">
@@ -143,7 +146,7 @@
         v-model="model.cache.path"
         autocomplete="off"
         spellcheck="false"
-        placeholder="/var/lib/pkgly-cache/s3">
+        placeholder="/tmp/s3cache">
         Cache directory
       </TextInput>
       <div style="display: flex; gap: 1rem; align-items: flex-start;">
@@ -186,6 +189,8 @@ import http from "@/http";
 import { computed, onMounted, ref, watch, watchEffect, type Ref } from "vue";
 import type { S3StorageSettings } from "@/components/nr/storage/storageTypes";
 
+const DEFAULT_CACHE_PATH = "/tmp/s3cache";
+
 const model = defineModel<S3StorageSettings>({
   default: () => ({
     bucket_name: "",
@@ -199,7 +204,7 @@ const model = defineModel<S3StorageSettings>({
     path_style: true,
     cache: {
       enabled: false,
-      path: "",
+      path: DEFAULT_CACHE_PATH,
       max_bytes: 536870912,
       max_entries: 2048,
     },
@@ -220,7 +225,7 @@ const ensureModel = (): S3StorageSettings => {
       path_style: true,
       cache: {
         enabled: false,
-        path: "",
+        path: DEFAULT_CACHE_PATH,
         max_bytes: 536870912,
         max_entries: 2048,
       },
@@ -293,11 +298,11 @@ watchEffect(() => {
   state.credentials.external_id ??= "";
   state.cache ??= {
     enabled: false,
-    path: "",
+    path: DEFAULT_CACHE_PATH,
     max_bytes: 536870912,
     max_entries: 2048,
   };
-  state.cache.path ??= "";
+  state.cache.path ||= DEFAULT_CACHE_PATH;
   if (typeof state.cache.max_bytes !== "number" || state.cache.max_bytes <= 0) {
     state.cache.max_bytes = 536870912;
   }
@@ -309,11 +314,11 @@ watchEffect(() => {
   }
   state.cache ??= {
     enabled: false,
-    path: "",
+    path: DEFAULT_CACHE_PATH,
     max_bytes: 536870912,
     max_entries: 2048,
   };
-  state.cache.path ??= "";
+  state.cache.path ||= DEFAULT_CACHE_PATH;
   if (typeof state.cache.max_bytes !== "number" || state.cache.max_bytes <= 0) {
     state.cache.max_bytes = 536870912;
   }
@@ -347,7 +352,7 @@ async function loadRegions() {
   try {
     const response = await http.get<string[]>("/api/storage/s3/regions");
     regionOptions.value = response.data.map((region) => ({
-      label: formatRegionId(region),
+      label: region,
       value: region,
     }));
     regionError.value = null;
@@ -366,13 +371,6 @@ async function loadRegions() {
   } finally {
     regionsLoading.value = false;
   }
-}
-
-function formatRegionId(value: string): string {
-  if (value.includes("-")) {
-    return value.toLowerCase();
-  }
-  return value.match(/[A-Z][a-z]+|\d+/g)?.join("-").toLowerCase() ?? value;
 }
 
 onMounted(() => {

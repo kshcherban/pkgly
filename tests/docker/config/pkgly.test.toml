@@ -1,3 +1,5 @@
+# ABOUTME: Configures the deterministic integration Pkgly instance.
+# ABOUTME: Allows the in-network MinIO endpoint for S3 end-to-end tests.
 mode = "Debug"
 suggested_local_storage_path = "/storage"
 
@@ -32,7 +34,7 @@ allow_basic_without_tokens = false
 
 [security.egress]
 # Proxy fixtures intentionally point back to the in-stack Pkgly service.
-allowed_hosts = ["pkgly"]
+allowed_hosts = ["pkgly", "minio"]
 allowed_cidrs = []
 
 [log.levels]
