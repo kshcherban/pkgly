@@ -52,9 +52,7 @@ use crate::{
         DynRepository, Repository,
         docker::{
             DockerRegistry,
-            metadata::{
-                calculate_referenced_manifest_size, docker_package_key, split_manifest_cache_path,
-            },
+            metadata::{backfill_manifest_objects, docker_package_key, split_manifest_cache_path},
             types::{Manifest as DockerManifest, MediaType},
         },
         go::GoRepository,
@@ -751,20 +749,22 @@ pub async fn list_cached_packages(
         };
 
         if is_docker_repository {
-            let manifest_path = StoragePath::from(entry.cache_path.as_str());
-            match calculate_referenced_manifest_size(&storage, repository.id(), &manifest_path)
+            if let Some(size) = row.referenced_size_bytes {
+                entry.size = size.max(0) as u64;
+            } else {
+                match backfill_manifest_objects(
+                    &site.database,
+                    &storage,
+                    repository.id(),
+                    &entry.cache_path,
+                )
                 .await
-            {
-                Ok(Some(size)) => {
-                    entry.size = size;
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        cache_path = %entry.cache_path,
-                        "Failed to calculate Docker referenced size"
-                    );
+                {
+                    Ok(Some(size)) => entry.size = size,
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(?err, cache_path = %entry.cache_path, "Failed to backfill Docker object accounting")
+                    }
                 }
             }
         } else if is_maven_repository {
@@ -3841,6 +3841,8 @@ pub enum DockerDeletionError {
     InvalidManifest(String),
     #[error("indexing error: {0}")]
     Indexing(#[from] ProxyIndexingError),
+    #[error("accounting error: {0}")]
+    Accounting(#[from] sqlx::Error),
 }
 
 fn docker_proxy_key_from_path(path: &str) -> Option<ProxyArtifactKey> {
@@ -3852,11 +3854,14 @@ fn docker_proxy_key_from_path(path: &str) -> Option<ProxyArtifactKey> {
     })
 }
 
+/// Deletes a Docker manifest graph and removes successfully deleted inventory entries.
+/// Returns storage, catalog, or accounting errors without suppressing failures.
 pub async fn delete_docker_package(
     storage: &nr_storage::DynStorage,
     repository_id: Uuid,
     cache_path: &str,
     indexer: Option<&dyn ProxyIndexing>,
+    database: Option<&PgPool>,
 ) -> Result<DockerDeletionResult, DockerDeletionError> {
     let (repository_name, _) =
         split_manifest_cache_path(cache_path).ok_or(DockerDeletionError::InvalidManifestPath)?;
@@ -3906,6 +3911,15 @@ pub async fn delete_docker_package(
         .delete_files_batch(repository_id, &paths_vec)
         .await?;
 
+    if let Some(database) = database {
+        nr_core::database::entities::docker_object::DBDockerObject::delete_paths(
+            database,
+            repository_id,
+            &paths_to_delete.iter().cloned().collect::<Vec<_>>(),
+        )
+        .await?;
+    }
+
     // Count manifests vs blobs for the result
     let manifest_count = paths_to_delete
         .iter()
@@ -3943,6 +3957,7 @@ struct StreamingDockerBatchDeletion {
     deleted_packages: usize,
     deleted_objects: usize,
     indexer: Option<Arc<dyn ProxyIndexing>>,
+    database: Option<PgPool>,
 }
 
 impl StreamingDockerBatchDeletion {
@@ -3962,6 +3977,7 @@ impl StreamingDockerBatchDeletion {
             deleted_packages: 0,
             deleted_objects: 0,
             indexer,
+            database: None,
         }
     }
 
@@ -3990,6 +4006,14 @@ impl StreamingDockerBatchDeletion {
             .delete_files_batch(self.repository_id, &paths)
             .await?;
 
+        if let Some(database) = &self.database {
+            nr_core::database::entities::docker_object::DBDockerObject::delete_paths(
+                database,
+                self.repository_id,
+                &drained,
+            )
+            .await?;
+        }
         self.deleted_objects += deleted;
         Ok(())
     }
@@ -4025,8 +4049,10 @@ async fn collect_docker_deletions_batch(
     repository_id: Uuid,
     paths: &[String],
     indexer: Option<Arc<dyn ProxyIndexing>>,
+    database: Option<&PgPool>,
 ) -> Result<DockerBatchDeletion, DockerDeletionError> {
     let mut batch = StreamingDockerBatchDeletion::new(storage, repository_id, indexer);
+    batch.database = database.cloned();
 
     for path in paths {
         if !is_valid_docker_manifest_path(path) {
@@ -4337,10 +4363,15 @@ pub async fn delete_cached_package_paths(
         PackageStrategy::DockerHosted | PackageStrategy::DockerProxy
     ) {
         let docker_indexer = docker_proxy.as_ref().map(|proxy| proxy.indexer().clone());
-        let batch =
-            collect_docker_deletions_batch(&storage, repository.id(), paths, docker_indexer)
-                .await
-                .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
+        let batch = collect_docker_deletions_batch(
+            &storage,
+            repository.id(),
+            paths,
+            docker_indexer,
+            Some(&site.database),
+        )
+        .await
+        .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
 
         debug!(
             paths = paths.len(),

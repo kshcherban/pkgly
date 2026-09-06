@@ -39,7 +39,7 @@ fn repository_request_accepts_router_separator_before_path() {
     assert!(result.is_ok());
 }
 
-static DB_LOCK: LazyLock<tokio::sync::Mutex<()>> = LazyLock::new(|| tokio::sync::Mutex::new(()));
+static DB_LOCK: &LazyLock<tokio::sync::Mutex<()>> = &crate::test_support::DB_TEST_LOCK;
 
 struct TestDb {
     pool: PgPool,

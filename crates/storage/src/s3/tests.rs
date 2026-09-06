@@ -766,10 +766,152 @@ async fn disk_cache_does_not_insert_oversized_objects() {
         .await
         .expect("cache");
     cache
+        .put("too-large", Bytes::from_static(b"old"), None)
+        .await
+        .expect("cache original object");
+    cache
         .put("too-large", Bytes::from_static(b"four"), None)
         .await
         .expect("oversized writes are ignored");
     assert!(cache.get("too-large").await.expect("cache read").is_none());
+}
+
+#[tokio::test]
+#[ignore = "requires a real MinIO endpoint in PKGLY_TEST_MINIO_ENDPOINT"]
+async fn oversized_s3_mutations_invalidate_cached_content() {
+    let endpoint = std::env::var("PKGLY_TEST_MINIO_ENDPOINT").expect("MinIO endpoint");
+    let directory = tempdir().expect("cache directory");
+    let cache = Arc::new(
+        S3DiskCache::new(
+            &S3CacheConfig {
+                max_bytes: 3,
+                ..cache_config_with_dir(directory.path())
+            },
+            "mutation-test",
+        )
+        .await
+        .expect("cache"),
+    );
+    let bucket = format!("mutation-{}", Uuid::new_v4());
+    let mut storage = build_s3_storage_with_cache(&endpoint, &bucket, cache);
+    let client = aws_sdk_s3::Client::from_conf(
+        S3ConfigBuilder::new()
+            .region(Region::new("us-east-1"))
+            .behavior_version(BehaviorVersion::latest())
+            .force_path_style(true)
+            .endpoint_url(&endpoint)
+            .credentials_provider(SharedCredentialsProvider::new(AwsCredentials::new(
+                "minioadmin",
+                "minioadmin",
+                None,
+                None,
+                "minio-test",
+            )))
+            .build(),
+    );
+    Arc::get_mut(&mut storage.0)
+        .expect("exclusive storage")
+        .client = client.clone();
+    client
+        .create_bucket()
+        .bucket(&bucket)
+        .send()
+        .await
+        .expect("create bucket");
+    let repository = Uuid::new_v4();
+    for append in [false, true] {
+        let path = StoragePath::from(if append { "append" } else { "overwrite" });
+        storage
+            .save_file(repository, FileContent::from(&b"old"[..]), &path)
+            .await
+            .expect("store cached original");
+        if append {
+            storage
+                .append_file(repository, FileContent::from(&b"!"[..]), &path)
+                .await
+                .expect("append beyond capacity");
+        } else {
+            storage
+                .save_file(repository, FileContent::from(&b"replacement"[..]), &path)
+                .await
+                .expect("overwrite beyond capacity");
+        }
+        let expected: &[u8] = if append { b"old!" } else { b"replacement" };
+        let Some(crate::StorageFile::File { mut content, .. }) = storage
+            .open_file(repository, &path)
+            .await
+            .expect("read object")
+        else {
+            panic!("missing object")
+        };
+        let mut actual = Vec::new();
+        content
+            .read_to_end(&mut actual)
+            .await
+            .expect("read content");
+        assert_eq!(actual, expected, "append={append}");
+    }
+    storage
+        .delete_repository(repository)
+        .await
+        .expect("delete objects");
+    client
+        .delete_bucket()
+        .bucket(bucket)
+        .send()
+        .await
+        .expect("delete bucket");
+}
+
+#[tokio::test]
+async fn cached_file_information_uses_memory_without_reading_cached_content() {
+    let directory = tempdir().expect("cache directory");
+    let cache = Arc::new(
+        S3DiskCache::new(&cache_config_with_dir(directory.path()), "metadata-test")
+            .await
+            .expect("cache"),
+    );
+    // A local listener with no accept loop makes any accidental S3 request time out.
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("listener");
+    let endpoint = format!("http://{}", listener.local_addr().expect("address"));
+    let storage = build_s3_storage_with_cache(&endpoint, "metadata-test", cache.clone());
+    let repository = Uuid::new_v4();
+    let path = StoragePath::from("blob");
+    let key = storage.cache_key(&repository, &path);
+    cache
+        .put(&key, Bytes::from_static(b"content"), Some("text/plain"))
+        .await
+        .expect("cache content");
+    let entry = cache
+        .state
+        .lock()
+        .await
+        .entries
+        .peek(&key)
+        .expect("entry")
+        .clone();
+    fs::remove_file(cache.dir.join(entry.relative_path))
+        .await
+        .expect("remove cache file");
+
+    let information = tokio::time::timeout(
+        Duration::from_secs(1),
+        storage.get_file_information(repository, &path),
+    )
+    .await
+    .expect("metadata must not contact storage")
+    .expect("metadata")
+    .expect("known object");
+    let crate::FileType::File(file) = information.file_type else {
+        panic!("expected file")
+    };
+    assert_eq!(file.file_size, 7);
+    assert_eq!(
+        file.mime_type.expect("content type").to_string(),
+        "text/plain"
+    );
 }
 
 #[tokio::test]

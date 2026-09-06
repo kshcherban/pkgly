@@ -447,6 +447,12 @@ async fn fetch_manifest_records_proxy_index_entries() -> anyhow::Result<()> {
             .iter()
             .all(|meta| meta.cache_path.starts_with("v2/library/alpine/manifests/"))
     );
+    // Direct references are indexed without probing their stored content.
+    assert!(recorded.iter().all(|meta| {
+        meta.docker_references
+            .as_ref()
+            .is_some_and(|paths| paths.len() == 1)
+    }));
 
     Ok(())
 }
@@ -766,6 +772,7 @@ async fn deleted_manifest_is_downloaded_again() -> anyhow::Result<()> {
         &storage,
         repository_id,
         manifest_path.to_string().as_str(),
+        None,
         None,
     )
     .await

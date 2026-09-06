@@ -1,3 +1,5 @@
+// ABOUTME: Maintains paginated package catalog records.
+// ABOUTME: Combines artifact metadata with database-backed Docker byte totals.
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -24,6 +26,7 @@ pub struct DBPackageFile {
     pub name: String,
     pub path: String,
     pub size_bytes: i64,
+    pub referenced_size_bytes: Option<i64>,
     pub content_digest: Option<String>,
     pub upstream_digest: Option<String>,
     pub modified_at: DateTime<FixedOffset>,
@@ -69,6 +72,7 @@ pub struct PackageFileUpsertInput {
     pub name: String,
     pub path: String,
     pub size_bytes: i64,
+    pub referenced_size_bytes: Option<i64>,
     pub content_digest: Option<String>,
     pub upstream_digest: Option<String>,
     pub modified_at: DateTime<FixedOffset>,
@@ -89,12 +93,13 @@ impl DBPackageFile {
                 name,
                 path,
                 size_bytes,
+                referenced_size_bytes,
                 content_digest,
                 upstream_digest,
                 modified_at,
                 deleted_at
             )
-            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, NULL)
+            VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NULL)
             ON CONFLICT (repository_id, path_ci)
             DO UPDATE SET
                 project_id = EXCLUDED.project_id,
@@ -103,6 +108,7 @@ impl DBPackageFile {
                 name = EXCLUDED.name,
                 path = EXCLUDED.path,
                 size_bytes = EXCLUDED.size_bytes,
+                referenced_size_bytes = EXCLUDED.referenced_size_bytes,
                 content_digest = EXCLUDED.content_digest,
                 upstream_digest = EXCLUDED.upstream_digest,
                 modified_at = EXCLUDED.modified_at,
@@ -117,6 +123,7 @@ impl DBPackageFile {
                 name,
                 path,
                 size_bytes,
+                referenced_size_bytes,
                 content_digest,
                 upstream_digest,
                 modified_at,
@@ -132,6 +139,7 @@ impl DBPackageFile {
         .bind(input.name)
         .bind(input.path)
         .bind(input.size_bytes.max(0))
+        .bind(input.referenced_size_bytes.filter(|size| *size > 0))
         .bind(input.content_digest)
         .bind(input.upstream_digest)
         .bind(input.modified_at)
@@ -262,6 +270,7 @@ impl DBPackageFile {
                 name,
                 path,
                 size_bytes,
+                referenced_size_bytes,
                 content_digest,
                 upstream_digest,
                 modified_at,
@@ -335,6 +344,7 @@ async fn query_page(
             name,
             path,
             size_bytes,
+            docker_referenced_size(repository_id, path) AS referenced_size_bytes,
             content_digest,
             upstream_digest,
             modified_at,
@@ -409,7 +419,9 @@ fn sort_expression(sort_by: PackageFileSortBy) -> &'static str {
         PackageFileSortBy::Modified => "modified_at",
         PackageFileSortBy::Package => "LOWER(package) COLLATE \"C\"",
         PackageFileSortBy::Name => "LOWER(name) COLLATE \"C\"",
-        PackageFileSortBy::Size => "size_bytes",
+        PackageFileSortBy::Size => {
+            "COALESCE(docker_referenced_size(repository_id, path), size_bytes)"
+        }
         PackageFileSortBy::Path => "LOWER(path) COLLATE \"C\"",
         PackageFileSortBy::Digest => {
             "LOWER(COALESCE(content_digest, upstream_digest, '')) COLLATE \"C\""
@@ -433,6 +445,7 @@ fn build_upsert_input(project: &DBProject, version: &DBProjectVersion) -> Packag
             name,
             path,
             size_bytes: proxy_meta.size.unwrap_or_default() as i64,
+            referenced_size_bytes: None,
             content_digest: None,
             upstream_digest: normalize_digest(proxy_meta.upstream_digest.as_deref()),
             modified_at,
@@ -482,6 +495,7 @@ fn build_upsert_input(project: &DBProject, version: &DBProjectVersion) -> Packag
         name,
         path,
         size_bytes,
+        referenced_size_bytes: None,
         content_digest,
         upstream_digest: None,
         modified_at: version.updated_at,

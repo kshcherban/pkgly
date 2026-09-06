@@ -26,6 +26,24 @@ The Docker repository supports multiple manifest formats:
 - **OCI Image Manifest** - Open Container Initiative image format
 - **OCI Image Index** - Multi-platform image manifests (manifest lists)
 
+## Cached package sizes
+
+The package list reports the stored manifest bytes plus its distinct reachable cached
+manifests and blobs. Missing layers and platforms contribute no bytes. A shared layer
+counts once within each listed image; adding together multiple image rows is therefore
+not a measure of total repository disk usage.
+
+Pkgly records object sizes after successful writes and stores direct manifest references
+in PostgreSQL. Package listings and size sorting calculate totals from that inventory;
+they do not read blobs or probe S3 or the filesystem for indexed images. Blob arrivals,
+tag replacements, and successful deletions change the inventory, so totals survive
+restarts and do not depend on the order of concurrent pulls.
+
+Images cached before object accounting are indexed on their first package listing.
+That backfill reads their manifests and looks up uncatalogued blob metadata once.
+Until a legacy image is indexed, size sorting uses its manifest-file size. Changes made
+directly in the storage backend bypass accounting; manage cached content through Pkgly.
+
 ## URL Structure
 
 Unlike other repository types, Docker repositories use a special URL structure to maintain compatibility with Docker clients:

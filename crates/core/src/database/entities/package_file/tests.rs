@@ -1,3 +1,5 @@
+// ABOUTME: Tests package catalog normalization and ordering expressions.
+// ABOUTME: Verifies stable sorting and digest handling.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 
 use super::{
@@ -36,7 +38,10 @@ fn sort_expression_covers_all_variants() {
         sort_expression(PackageFileSortBy::Name),
         "LOWER(name) COLLATE \"C\""
     );
-    assert_eq!(sort_expression(PackageFileSortBy::Size), "size_bytes");
+    assert_eq!(
+        sort_expression(PackageFileSortBy::Size),
+        "COALESCE(docker_referenced_size(repository_id, path), size_bytes)"
+    );
     assert_eq!(
         sort_expression(PackageFileSortBy::Path),
         "LOWER(path) COLLATE \"C\""

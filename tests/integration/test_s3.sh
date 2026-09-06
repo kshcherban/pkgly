@@ -35,6 +35,17 @@ if [ "${PKGLY_S3_PHASE:-initial}" = "post_restart" ]; then
         fail "Failed to pull the image after restarting Pkgly"
     fi
 
+    print_test "Read persisted package size while MinIO is unavailable"
+    expected_size=$(cat /results/s3-image-size)
+    actual_size=$(curl -fsS -H "$(get_auth_header)" \
+        "${PKGLY_URL}/api/repository/${S3_REPOSITORY_ID}/packages" | \
+        jq -r --arg tag "$IMAGE_TAG" '.items[] | select(.name == $tag) | .size')
+    if [ "$actual_size" = "$expected_size" ]; then
+        pass
+    else
+        fail "Expected cached size ${expected_size}, got ${actual_size}"
+    fi
+
     print_summary
     exit $?
 fi
@@ -133,13 +144,27 @@ else
 fi
 
 print_test "Read pushed manifest through the S3-backed registry"
-manifest_status=$(curl -sS -o /dev/null -w "%{http_code}" \
+manifest_status=$(curl -sS -o "$WORKSPACE/manifest.json" -w "%{http_code}" \
     "${PKGLY_URL}/v2/${S3_REPOSITORY_PATH}/${IMAGE_NAME}/manifests/${IMAGE_TAG}" \
     -H "$(get_auth_header)")
 if assert_http_status "200" "$manifest_status"; then
     pass
 else
     fail "Expected manifest GET to return 200, got ${manifest_status}"
+fi
+
+print_test "Package size counts manifest and distinct stored blobs"
+manifest_size=$(wc -c < "$WORKSPACE/manifest.json")
+blob_size=$(jq '[.config, .layers[]] | unique_by(.digest) | map(.size) | add' "$WORKSPACE/manifest.json")
+expected_size=$((manifest_size + blob_size))
+printf '%s' "$expected_size" > /results/s3-image-size
+actual_size=$(curl -fsS -H "$(get_auth_header)" \
+    "${PKGLY_URL}/api/repository/${S3_REPOSITORY_ID}/packages" | \
+    jq -r --arg tag "$IMAGE_TAG" '.items[] | select(.name == $tag) | .size')
+if [ "$actual_size" = "$expected_size" ]; then
+    pass
+else
+    fail "Expected cached size ${expected_size}, got ${actual_size}"
 fi
 
 print_test "Confirm S3 cache sidecars were written"

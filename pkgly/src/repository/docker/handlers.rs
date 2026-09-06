@@ -1,8 +1,11 @@
+// ABOUTME: Handles Docker Registry manifest and blob requests.
+// ABOUTME: Records stored object sizes and references for cached-byte accounting.
 //! Docker Registry API V2 HTTP handlers
 //!
 //! Implements the Docker Registry HTTP API V2 specification.
 //! Reference: https://docs.docker.com/registry/spec/api/
 
+use crate::repository::proxy_indexing::ProxyIndexingError;
 use axum::body::Body;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -10,6 +13,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use futures::StreamExt;
 use http::StatusCode;
+use nr_core::database::entities::docker_object::DBDockerObject;
 use nr_core::database::entities::project::{
     DBProject, NewProject, ProjectDBType,
     versions::{DBProjectVersion, NewVersion},
@@ -902,6 +906,17 @@ async fn get_blob(
         .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
 
     let size = meta.file_type.file_size;
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            size,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let stream = ReaderStream::new(reader);
 
     let mut builder = ResponseBuilder::ok();
@@ -933,6 +948,17 @@ async fn head_blob(
         .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
 
     let size = meta.file_type.file_size;
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            size,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let stored_digest = meta
         .file_type
         .file_hash
@@ -1025,6 +1051,8 @@ async fn put_manifest(
         }
     }
 
+    let references = super::metadata::manifest_references(repository_name, &body);
+
     // Save manifest by tag/reference
     let manifest_path =
         StoragePath::from(format!("v2/{}/manifests/{}", repository_name, reference));
@@ -1032,6 +1060,15 @@ async fn put_manifest(
         .save_file(repo.id(), body.clone().into(), &manifest_path)
         .await?;
     if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &manifest_path.to_string(),
+            body_size,
+            &references,
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
         record_manifest_in_catalog(
             &repo.site().database,
             repo.id(),
@@ -1052,6 +1089,15 @@ async fn put_manifest(
             .save_file(repo.id(), body.into(), &digest_path)
             .await?;
         if repo.catalog_indexing_enabled() {
+            DBDockerObject::upsert(
+                &repo.site().database,
+                repo.id(),
+                &digest_path.to_string(),
+                body_size,
+                &references,
+            )
+            .await
+            .map_err(ProxyIndexingError::from)?;
             record_manifest_in_catalog(
                 &repo.site().database,
                 repo.id(),
@@ -1434,6 +1480,17 @@ async fn complete_blob_upload(
         return Err(DockerError::BlobUploadNotFound(upload_id.to_string()));
     }
 
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            finalized.length,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let location = format!("/v2/{}/blobs/{}", repository_name, digest);
 
     Ok(custom_response(
@@ -1524,6 +1581,7 @@ async fn delete_manifest(
         repo.id(),
         &manifest_path_str,
         None,
+        Some(&repo.site().database),
     )
     .await
     {
@@ -1572,6 +1630,9 @@ async fn delete_blob(
     repo.get_storage()
         .delete_file(repo.id(), &blob_path)
         .await?;
+    DBDockerObject::delete_paths(&repo.site().database, repo.id(), &[blob_path.to_string()])
+        .await
+        .map_err(ProxyIndexingError::from)?;
 
     Ok(custom_response(StatusCode::ACCEPTED, vec![], vec![]))
 }

@@ -2122,6 +2122,8 @@ impl Storage for S3Storage {
                 Some(modified),
             )
             .await?;
+        } else {
+            self.cache_remove(&repository, location).await?;
         }
         Ok((size, !already_exists))
     }
@@ -2207,6 +2209,8 @@ impl Storage for S3Storage {
                 Some(modified),
             )
             .await?;
+        } else {
+            self.cache_remove(&repository, location).await?;
         }
         Ok(appended_size)
     }
@@ -2417,13 +2421,25 @@ impl Storage for S3Storage {
         repository: uuid::Uuid,
         location: &StoragePath,
     ) -> Result<Option<crate::StorageFileMeta<FileType>>, S3StorageError> {
-        if let Some(cached) = self.cache_get(&repository, location).await? {
+        // Metadata describes the S3 object even if its local content copy is evicted
+        // or damaged. Only content reads need to read and verify the cache file.
+        let cached = if self.should_cache(location) {
+            if let Some(cache) = &self.cache {
+                let key = self.cache_key(&repository, location);
+                cache.state.lock().await.entries.get(&key).cloned()
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+        if let Some(cached) = cached {
             let mime_type = cached
                 .content_type
                 .as_deref()
                 .and_then(|ct| Mime::from_str(ct).ok())
                 .map(SerdeMime);
-            let size = cached.bytes.len() as u64;
+            let size = cached.size;
             let modified = cached
                 .last_modified
                 .unwrap_or_else(|| Local::now().fixed_offset());

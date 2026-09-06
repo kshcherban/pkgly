@@ -34,6 +34,7 @@ use http::{
     header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE},
 };
 use nr_core::{
+    database::entities::docker_object::DBDockerObject,
     repository::{Visibility, config::RepositoryConfigType, project::ProxyArtifactMeta},
     storage::StoragePath,
     utils::base64_utils,
@@ -58,6 +59,7 @@ use crate::{
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryRequest,
+        docker::metadata::manifest_references,
         proxy_indexing::{DatabaseProxyIndexer, ProxyIndexing, ProxyIndexingError},
         utils::can_read_repository_with_auth,
     },
@@ -628,11 +630,12 @@ async fn record_docker_manifest_cache_hit(
     cache_path: &StoragePath,
     digest: &str,
     size: u64,
+    references: Vec<String>,
 ) -> Result<(), ProxyIndexingError> {
     let Some(indexer) = indexer else {
         return Ok(());
     };
-    let meta = ProxyArtifactMeta::builder(
+    let mut builder = ProxyArtifactMeta::builder(
         repository_name.to_string(),
         docker_proxy_package_key(repository_name),
         cache_path.to_string(),
@@ -640,9 +643,9 @@ async fn record_docker_manifest_cache_hit(
     .version(reference.to_string())
     .upstream_digest(digest.to_string())
     .size(size)
-    .fetched_at(Utc::now())
-    .build();
-    indexer.record_cached_artifact(meta).await
+    .fetched_at(Utc::now());
+    builder = builder.docker_references(references);
+    indexer.record_cached_artifact(builder.build()).await
 }
 
 async fn stream_response_to_tempfile(response: Response) -> Result<StreamedDownload, DockerError> {
@@ -789,6 +792,15 @@ impl DockerProxy {
                 .await?
             {
                 if let FileType::File(file_meta) = meta.file_type() {
+                    DBDockerObject::upsert(
+                        &self.0.site.database,
+                        self.id(),
+                        &blob_path.to_string(),
+                        file_meta.file_size,
+                        &[],
+                    )
+                    .await
+                    .map_err(ProxyIndexingError::from)?;
                     let digest_value = file_meta
                         .file_hash
                         .sha2_256
@@ -808,6 +820,17 @@ impl DockerProxy {
             digest,
         )
         .await?;
+
+        let blob_path = format!("v2/{repository_name}/blobs/{digest}");
+        DBDockerObject::upsert(
+            &self.0.site.database,
+            self.id(),
+            &blob_path,
+            blob.length,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
 
         Ok(if head_only {
             blob_head_response(&blob.digest, blob.length)
@@ -1009,7 +1032,7 @@ async fn download_manifest_from_upstream(
     }
     let headers = response.headers().clone();
     let streamed = stream_response_to_tempfile(response).await?;
-    let manifest_bytes = tokio::fs::read(streamed.path.to_path_buf()).await?;
+    let mut manifest_bytes = tokio::fs::read(streamed.path.to_path_buf()).await?;
     let mut content_type = manifest_media_type(&manifest_bytes, Some(&headers));
     let mut streamed_download = streamed;
 
@@ -1034,6 +1057,7 @@ async fn download_manifest_from_upstream(
                 }
             }
 
+            manifest_bytes = modern_bytes;
             content_type = modern_content_type;
             streamed_download = modern_streamed;
         } else {
@@ -1074,6 +1098,8 @@ async fn download_manifest_from_upstream(
     )
     .await?;
 
+    let references = manifest_references(repository_name, &manifest_bytes);
+
     record_docker_manifest_cache_hit(
         indexer,
         repository_name,
@@ -1081,6 +1107,7 @@ async fn download_manifest_from_upstream(
         manifest_path,
         &computed_digest,
         streamed_download.size,
+        references.clone(),
     )
     .await?;
 
@@ -1107,6 +1134,7 @@ async fn download_manifest_from_upstream(
             &digest_path,
             &computed_digest,
             streamed_download.size,
+            references.clone(),
         )
         .await?;
     }

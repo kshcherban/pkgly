@@ -1,3 +1,5 @@
+// ABOUTME: Defines metadata for cached upstream artifacts.
+// ABOUTME: Carries Docker reference paths alongside proxy artifact identities.
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 
@@ -26,6 +28,8 @@ pub struct ProxyArtifactMeta {
     pub upstream_digest: Option<String>,
     pub upstream_url: Option<String>,
     pub size: Option<u64>,
+    #[serde(default)]
+    pub docker_references: Option<Vec<String>>,
     pub fetched_at: DateTime<Utc>,
 }
 
@@ -44,6 +48,7 @@ impl ProxyArtifactMeta {
             upstream_url: None,
             size: None,
             fetched_at: None,
+            docker_references: None,
         }
     }
 
@@ -61,6 +66,7 @@ pub struct ProxyArtifactMetaBuilder {
     upstream_digest: Option<String>,
     upstream_url: Option<String>,
     size: Option<u64>,
+    docker_references: Option<Vec<String>>,
     fetched_at: Option<DateTime<Utc>>,
 }
 
@@ -85,6 +91,12 @@ impl ProxyArtifactMetaBuilder {
         self
     }
 
+    /// Records direct Docker object paths without fetching referenced content.
+    pub fn docker_references(mut self, references: Vec<String>) -> Self {
+        self.docker_references = Some(references);
+        self
+    }
+
     pub fn fetched_at(mut self, fetched_at: DateTime<Utc>) -> Self {
         self.fetched_at = Some(fetched_at);
         self
@@ -100,6 +112,7 @@ impl ProxyArtifactMetaBuilder {
             upstream_digest: self.upstream_digest,
             upstream_url: self.upstream_url,
             size: self.size,
+            docker_references: self.docker_references,
             fetched_at: self.fetched_at.unwrap_or_else(Utc::now),
         }
     }
@@ -152,6 +165,7 @@ mod tests {
         ProxyArtifactMeta::builder("numpy", "numpy", "packages/numpy/numpy-2.1.0.whl")
             .version("2.1.0")
             .size(4_096)
+            .docker_references(vec!["v2/numpy/blobs/sha256:abc".into()])
             .upstream_digest("sha256:deadbeef")
             .fetched_at(timestamp)
             .build()

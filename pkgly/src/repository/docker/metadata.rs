@@ -7,7 +7,9 @@ use nr_core::storage::StoragePath;
 use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile, s3::S3Storage};
 use uuid::Uuid;
 
-use super::types::{Descriptor, Manifest, ManifestDescriptor, MediaType};
+#[cfg(test)]
+use super::types::{Descriptor, ManifestDescriptor};
+use super::types::{Manifest, MediaType};
 
 /// Represents a manifest (tag or digest) stored for a Docker image.
 #[derive(Debug, Clone)]
@@ -102,19 +104,11 @@ pub async fn collect_manifest_entries(
                                 let mut manifest_path = manifests_path.clone();
                                 manifest_path.push_mut(&manifest.name);
 
-                                let calculated_size = calculate_referenced_manifest_size(
-                                    storage,
-                                    repository_id,
-                                    &manifest_path,
-                                )
-                                .await?
-                                .unwrap_or(file_meta.file_size);
-
                                 manifests.push(DockerManifestEntry {
                                     repository: repository_name.clone(),
                                     reference: manifest.name.clone(),
                                     cache_path: manifest_path.to_string(),
-                                    size: calculated_size,
+                                    size: file_meta.file_size,
                                     modified: manifest.modified,
                                 });
                             }
@@ -224,6 +218,7 @@ async fn read_manifest_file(
     }
 }
 
+#[cfg(test)]
 pub(crate) async fn calculate_referenced_manifest_size(
     storage: &DynStorage,
     repository_id: Uuid,
@@ -305,6 +300,97 @@ fn parse_manifest(bytes: &[u8]) -> Option<Manifest> {
     Manifest::from_bytes(bytes, media_type).ok()
 }
 
+/// Extracts distinct direct object references without accessing storage.
+pub(crate) fn manifest_references(repository_name: &str, bytes: &[u8]) -> Vec<String> {
+    let Some(manifest) = parse_manifest(bytes) else {
+        return Vec::new();
+    };
+    let (kind, digests): (&str, Vec<String>) = match manifest {
+        Manifest::DockerV2(manifest) => (
+            "blobs",
+            std::iter::once(manifest.config)
+                .chain(manifest.layers)
+                .map(|descriptor| descriptor.digest)
+                .collect(),
+        ),
+        Manifest::OciImage(manifest) => (
+            "blobs",
+            manifest
+                .config
+                .into_iter()
+                .chain(manifest.layers)
+                .map(|descriptor| descriptor.digest)
+                .collect(),
+        ),
+        Manifest::OciIndex(index) => (
+            "manifests",
+            index
+                .manifests
+                .into_iter()
+                .map(|descriptor| descriptor.digest)
+                .collect(),
+        ),
+    };
+    let mut paths: Vec<_> = digests
+        .into_iter()
+        .map(|digest| format!("v2/{repository_name}/{kind}/{digest}"))
+        .collect();
+    paths.sort();
+    paths.dedup();
+    paths
+}
+
+/// Backfills a legacy manifest graph once; indexed objects require no storage probes.
+pub(crate) async fn backfill_manifest_objects(
+    database: &sqlx::PgPool,
+    storage: &DynStorage,
+    repository_id: Uuid,
+    root: &str,
+) -> anyhow::Result<Option<u64>> {
+    use nr_core::database::entities::docker_object::DBDockerObject;
+    let Some((repository_name, _)) = split_manifest_cache_path(root) else {
+        return Ok(None);
+    };
+    let mut pending = vec![root.to_string()];
+    let mut visited = HashSet::new();
+    // Publish children before parents so an indexed root represents a finished backfill.
+    let mut objects = Vec::new();
+    while let Some(path) = pending.pop() {
+        if !visited.insert(path.clone())
+            || DBDockerObject::referenced_size(database, repository_id, &path)
+                .await?
+                .is_some()
+        {
+            continue;
+        }
+        let storage_path = StoragePath::from(path.as_str());
+        if split_manifest_cache_path(&path).is_some() {
+            if let Some((bytes, size)) =
+                read_manifest_file(storage, repository_id, &storage_path).await?
+            {
+                let references = manifest_references(&repository_name, &bytes);
+                pending.extend(references.clone());
+                objects.push((path, size, references));
+            }
+        } else if let Some(meta) = storage
+            .get_file_information(repository_id, &storage_path)
+            .await?
+            && let FileType::File(file) = meta.file_type()
+        {
+            objects.push((path, file.file_size, Vec::new()));
+        }
+    }
+    for (path, size, references) in objects.into_iter().rev() {
+        DBDockerObject::insert_missing(database, repository_id, &path, size, &references).await?;
+    }
+    Ok(
+        DBDockerObject::referenced_size(database, repository_id, root)
+            .await?
+            .map(|size| size as u64),
+    )
+}
+
+#[cfg(test)]
 async fn add_manifest_payload_sizes(
     storage: &DynStorage,
     repository_id: Uuid,
@@ -368,6 +454,7 @@ async fn add_manifest_payload_sizes(
     Ok(())
 }
 
+#[cfg(test)]
 async fn add_blob_descriptor_size(
     storage: &DynStorage,
     repository_id: Uuid,
@@ -384,10 +471,14 @@ async fn add_blob_descriptor_size(
         "v2/{}/blobs/{}",
         repository_name, descriptor.digest
     ));
-    if let Some(StorageFile::File { meta, .. }) =
-        storage.open_file(repository_id, &blob_path).await?
+    // ponytail: only the stored size is needed, so HEAD the blob instead of
+    // downloading its body. Avoids one full-body S3 GET per layer per listing row.
+    if let Some(meta) = storage
+        .get_file_information(repository_id, &blob_path)
+        .await?
+        && let FileType::File(file_meta) = meta.file_type()
     {
-        *total += meta.file_type.file_size;
+        *total += file_meta.file_size;
     }
     Ok(())
 }
