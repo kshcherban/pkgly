@@ -45,7 +45,7 @@ impl TestCore {
             let env_filter = EnvFilter::try_from_default_env().unwrap_or_else(|_| log.into());
 
             LOGGING_INIT.call_once(|| {
-                let stdout_log = tracing_subscriber::fmt::layer().pretty();
+                let stdout_log = tracing_subscriber::fmt::layer();
                 match tracing_subscriber::registry()
                     .with(stdout_log.with_filter(env_filter))
                     .try_init()

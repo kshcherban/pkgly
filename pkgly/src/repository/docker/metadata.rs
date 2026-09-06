@@ -1,7 +1,8 @@
 // ABOUTME: Collects Docker registry metadata for listings, browse views, and size reporting.
 // ABOUTME: Resolves manifest paths and computes referenced Docker content sizes.
-use std::collections::{HashSet, VecDeque};
+use std::collections::VecDeque;
 
+use ahash::{HashMap, HashSet};
 use chrono::{DateTime, FixedOffset};
 use nr_core::storage::StoragePath;
 use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile, s3::S3Storage};
@@ -198,6 +199,9 @@ async fn read_manifest_file(
     repository_id: Uuid,
     path: &StoragePath,
 ) -> Result<Option<(Vec<u8>, u64)>, StorageError> {
+    if let DynStorage::S3(s3) = storage {
+        s3.invalidate_cached_file(repository_id, path).await?;
+    }
     let manifest_file = match storage.open_file(repository_id, path).await {
         Ok(Some(file)) => file,
         Ok(None) => return Ok(None),
@@ -238,8 +242,8 @@ pub(crate) async fn calculate_referenced_manifest_size(
     };
 
     let mut total = manifest_size;
-    let mut seen_blobs = HashSet::new();
-    let mut seen_manifests = HashSet::new();
+    let mut seen_blobs = HashSet::default();
+    let mut seen_manifests = HashSet::default();
     let mut pending_manifests = Vec::new();
 
     add_manifest_payload_sizes(
@@ -340,7 +344,117 @@ pub(crate) fn manifest_references(repository_name: &str, bytes: &[u8]) -> Vec<St
     paths
 }
 
-/// Backfills a legacy manifest graph once; indexed objects require no storage probes.
+/// Summary of a Docker object accounting reconciliation pass.
+#[derive(Debug, Default, Clone, Copy)]
+pub(crate) struct DockerReconcileSummary {
+    pub backfilled: usize,
+    pub corrected: usize,
+    pub removed: usize,
+}
+
+/// Reconciles the `docker_objects` accounting table with storage reality.
+///
+/// Storage mutations and PostgreSQL updates are separate operations, so crashes or partial
+/// failures can leave the table inaccurate. This backfills missing manifest graphs, corrects
+/// drifted sizes, and removes rows whose objects no longer exist. It only probes objects
+/// referenced by stored manifests (plus manifest rows), not every blob ever seen.
+pub(crate) async fn reconcile_docker_objects(
+    database: &sqlx::PgPool,
+    storage: &DynStorage,
+    repository_id: Uuid,
+) -> anyhow::Result<DockerReconcileSummary> {
+    use nr_core::database::entities::docker_object::DBDockerObject;
+    let mut summary = DockerReconcileSummary::default();
+
+    // 1. Backfill missing manifest graphs so every stored manifest has an accounting root.
+    let entries = collect_manifest_entries(storage, repository_id).await?;
+    for entry in &entries {
+        if DBDockerObject::needs_backfill(database, repository_id, &entry.cache_path).await? {
+            match backfill_manifest_objects(database, storage, repository_id, &entry.cache_path)
+                .await
+            {
+                Ok(_) => summary.backfilled += 1,
+                Err(err) => {
+                    tracing::warn!(
+                        %repository_id,
+                        cache_path = %entry.cache_path,
+                        %err,
+                        "Failed to backfill Docker object accounting"
+                    );
+                }
+            }
+        }
+    }
+
+    // 2. Compare rows with an authoritative object inventory and correct drifted sizes.
+    // Capture rows before scanning storage: an upload completing between the two snapshots
+    // is then absent from the older row snapshot, so its fresh row can never be deleted
+    // for missing inventory.
+    let rows = DBDockerObject::list_rows(database, repository_id).await?;
+    let inventory = if let DynStorage::S3(s3) = storage {
+        Some(
+            s3.list_repository_objects(repository_id, None)
+                .await?
+                .into_iter()
+                .map(|object| (object.key, object.size))
+                .collect::<HashMap<_, _>>(),
+        )
+    } else {
+        None
+    };
+    let mut missing = Vec::new();
+    for (path, stored_size, revision) in rows {
+        let storage_path = StoragePath::from(path.as_str());
+        let observed_size = if let Some(inventory) = &inventory {
+            inventory.get(&path).copied()
+        } else {
+            match storage
+                .get_file_information(repository_id, &storage_path)
+                .await
+            {
+                Ok(Some(meta)) => match meta.file_type() {
+                    FileType::File(file) => Some(file.file_size),
+                    FileType::Directory(_) => None,
+                },
+                Ok(None) => None,
+                Err(err) => {
+                    tracing::warn!(
+                        %repository_id,
+                        path = %path,
+                        %err,
+                        "Skipping Docker object during reconciliation"
+                    );
+                    continue;
+                }
+            }
+        };
+        match observed_size {
+            Some(size) if size != stored_size.max(0) as u64 => {
+                if DBDockerObject::update_size_if_revision(
+                    database,
+                    repository_id,
+                    &path,
+                    size,
+                    revision,
+                )
+                .await?
+                {
+                    summary.corrected += 1;
+                }
+            }
+            Some(_) => {}
+            None => missing.push((path, revision)),
+        }
+    }
+    if !missing.is_empty() {
+        summary.removed =
+            DBDockerObject::delete_paths_if_revisions(database, repository_id, &missing).await?;
+    }
+
+    Ok(summary)
+}
+
+/// Backfills a manifest graph by probing storage and recording each observed object.
 pub(crate) async fn backfill_manifest_objects(
     database: &sqlx::PgPool,
     storage: &DynStorage,
@@ -352,17 +466,17 @@ pub(crate) async fn backfill_manifest_objects(
         return Ok(None);
     };
     let mut pending = vec![root.to_string()];
-    let mut visited = HashSet::new();
+    let mut visited = HashSet::default();
     // Publish children before parents so an indexed root represents a finished backfill.
     let mut objects = Vec::new();
     while let Some(path) = pending.pop() {
-        if !visited.insert(path.clone())
-            || DBDockerObject::referenced_size(database, repository_id, &path)
-                .await?
-                .is_some()
-        {
+        if !visited.insert(path.clone()) {
             continue;
         }
+        // Capture the revision before reading storage: a concurrent update to this object
+        // bumps its revision, so publishing the bytes read here becomes a guarded no-op
+        // instead of overwriting the newer row with stale references.
+        let revision = DBDockerObject::revision(database, repository_id, &path).await?;
         let storage_path = StoragePath::from(path.as_str());
         if split_manifest_cache_path(&path).is_some() {
             if let Some((bytes, size)) =
@@ -370,18 +484,31 @@ pub(crate) async fn backfill_manifest_objects(
             {
                 let references = manifest_references(&repository_name, &bytes);
                 pending.extend(references.clone());
-                objects.push((path, size, references));
+                objects.push((path, size, references, revision));
             }
         } else if let Some(meta) = storage
             .get_file_information(repository_id, &storage_path)
             .await?
             && let FileType::File(file) = meta.file_type()
         {
-            objects.push((path, file.file_size, Vec::new()));
+            objects.push((path, file.file_size, Vec::new(), revision));
         }
     }
-    for (path, size, references) in objects.into_iter().rev() {
-        DBDockerObject::insert_missing(database, repository_id, &path, size, &references).await?;
+    for (path, size, references, revision) in objects.into_iter().rev() {
+        if let Some(revision) = revision {
+            let _ = DBDockerObject::upsert_if_revision(
+                database,
+                repository_id,
+                &path,
+                size,
+                &references,
+                revision,
+            )
+            .await?;
+        } else {
+            DBDockerObject::insert_missing(database, repository_id, &path, size, &references)
+                .await?;
+        }
     }
     Ok(
         DBDockerObject::referenced_size(database, repository_id, root)
@@ -471,8 +598,8 @@ async fn add_blob_descriptor_size(
         "v2/{}/blobs/{}",
         repository_name, descriptor.digest
     ));
-    // ponytail: only the stored size is needed, so HEAD the blob instead of
-    // downloading its body. Avoids one full-body S3 GET per layer per listing row.
+    // Only the stored size is needed here, so retrieve metadata instead of downloading the blob
+    // body. This avoids one full-body S3 GET per layer per listing row.
     if let Some(meta) = storage
         .get_file_information(repository_id, &blob_path)
         .await?

@@ -421,7 +421,12 @@ async fn disk_cache_recovers_entries_and_preserves_unrelated_files() {
         .await
         .expect("cache read")
         .expect("recovered object");
-    assert_eq!(object.bytes, Bytes::from_static(b"persisted"));
+    let mut content = Vec::new();
+    let mut file = object.file;
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut content)
+        .await
+        .expect("cache content");
+    assert_eq!(content, b"persisted");
     assert_eq!(object.content_type.as_deref(), Some("text/plain"));
     assert_eq!(
         fs::read(&sentinel).await.expect("sentinel read"),
@@ -461,7 +466,12 @@ async fn disk_cache_recovers_latest_same_key_publication() {
         .await
         .expect("cache read")
         .expect("latest entry should recover");
-    assert_eq!(object.bytes, Bytes::from_static(b"latest"));
+    let mut content = Vec::new();
+    let mut file = object.file;
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut content)
+        .await
+        .expect("cache content");
+    assert_eq!(content, b"latest");
 }
 
 #[tokio::test]
@@ -565,7 +575,7 @@ async fn disk_cache_discards_missing_or_malformed_sidecars() {
 }
 
 #[tokio::test]
-async fn disk_cache_treats_corrupt_content_as_a_miss() {
+async fn disk_cache_runtime_same_size_mutation_is_not_rehashed() {
     let temp_dir = tempdir().expect("tempdir");
     let cache_config = cache_config_with_dir(temp_dir.path());
     let cache = S3DiskCache::new(&cache_config, "test-cache")
@@ -589,7 +599,17 @@ async fn disk_cache_treats_corrupt_content_as_a_miss() {
         .await
         .expect("corrupt cache entry");
 
-    assert!(cache.get("corrupt").await.expect("cache read").is_none());
+    let object = cache
+        .get("corrupt")
+        .await
+        .expect("cache read")
+        .expect("same-sized content remains indexed");
+    let mut content = Vec::new();
+    let mut file = object.file;
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut content)
+        .await
+        .expect("cache content");
+    assert_eq!(content, b"tampered");
 }
 
 #[tokio::test]
@@ -944,7 +964,82 @@ async fn disk_cache_concurrent_publications_leave_a_valid_entry() {
         .await
         .expect("cache read")
         .expect("entry remains");
-    assert_eq!(object.bytes.len(), 8);
+    assert_eq!(object.size, 8);
+    let mut content = Vec::new();
+    let mut file = object.file;
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut content)
+        .await
+        .expect("read cache file");
+    assert_eq!(content.len(), 8);
+}
+
+#[tokio::test]
+async fn stale_cache_publication_does_not_remove_newer_entry() {
+    let temp_dir = tempdir().expect("tempdir");
+    let cache = S3DiskCache::new(&cache_config_with_dir(temp_dir.path()), "test-cache")
+        .await
+        .expect("cache");
+
+    cache
+        .put("same-key", Bytes::from_static(b"old"), None)
+        .await
+        .expect("initial publication");
+    let generation = cache.generation_for("same-key").await;
+    cache
+        .put("same-key", Bytes::from_static(b"new"), None)
+        .await
+        .expect("newer publication");
+
+    assert!(
+        !cache
+            .put_if_generation(
+                "same-key",
+                Bytes::from_static(b"stale"),
+                None,
+                None,
+                generation,
+            )
+            .await
+            .expect("stale publication")
+    );
+
+    let object = cache
+        .get("same-key")
+        .await
+        .expect("cache read")
+        .expect("newer entry remains");
+    let mut content = Vec::new();
+    let mut file = object.file;
+    tokio::io::AsyncReadExt::read_to_end(&mut file, &mut content)
+        .await
+        .expect("cache content");
+    assert_eq!(content, b"new");
+}
+
+#[tokio::test]
+async fn oversized_stale_publication_does_not_evict_newer_entry() {
+    let temp_dir = tempdir().expect("tempdir");
+    let cache = S3DiskCache::new(&cache_config_with_dir(temp_dir.path()), "test-cache")
+        .await
+        .expect("cache");
+    cache
+        .put("same-key", Bytes::from_static(b"new"), None)
+        .await
+        .expect("newer publication");
+
+    assert!(
+        !cache
+            .put_if_generation(
+                "same-key",
+                Bytes::from_static(b"stale-too-large"),
+                None,
+                None,
+                0,
+            )
+            .await
+            .expect("stale publication")
+    );
+    assert!(cache.get("same-key").await.expect("cache read").is_some());
 }
 
 #[test]
@@ -1231,11 +1326,28 @@ fn build_s3_storage(endpoint: &str, bucket: &str) -> S3Storage {
         storage_config,
         client,
         cache: None,
+        cache_load_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
         manifest_cache: parking_lot::Mutex::new(super::ManifestCache::new()),
-        manifest_load_lock: tokio::sync::Mutex::new(()),
+        manifest_load_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
+        append_staging: parking_lot::Mutex::new(ahash::HashMap::default()),
+        append_operation_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
+        upload_spool_budget: Arc::new(tokio::sync::Semaphore::new(
+            (super::MAX_STAGED_BYTES / super::S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize,
+        )),
+        staging_dir: test_staging_dir(),
+        creation_probes: parking_lot::Mutex::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(4096).unwrap(),
+        )),
+        creation_probe_generation: parking_lot::Mutex::new(0),
     };
 
     S3Storage::from(inner)
+}
+
+fn test_staging_dir() -> std::path::PathBuf {
+    let dir = std::env::temp_dir().join(format!("pkgly-test-staging-{}", Uuid::new_v4()));
+    std::fs::create_dir_all(&dir).expect("staging dir");
+    dir
 }
 
 fn build_s3_storage_with_cache(endpoint: &str, bucket: &str, cache: Arc<S3DiskCache>) -> S3Storage {
@@ -1277,8 +1389,19 @@ fn build_s3_storage_with_cache(endpoint: &str, bucket: &str, cache: Arc<S3DiskCa
         storage_config,
         client,
         cache: Some(cache),
+        cache_load_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
         manifest_cache: parking_lot::Mutex::new(super::ManifestCache::new()),
-        manifest_load_lock: tokio::sync::Mutex::new(()),
+        manifest_load_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
+        append_staging: parking_lot::Mutex::new(ahash::HashMap::default()),
+        append_operation_locks: parking_lot::Mutex::new(ahash::HashMap::default()),
+        upload_spool_budget: Arc::new(tokio::sync::Semaphore::new(
+            (super::MAX_STAGED_BYTES / super::S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize,
+        )),
+        staging_dir: test_staging_dir(),
+        creation_probes: parking_lot::Mutex::new(lru::LruCache::new(
+            std::num::NonZeroUsize::new(4096).unwrap(),
+        )),
+        creation_probe_generation: parking_lot::Mutex::new(0),
     })
 }
 
@@ -1694,30 +1817,50 @@ async fn append_uses_if_match_and_returns_appended_bytes() {
             None,
         )),
         respond_response(response_with_body(StatusCode::OK, bytes::Bytes::new())),
+        respond_response(response_with_body(
+            StatusCode::NO_CONTENT,
+            bytes::Bytes::new(),
+        )),
     ])
     .await;
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
     let appended = storage
-        .append_file(
+        .append_file_staged(
             repository,
             FileContent::Bytes(Bytes::from_static(b"new")),
             &StoragePath::from("file.bin"),
         )
         .await
         .expect("append should succeed");
-
     assert_eq!(appended, 3);
+
+    storage
+        .move_file(
+            repository,
+            &StoragePath::from("file.bin"),
+            &StoragePath::from("final.bin"),
+        )
+        .await
+        .expect("finalize should upload staged content");
+
     let requests = server.take_requests();
-    assert_eq!(requests.len(), 2);
+    assert_eq!(requests.len(), 3);
     assert_eq!(requests[0].method, hyper::Method::GET);
     assert_eq!(requests[1].method, hyper::Method::PUT);
-    assert_eq!(requests[1].body, Bytes::from_static(b"oldnew"));
+    assert!(
+        requests[1]
+            .body
+            .windows(b"oldnew".len())
+            .any(|body| body == b"oldnew")
+    );
+    assert_eq!(requests[1].headers.get(header::IF_NONE_MATCH).unwrap(), "*");
+    assert!(requests[1].headers.get(header::IF_MATCH).is_none());
+    assert_eq!(requests[2].method, hyper::Method::DELETE);
     assert_eq!(
-        requests[1].headers.get(header::IF_MATCH).unwrap(),
+        requests[2].headers.get(header::IF_MATCH).unwrap(),
         "\"etag-old\""
     );
-    assert!(requests[1].headers.get(header::IF_NONE_MATCH).is_none());
     server.shutdown().await;
 }
 
@@ -1732,19 +1875,35 @@ async fn append_uses_if_none_match_for_missing_object() {
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
     let appended = storage
-        .append_file(
+        .append_file_staged(
             repository,
             FileContent::Content(b"new".to_vec()),
             &StoragePath::from("file.bin"),
         )
         .await
         .expect("append should create missing object");
-
     assert_eq!(appended, 3);
+
+    storage
+        .move_file(
+            repository,
+            &StoragePath::from("file.bin"),
+            &StoragePath::from("final.bin"),
+        )
+        .await
+        .expect("finalize should upload staged content");
+
     let requests = server.take_requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[0].method, hyper::Method::GET);
     assert_eq!(requests[1].headers.get(header::IF_NONE_MATCH).unwrap(), "*");
     assert!(requests[1].headers.get(header::IF_MATCH).is_none());
-    assert_eq!(requests[1].body, Bytes::from_static(b"new"));
+    assert!(
+        requests[1]
+            .body
+            .windows(b"new".len())
+            .any(|body| body == b"new")
+    );
     server.shutdown().await;
 }
 
@@ -1761,17 +1920,26 @@ async fn append_conflict_preserves_cache_and_returns_conflict() {
     .await;
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
-    let error = storage
-        .append_file(
+    storage
+        .append_file_staged(
             repository,
             FileContent::Bytes(Bytes::from_static(b"new")),
             &StoragePath::from("file.bin"),
         )
         .await
+        .expect("append should stage locally");
+
+    let error = storage
+        .move_file(
+            repository,
+            &StoragePath::from("file.bin"),
+            &StoragePath::from("final.bin"),
+        )
+        .await
         .expect_err("stale ETag should produce a conflict");
 
     assert!(error.is_conflict());
-    assert_eq!(server.take_requests().len(), 2);
+    assert_eq!(server.take_requests().len(), 3);
     server.shutdown().await;
 }
 
@@ -1803,14 +1971,13 @@ async fn append_checks_concrete_ancestors_without_rechecking_final_target() {
     let repository = Uuid::new_v4();
     let server = MockS3Server::start(vec![
         respond_response(not_found_response("NotFound")),
-        respond_response(get_response(b"old", Some("\"etag-old\""), None, None)),
-        respond_response(response_with_body(StatusCode::OK, bytes::Bytes::new())),
+        respond_response(not_found_response("NoSuchKey")),
     ])
     .await;
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
     storage
-        .append_file(
+        .append_file_staged(
             repository,
             FileContent::Content(b"new".to_vec()),
             &StoragePath::from("parent/file.bin"),
@@ -1818,10 +1985,53 @@ async fn append_checks_concrete_ancestors_without_rechecking_final_target() {
         .await
         .expect("append should succeed");
     let requests = server.take_requests();
-    assert_eq!(requests.len(), 3);
+    assert_eq!(requests.len(), 2);
     assert_eq!(requests[0].method, hyper::Method::HEAD);
     assert_eq!(requests[1].method, hyper::Method::GET);
-    assert_eq!(requests[2].method, hyper::Method::PUT);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn repeated_appends_stage_locally_without_per_chunk_s3_transfers() {
+    let repository = Uuid::new_v4();
+    let server = MockS3Server::start(vec![
+        respond_response(not_found_response("NoSuchKey")),
+        respond_response(response_with_body(StatusCode::OK, bytes::Bytes::new())),
+    ])
+    .await;
+    let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
+    let path = StoragePath::from("file.bin");
+
+    storage
+        .append_file_staged(repository, FileContent::Content(b"one".to_vec()), &path)
+        .await
+        .expect("first append");
+    storage
+        .append_file_staged(repository, FileContent::Content(b"two".to_vec()), &path)
+        .await
+        .expect("second append");
+    storage
+        .append_file_staged(repository, FileContent::Content(b"three".to_vec()), &path)
+        .await
+        .expect("third append");
+
+    // Only the first append contacts S3 (to check for pre-existing content); subsequent
+    // appends are pure local disk writes, and the single upload happens on finalize.
+    assert_eq!(server.take_requests().len(), 1);
+
+    storage
+        .move_file(repository, &path, &StoragePath::from("final.bin"))
+        .await
+        .expect("finalize");
+    let requests = server.take_requests();
+    assert_eq!(requests.len(), 2);
+    assert_eq!(requests[1].method, hyper::Method::PUT);
+    assert!(
+        requests[1]
+            .body
+            .windows(b"onetwothree".len())
+            .any(|body| body == b"onetwothree")
+    );
     server.shutdown().await;
 }
 
@@ -2428,13 +2638,22 @@ async fn large_move_uses_multipart_copy_ranges_and_completes() {
 #[tokio::test]
 async fn manifest_pages_share_one_cached_traversal() {
     let repository = Uuid::new_v4();
-    let server = MockS3Server::start(vec![respond_list(list_response_body_with_metadata(
-        &format!("{repository}/v2/"),
-        &[],
-        &[],
-        false,
-        None,
-    ))])
+    let server = MockS3Server::start(vec![
+        respond_list(list_response_body_with_metadata(
+            &format!("{repository}/v2/"),
+            &[],
+            &[],
+            false,
+            None,
+        )),
+        respond_list(list_response_body_with_metadata(
+            &format!("{repository}/v2/"),
+            &[],
+            &[],
+            false,
+            None,
+        )),
+    ])
     .await;
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
@@ -2449,7 +2668,7 @@ async fn manifest_pages_share_one_cached_traversal() {
     assert!(first.0.is_empty());
     assert_eq!(first.1, 0);
     assert!(second.0.is_empty());
-    assert_eq!(server.take_requests().len(), 1);
+    assert_eq!(server.take_requests().len(), 2);
     server.shutdown().await;
 }
 
@@ -2482,6 +2701,50 @@ async fn concurrent_manifest_requests_share_one_traversal() {
     });
     assert!(first.await.expect("first task").is_empty());
     assert!(second.await.expect("second task").is_empty());
+    assert_eq!(server.take_requests().len(), 1);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn concurrent_cache_misses_share_one_object_download() {
+    let repository = Uuid::new_v4();
+    let directory = tempdir().expect("cache directory");
+    let cache = Arc::new(
+        S3DiskCache::new(
+            &cache_config_with_dir(directory.path()),
+            "cache-miss-coordination",
+        )
+        .await
+        .expect("cache"),
+    );
+    let server = MockS3Server::start(vec![respond_delayed(
+        Duration::from_millis(50),
+        get_response(b"payload", Some("\"etag\""), None, None),
+    )])
+    .await;
+    let storage = build_s3_storage_with_cache(&server.endpoint(), "mock-bucket", cache);
+    let path = StoragePath::from("blob");
+
+    let first_storage = storage.clone();
+    let first_path = path.clone();
+    let first = tokio::spawn(async move {
+        first_storage
+            .open_file(repository, &first_path)
+            .await
+            .expect("first object")
+    });
+    sleep(Duration::from_millis(5)).await;
+    let second_storage = storage.clone();
+    let second_path = path.clone();
+    let second = tokio::spawn(async move {
+        second_storage
+            .open_file(repository, &second_path)
+            .await
+            .expect("second object")
+    });
+
+    assert!(first.await.expect("first task").is_some());
+    assert!(second.await.expect("second task").is_some());
     assert_eq!(server.take_requests().len(), 1);
     server.shutdown().await;
 }
@@ -2558,43 +2821,25 @@ async fn mutation_during_manifest_load_prevents_stale_cache_publication() {
 async fn manifest_loader_sorts_nested_results_before_pagination() {
     let repository = Uuid::new_v4();
     let root = format!("{repository}/v2/");
-    let image = format!("{repository}/v2/library/");
-    let manifests = format!("{repository}/v2/library/image/manifests/");
-    let server = MockS3Server::start(vec![
-        respond_list(list_response_body_with_metadata(
-            &root,
-            &[],
-            &[&image],
-            false,
-            None,
-        )),
-        respond_list(list_response_body_with_metadata(
-            &image,
-            &[],
-            &[&manifests],
-            false,
-            None,
-        )),
-        respond_list(list_response_body_with_metadata(
-            &manifests,
-            &[
-                (
-                    &format!("{manifests}z"),
-                    1,
-                    Some("2025-01-01T00:00:00.000Z"),
-                ),
-                (
-                    &format!("{manifests}a"),
-                    2,
-                    Some("2025-01-01T00:00:00.000Z"),
-                ),
-            ],
-            &[],
-            false,
-            None,
-        )),
-    ])
-    .await;
+    let page = list_response_body_with_metadata(
+        &root,
+        &[
+            (
+                &format!("{repository}/v2/library/image/manifests/a"),
+                2,
+                Some("2025-01-01T00:00:00.000Z"),
+            ),
+            (
+                &format!("{repository}/v2/library/image/manifests/z"),
+                1,
+                Some("2025-01-01T00:00:00.000Z"),
+            ),
+        ],
+        &[],
+        false,
+        None,
+    );
+    let server = MockS3Server::start(vec![respond_list(page.clone()), respond_list(page)]).await;
     let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
 
     let (first, total) = storage
@@ -2609,7 +2854,7 @@ async fn manifest_loader_sorts_nested_results_before_pagination() {
     assert_eq!(second_total, 2);
     assert_eq!(first[0].key, "v2/library/image/manifests/a");
     assert_eq!(second[0].key, "v2/library/image/manifests/z");
-    assert_eq!(server.take_requests().len(), 3);
+    assert_eq!(server.take_requests().len(), 2);
     server.shutdown().await;
 }
 
@@ -2708,5 +2953,151 @@ async fn successful_save_invalidates_manifest_cache() {
         .await
         .expect("traversal after invalidation");
     assert_eq!(server.take_requests().len(), 4);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn append_file_staged_accounts_shared_spool_capacity() {
+    let repository = Uuid::new_v4();
+    let server = MockS3Server::start(vec![
+        respond_response(not_found_response("NoSuchKey")),
+        respond_response(not_found_response("NoSuchKey")),
+        respond_response(response_with_body(StatusCode::OK, bytes::Bytes::new())),
+    ])
+    .await;
+    let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
+    let path = StoragePath::from("file.bin");
+
+    // Hold the entire shared spool budget so no capacity remains for staged bytes;
+    // the append must be rejected instead of exceeding the budget.
+    let total_units = (super::MAX_STAGED_BYTES / super::S3_UPLOAD_SPOOL_PERMIT_BYTES) as u32;
+    let hoard = storage
+        .upload_spool_budget()
+        .try_acquire_many_owned(total_units)
+        .expect("budget should start empty");
+
+    let error = storage
+        .append_file_staged(
+            repository,
+            FileContent::Bytes(Bytes::from_static(b"data")),
+            &path,
+        )
+        .await
+        .expect_err("append must respect the shared spool capacity");
+    assert!(
+        error.to_string().contains("capacity exceeded"),
+        "unexpected error: {error}"
+    );
+    assert!(
+        storage
+            .append_staging
+            .lock()
+            .values()
+            .map(|entry| entry.size)
+            .sum::<u64>()
+            == 0,
+        "a rejected append must not consume shared budget"
+    );
+
+    // Releasing the spool reservation frees capacity for the staged bytes.
+    drop(hoard);
+    let appended = storage
+        .append_file_staged(
+            repository,
+            FileContent::Bytes(Bytes::from_static(b"data")),
+            &path,
+        )
+        .await
+        .expect("append succeeds once spool capacity is released");
+    assert_eq!(appended, 4);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn staged_bytes_hold_shared_spool_capacity() {
+    let repository = Uuid::new_v4();
+    let server = MockS3Server::start(vec![
+        respond_response(not_found_response("NoSuchKey")),
+        respond_response(not_found_response("NoSuchKey")),
+    ])
+    .await;
+    let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
+    let budget = storage.upload_spool_budget();
+    let initial = budget.available_permits();
+    let path = StoragePath::from("file.bin");
+
+    storage
+        .append_file_staged(
+            repository,
+            FileContent::Bytes(Bytes::from_static(b"data")),
+            &path,
+        )
+        .await
+        .expect("append should reserve shared capacity");
+
+    assert_eq!(budget.available_permits(), initial - 1);
+    assert!(
+        storage
+            .delete_file(repository, &path)
+            .await
+            .expect("delete staged upload")
+    );
+    assert_eq!(budget.available_permits(), initial);
+    server.shutdown().await;
+}
+
+#[tokio::test]
+async fn staged_finalization_does_not_block_unrelated_uploads() {
+    let repository = Uuid::new_v4();
+    let server = MockS3Server::start(vec![
+        respond_response(not_found_response("NoSuchKey")),
+        respond_delayed(
+            Duration::from_millis(400),
+            response_with_body(StatusCode::OK, bytes::Bytes::new()),
+        ),
+        respond_response(not_found_response("NoSuchKey")),
+    ])
+    .await;
+    let storage = build_s3_storage(&server.endpoint(), "mock-bucket");
+    let path_a = StoragePath::from("a.bin");
+    let path_b = StoragePath::from("b.bin");
+
+    storage
+        .append_file_staged(
+            repository,
+            FileContent::Bytes(Bytes::from_static(b"aaa")),
+            &path_a,
+        )
+        .await
+        .expect("stage upload a");
+
+    let finalize = tokio::spawn({
+        let storage = storage.clone();
+        async move {
+            storage
+                .move_file(repository, &path_a, &StoragePath::from("final-a.bin"))
+                .await
+        }
+    });
+    // Give the finalization time to enter its delayed S3 transfer while holding the
+    // per-upload lock; an unrelated upload must proceed without waiting for it.
+    sleep(Duration::from_millis(50)).await;
+    let started = std::time::Instant::now();
+    storage
+        .append_file_staged(
+            repository,
+            FileContent::Bytes(Bytes::from_static(b"bbb")),
+            &path_b,
+        )
+        .await
+        .expect("unrelated append must not block behind finalization");
+    assert!(
+        started.elapsed() < Duration::from_millis(300),
+        "unrelated append was blocked behind the finalization transfer"
+    );
+    finalize
+        .await
+        .expect("finalize task joins")
+        .expect("finalization succeeds");
     server.shutdown().await;
 }

@@ -983,6 +983,7 @@ fn streamed_from_bytes(bytes: &[u8]) -> anyhow::Result<StreamedDownload> {
         path,
         size: bytes.len() as u64,
         digest,
+        permits: Vec::new(),
     })
 }
 
@@ -1134,4 +1135,22 @@ async fn bearer_challenge_is_followed_for_public_token() -> anyhow::Result<()> {
     upstream_server.abort();
     token_server.abort();
     Ok(())
+}
+
+#[test]
+fn temp_reservations_track_units_and_fail_fast_when_exhausted() {
+    let budget = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut permits = Vec::new();
+    reserve_temp_permits(&budget, &mut permits, 2 * TEMP_FILE_PERMIT_BYTES)
+        .expect("initial reservation");
+    reserve_temp_permits(&budget, &mut permits, 3 * TEMP_FILE_PERMIT_BYTES)
+        .expect("incremental reservation");
+    assert_eq!(budget.available_permits(), 1);
+
+    let error = reserve_temp_permits(&budget, &mut permits, 5 * TEMP_FILE_PERMIT_BYTES)
+        .expect_err("reservation must fail fast when the budget is exhausted");
+    assert!(
+        error.to_string().contains("temporary file budget"),
+        "unexpected error: {error}"
+    );
 }

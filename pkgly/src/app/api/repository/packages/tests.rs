@@ -1477,6 +1477,11 @@ mod catalog_db_tests {
                 .unwrap(),
             Some(10)
         );
+        assert!(
+            DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
+        );
         DBDockerObject::upsert(
             db.pool(),
             repository,
@@ -1494,6 +1499,11 @@ mod catalog_db_tests {
                 .await
                 .unwrap(),
             Some(60)
+        );
+        assert!(
+            !DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
         );
         DBDockerObject::insert_missing(db.pool(), repository, root, 999, &[])
             .await
@@ -1534,6 +1544,11 @@ mod catalog_db_tests {
         DBDockerObject::delete_paths(db.pool(), repository, &[blob.into()])
             .await
             .unwrap();
+        assert!(
+            DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
+        );
         assert_eq!(
             DBDockerObject::referenced_size(db.pool(), repository, root)
                 .await

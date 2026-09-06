@@ -95,6 +95,7 @@ When reviewing or writing code, check for:
 - ❌ Unclear variable names (x, temp, data)
 
 ## Project operations
+- run tests with `cargo test -q` to keep output minimal (passing test names are suppressed, failures still shown in full); the test logger defaults to `Warn` for third-party crates — raise levels via `storage_tests/storage_testing_config.toml` or `RUST_LOG` when debugging
 - to fully rebuild project and restart docker compose services use `./dev.sh`
 - to rebuild just UI/frontend `npm --prefix site run build`
 - to rebuild just backend `./dev.sh -b`

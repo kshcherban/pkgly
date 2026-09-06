@@ -36,15 +36,15 @@ use sha2::{Digest, Sha256};
 use sysinfo::System;
 use tokio::{
     fs,
-    io::BufReader,
-    sync::Mutex,
+    io::{AsyncRead, AsyncReadExt, AsyncWriteExt, BufReader, ReadBuf},
+    sync::{Mutex, OwnedSemaphorePermit, Semaphore},
     task,
     time::{Duration, Instant},
 };
 use url::{Host, Url};
 
 pub mod regions;
-use ahash::HashSet;
+use ahash::{HashMap, HashSet};
 use ipnet::IpNet;
 use parking_lot::{Mutex as ParkingMutex, RwLock};
 use serde::{Deserialize, Deserializer, Serialize};
@@ -689,6 +689,10 @@ struct CacheState {
     entries: LruCache<String, CacheEntry>,
     current_bytes: u64,
     failed_deletions: VecDeque<FailedDeletion>,
+    /// Monotonic mutation counter per object key. In-flight S3 reads capture a generation and
+    /// only publish into the cache when it is unchanged, so a GET that finishes after an
+    /// overwrite or deletion cannot resurrect stale content.
+    generations: HashMap<String, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -700,9 +704,11 @@ struct CacheEntry {
     last_modified: Option<chrono::DateTime<FixedOffset>>,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 struct CachedObject {
-    bytes: Bytes,
+    file: tokio::fs::File,
+    size: u64,
+    digest: String,
     content_type: Option<String>,
     last_modified: Option<chrono::DateTime<FixedOffset>>,
 }
@@ -724,6 +730,13 @@ struct FailedDeletion {
     relative_path: PathBuf,
     attempts: u32,
     next_retry: Instant,
+}
+
+/// Controls how cache publication interacts with per-object generation counters.
+#[derive(Debug, Clone, Copy)]
+enum PublishGuard {
+    Unconditional,
+    IfGeneration(u64),
 }
 
 impl FailedDeletion {
@@ -793,6 +806,7 @@ impl S3DiskCache {
             entries,
             current_bytes,
             failed_deletions: VecDeque::new(),
+            generations: HashMap::default(),
         };
         Ok(Self {
             dir,
@@ -871,6 +885,31 @@ impl S3DiskCache {
             && path
                 .components()
                 .all(|component| matches!(component, std::path::Component::Normal(_)))
+    }
+
+    async fn verify_content_file(
+        path: &std::path::Path,
+        expected_size: u64,
+        expected_digest: &str,
+    ) -> bool {
+        let Ok(mut file) = fs::File::open(path).await else {
+            return false;
+        };
+        let mut hasher = Sha256::new();
+        let mut buffer = vec![0u8; 64 * 1024];
+        let mut size = 0u64;
+        loop {
+            let read = match file.read(&mut buffer).await {
+                Ok(read) => read,
+                Err(_) => return false,
+            };
+            if read == 0 {
+                break;
+            }
+            size = size.saturating_add(read as u64);
+            hasher.update(&buffer[..read]);
+        }
+        size == expected_size && encode(hasher.finalize()) == expected_digest
     }
 
     async fn recover_entries(
@@ -953,13 +992,7 @@ impl S3DiskCache {
                     .map(|metadata| metadata.file_type().is_file())
                     .unwrap_or(false)
                 {
-                    match fs::read(&content_path).await {
-                        Ok(bytes) => {
-                            bytes.len() as u64 == metadata.size
-                                && hex::encode(Sha256::digest(&bytes)) == metadata.digest
-                        }
-                        Err(_) => false,
-                    }
+                    Self::verify_content_file(&content_path, metadata.size, &metadata.digest).await
                 } else {
                     false
                 };
@@ -1059,35 +1092,46 @@ impl S3DiskCache {
             }
         };
         let path = self.dir.join(&entry.relative_path);
-        let is_regular_file = fs::symlink_metadata(&path)
-            .await
-            .map(|metadata| metadata.file_type().is_file())
-            .unwrap_or(false);
-        if !is_regular_file {
+        let metadata = match fs::symlink_metadata(&path).await {
+            Ok(metadata) => metadata,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                self.remove_if_matches(key, &entry).await?;
+                return Ok(None);
+            }
+            Err(err) => return Err(err.into()),
+        };
+        // Cache reads open the file instead of hashing full contents into memory. Digest
+        // integrity is checked when entries are written and during startup recovery; the cheap
+        // size check here catches truncation and torn writes.
+        if !metadata.file_type().is_file() || metadata.len() != entry.size {
             self.remove_if_matches(key, &entry).await?;
             return Ok(None);
         }
-        match fs::read(&path).await {
-            Ok(data)
-                if data.len() as u64 == entry.size
-                    && hex::encode(Sha256::digest(&data)) == entry.digest =>
-            {
-                Ok(Some(CachedObject {
-                    bytes: Bytes::from(data),
-                    content_type: entry.content_type,
-                    last_modified: entry.last_modified,
-                }))
-            }
-            Ok(_) => {
-                self.remove_if_matches(key, &entry).await?;
-                Ok(None)
-            }
+        match fs::File::open(&path).await {
+            Ok(file) => Ok(Some(CachedObject {
+                file,
+                size: entry.size,
+                digest: entry.digest,
+                content_type: entry.content_type,
+                last_modified: entry.last_modified,
+            })),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 self.remove_if_matches(key, &entry).await?;
                 Ok(None)
             }
             Err(err) => Err(err.into()),
         }
+    }
+
+    /// Returns the current mutation generation for an object key (0 when never mutated).
+    async fn generation_for(&self, key: &str) -> u64 {
+        self.state
+            .lock()
+            .await
+            .generations
+            .get(key)
+            .copied()
+            .unwrap_or(0)
     }
 
     #[cfg(test)]
@@ -1112,6 +1156,52 @@ impl S3DiskCache {
             self.remove(key).await?;
             return Ok(());
         }
+        self.publish(
+            key,
+            data,
+            content_type,
+            last_modified,
+            PublishGuard::Unconditional,
+        )
+        .await
+        .map(|_| ())
+    }
+
+    /// Publishes cache content captured by an in-flight S3 read only when the object was not
+    /// mutated since the read started. Returns false (without touching the cache) when stale.
+    async fn put_if_generation(
+        &self,
+        key: &str,
+        data: Bytes,
+        content_type: Option<&str>,
+        last_modified: Option<chrono::DateTime<FixedOffset>>,
+        generation: u64,
+    ) -> Result<bool, S3StorageError> {
+        self.retry_failed_deletions().await;
+        if data.len() as u64 > self.max_bytes {
+            self.remove_if_generation(key, generation).await?;
+            return Ok(false);
+        }
+        self.publish(
+            key,
+            data,
+            content_type,
+            last_modified,
+            PublishGuard::IfGeneration(generation),
+        )
+        .await
+    }
+
+    /// Atomically publishes a cache entry. `Unconditional` writes bump the object generation;
+    /// `IfGeneration` writes verify the generation is unchanged before inserting the entry.
+    async fn publish(
+        &self,
+        key: &str,
+        data: Bytes,
+        content_type: Option<&str>,
+        last_modified: Option<chrono::DateTime<FixedOffset>>,
+        guard: PublishGuard,
+    ) -> Result<bool, S3StorageError> {
         let relative = Self::generated_filename(key);
         let path = self.dir.join(&relative);
         if let Some(parent) = path.parent() {
@@ -1144,10 +1234,34 @@ impl S3DiskCache {
         let mut removed_entries = Vec::new();
         let mut superseded_generations = Vec::new();
         let _publication = self.publish_lock.lock().await;
+        if let PublishGuard::IfGeneration(expected) = guard
+            && self
+                .state
+                .lock()
+                .await
+                .generations
+                .get(key)
+                .copied()
+                .unwrap_or(0)
+                != expected
+        {
+            // The object changed while the S3 read was in flight. Discard the temporary files
+            // without touching the current cache entry.
+            let _ = fs::remove_file(&temp_path).await;
+            let _ = fs::remove_file(&metadata_temp).await;
+            return Ok(false);
+        }
         fs::rename(&temp_path, &path).await?;
         fs::rename(&metadata_temp, &metadata_path).await?;
         {
             let mut state = self.state.lock().await;
+            if matches!(guard, PublishGuard::Unconditional) {
+                state
+                    .generations
+                    .entry(key.to_owned())
+                    .and_modify(|count| *count = count.wrapping_add(1))
+                    .or_insert(1);
+            }
             if let Some(old) = state.entries.pop(key) {
                 state.current_bytes = state.current_bytes.saturating_sub(old.size);
                 if old.relative_path != relative {
@@ -1186,13 +1300,19 @@ impl S3DiskCache {
         for rel in removed_entries {
             self.delete_relative_path(rel).await;
         }
-        Ok(())
+        Ok(true)
     }
 
     async fn remove(&self, key: &str) -> Result<(), S3StorageError> {
         self.retry_failed_deletions().await;
+        let _publication = self.publish_lock.lock().await;
         let removed = {
             let mut state = self.state.lock().await;
+            state
+                .generations
+                .entry(key.to_owned())
+                .and_modify(|count| *count = count.wrapping_add(1))
+                .or_insert(1);
             state.entries.pop(key).map(|entry| {
                 state.current_bytes = state.current_bytes.saturating_sub(entry.size);
                 entry.relative_path
@@ -1204,18 +1324,53 @@ impl S3DiskCache {
         Ok(())
     }
 
+    /// Removes an entry only when its generation still matches an in-flight read.
+    async fn remove_if_generation(
+        &self,
+        key: &str,
+        expected_generation: u64,
+    ) -> Result<(), S3StorageError> {
+        self.retry_failed_deletions().await;
+        let _publication = self.publish_lock.lock().await;
+        let removed = {
+            let mut state = self.state.lock().await;
+            if state.generations.get(key).copied().unwrap_or(0) != expected_generation {
+                return Ok(());
+            }
+            state
+                .generations
+                .entry(key.to_owned())
+                .and_modify(|count| *count = count.wrapping_add(1))
+                .or_insert(1);
+            state.entries.pop(key).map(|entry| {
+                state.current_bytes = state.current_bytes.saturating_sub(entry.size);
+                entry.relative_path
+            })
+        };
+        if let Some(relative) = removed {
+            self.delete_relative_path(relative).await;
+        }
+        Ok(())
+    }
+
     async fn remove_if_matches(
         &self,
         key: &str,
         expected: &CacheEntry,
     ) -> Result<(), S3StorageError> {
         self.retry_failed_deletions().await;
+        let _publication = self.publish_lock.lock().await;
         let removed = {
             let mut state = self.state.lock().await;
             let matches = state.entries.peek(key).is_some_and(|entry| {
                 entry.relative_path == expected.relative_path && entry.digest == expected.digest
             });
             if matches {
+                state
+                    .generations
+                    .entry(key.to_owned())
+                    .and_modify(|count| *count = count.wrapping_add(1))
+                    .or_insert(1);
                 state.entries.pop(key).map(|entry| {
                     state.current_bytes = state.current_bytes.saturating_sub(entry.size);
                     entry.relative_path
@@ -1336,14 +1491,42 @@ pub struct S3StorageInner {
     pub storage_config: StorageConfigInner,
     pub client: AwsS3Client,
     cache: Option<Arc<S3DiskCache>>,
+    cache_load_locks: ParkingMutex<HashMap<String, Arc<Mutex<()>>>>,
     manifest_cache: ParkingMutex<ManifestCache>,
-    manifest_load_lock: Mutex<()>,
+    manifest_load_locks: ParkingMutex<HashMap<Uuid, Arc<Mutex<()>>>>,
+    /// Local-disk staging for append-style uploads, keyed by full S3 object path.
+    /// Appends accumulate locally; the single upload happens when the object is moved.
+    append_staging: ParkingMutex<HashMap<String, StagedAppend>>,
+    /// Per-path locks serializing staging mutations so chunks for one upload cannot
+    /// interleave with its finalization while unrelated uploads proceed.
+    append_operation_locks: ParkingMutex<HashMap<String, Arc<Mutex<()>>>>,
+    /// Shared capacity for spooled incoming upload chunk files, accounted together with
+    /// staged bytes against MAX_STAGED_BYTES so uploads cannot exceed the shared budget.
+    upload_spool_budget: Arc<Semaphore>,
+    staging_dir: PathBuf,
+    /// Memoized ancestor paths that were verified clear of concrete objects.
+    creation_probes: ParkingMutex<LruCache<String, ()>>,
+    /// Changes whenever a concrete object is created, preventing an in-flight negative probe
+    /// from being cached after a concurrent write completes.
+    creation_probe_generation: ParkingMutex<u64>,
+}
+
+/// Local staging state for one append-style upload.
+#[derive(Debug, Clone)]
+struct StagedAppend {
+    path: PathBuf,
+    size: u64,
+    /// S3 ETag of the pre-existing object when staging started, if any.
+    base_etag: Option<String>,
+    /// Shared temporary-storage capacity held for this staged file.
+    budget_permits: Vec<Arc<OwnedSemaphorePermit>>,
+    reserved_units: usize,
 }
 
 #[derive(Debug)]
 struct ManifestCache {
     entries: LruCache<Uuid, CachedManifestList>,
-    generation: u64,
+    generations: HashMap<Uuid, u64>,
 }
 
 #[derive(Debug, Clone)]
@@ -1356,7 +1539,7 @@ impl ManifestCache {
     fn new() -> Self {
         Self {
             entries: LruCache::new(NonZeroUsize::new(256).unwrap_or(NonZeroUsize::MIN)),
-            generation: 0,
+            generations: HashMap::default(),
         }
     }
 
@@ -1386,17 +1569,20 @@ impl ManifestCache {
         now: Instant,
         generation: u64,
     ) {
-        if self.generation == generation {
+        if self.generations.get(&repository).copied().unwrap_or(0) == generation {
             self.insert(repository, items, now);
         }
     }
 
-    fn generation(&self) -> u64 {
-        self.generation
+    fn generation(&self, repository: Uuid) -> u64 {
+        self.generations.get(&repository).copied().unwrap_or(0)
     }
 
     fn invalidate(&mut self, repository: Uuid) {
-        self.generation = self.generation.wrapping_add(1);
+        self.generations
+            .entry(repository)
+            .and_modify(|generation| *generation = generation.wrapping_add(1))
+            .or_insert(1);
         self.entries.pop(&repository);
     }
 }
@@ -1581,6 +1767,59 @@ impl S3StorageInner {
         let cache = S3DiskCache::new(&config.cache, &storage.storage_name).await?;
         Ok(Some(Arc::new(cache)))
     }
+
+    /// Creates a fresh staging directory for append uploads and removes only stale leftovers from
+    /// previous runs, leaving active staging directories untouched.
+    async fn prepare_staging_dir(storage_name: &str) -> Result<PathBuf, S3StorageError> {
+        let prefix = format!("pkgly-s3-staging-{storage_name}-");
+        let dir = std::env::temp_dir().join(format!("{prefix}{}", Uuid::new_v4().simple()));
+        let mut entries = fs::read_dir(std::env::temp_dir()).await?;
+        while let Some(entry) = entries.next_entry().await? {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            if !name.starts_with(&prefix) {
+                continue;
+            }
+            let owner = fs::read_to_string(entry.path().join(".owner")).await.ok();
+            let owned_by_current_process = owner
+                .as_deref()
+                .and_then(|value| value.trim().parse::<u32>().ok())
+                .is_some_and(|pid| pid == std::process::id());
+            if !owned_by_current_process {
+                let _ = fs::remove_dir_all(entry.path()).await;
+            }
+        }
+        fs::create_dir_all(&dir).await?;
+        fs::write(dir.join(".owner"), std::process::id().to_string()).await?;
+        Ok(dir)
+    }
+
+    /// Acquires budget for buffering a body of the given size, or None when it exceeds the
+    /// shared budget (callers must stream instead of buffering in that case).
+    async fn acquire_body_budget(&self, size: u64) -> Option<tokio::sync::OwnedSemaphorePermit> {
+        let permits = size.div_ceil(BODY_BUDGET_PERMIT_BYTES);
+        let total_permits = BODY_BUDGET_BYTES / BODY_BUDGET_PERMIT_BYTES;
+        if permits > total_permits {
+            return None;
+        }
+        global_body_budget()
+            .acquire_many_owned(permits as u32)
+            .await
+            .ok()
+    }
+
+    /// Captures the cache generation for a location, or None when caching is disabled.
+    async fn cache_generation(&self, repository: &Uuid, location: &StoragePath) -> Option<u64> {
+        if !self.should_cache(location) {
+            return None;
+        }
+        let cache = self.cache.as_ref()?;
+        Some(
+            cache
+                .generation_for(&self.cache_key(repository, location))
+                .await,
+        )
+    }
+
     pub fn s3_path(&self, repository: &Uuid, path: &StoragePath) -> String {
         format!("{}/{}", repository, path)
     }
@@ -1710,6 +1949,316 @@ impl S3StorageInner {
             cache.remove(&key).await?;
         }
         Ok(())
+    }
+
+    /// Publishes GET-captured content into the cache only when the object generation is
+    /// unchanged since the read started, so stale content never overwrites newer cache entries.
+    async fn cache_put_if_generation(
+        &self,
+        repository: &Uuid,
+        location: &StoragePath,
+        data: Bytes,
+        content_type: Option<String>,
+        last_modified: Option<ChronoDateTime<FixedOffset>>,
+        generation: u64,
+    ) -> Result<(), S3StorageError> {
+        if !self.should_cache(location) {
+            return Ok(());
+        }
+        if let Some(cache) = &self.cache {
+            let key = self.cache_key(repository, location);
+            cache
+                .put_if_generation(
+                    &key,
+                    data,
+                    content_type.as_deref(),
+                    last_modified,
+                    generation,
+                )
+                .await?;
+        }
+        Ok(())
+    }
+
+    /// Ensures a local staging file exists for an append-style upload, seeding it with any
+    /// existing S3 object content. Returns the staging path, current size, and base ETag.
+    async fn ensure_staging(
+        &self,
+        path: &str,
+    ) -> Result<(PathBuf, u64, Option<String>), S3StorageError> {
+        let existing = {
+            let staging = self.append_staging.lock();
+            staging
+                .get(path)
+                .map(|entry| (entry.path.clone(), entry.size, entry.base_etag.clone()))
+        };
+        if let Some(existing) = existing {
+            return Ok(existing);
+        }
+        let staging_path = self.staging_dir.join(Uuid::new_v4().simple().to_string());
+        let mut file = fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&staging_path)
+            .await?;
+        let (size, base_etag, budget_permits, reserved_units) = match self
+            .aws_client()
+            .get_object()
+            .bucket(self.bucket())
+            .key(path)
+            .customize()
+            .config_override(timeout_override(streaming_timeout_config()))
+            .send()
+            .await
+        {
+            Ok(response) => {
+                let Some(etag) = response.e_tag().map(str::to_owned) else {
+                    drop(file);
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(S3StorageError::aws_message(
+                        "S3 existing object did not return an ETag; refusing an unguarded append",
+                    ));
+                };
+                let Some(size) = response
+                    .content_length()
+                    .and_then(|size| u64::try_from(size).ok())
+                else {
+                    drop(file);
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(S3StorageError::aws_message(
+                        "S3 existing object did not return a valid content length",
+                    ));
+                };
+                let reserved_units = size.div_ceil(S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize;
+                let budget_permits = if reserved_units == 0 {
+                    Vec::new()
+                } else {
+                    match self
+                        .upload_spool_budget
+                        .clone()
+                        .try_acquire_many_owned(reserved_units as u32)
+                    {
+                        Ok(permit) => vec![Arc::new(permit)],
+                        Err(_) => {
+                            drop(file);
+                            let _ = fs::remove_file(&staging_path).await;
+                            return Err(S3StorageError::aws_message(
+                                "S3 append staging byte capacity exceeded",
+                            ));
+                        }
+                    }
+                };
+                let mut stream = response.body.into_async_read();
+                let copied = match tokio::io::copy(&mut stream, &mut file).await {
+                    Ok(copied) => copied,
+                    Err(error) => {
+                        drop(file);
+                        let _ = fs::remove_file(&staging_path).await;
+                        return Err(error.into());
+                    }
+                };
+                if copied != size {
+                    drop(file);
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(S3StorageError::aws_message(
+                        "S3 existing object length changed while staging",
+                    ));
+                }
+                (copied, Some(etag), budget_permits, reserved_units)
+            }
+            Err(error) => {
+                let error = S3StorageError::from_sdk_error(error);
+                if error.is_not_found() {
+                    (0, None, Vec::new(), 0)
+                } else {
+                    drop(file);
+                    let _ = fs::remove_file(&staging_path).await;
+                    return Err(error);
+                }
+            }
+        };
+        if let Err(error) = file.flush().await {
+            drop(file);
+            let _ = fs::remove_file(&staging_path).await;
+            return Err(error.into());
+        }
+        // Publish the staging entry; a concurrent first-append may have won, so discard ours.
+        enum StagingDecision {
+            Ready(PathBuf, u64, Option<String>),
+            Existing(PathBuf, u64, Option<String>),
+            CapacityExceeded,
+        }
+        let decision = {
+            let mut staging = self.append_staging.lock();
+            if let Some(existing) = staging.get(path) {
+                StagingDecision::Existing(
+                    existing.path.clone(),
+                    existing.size,
+                    existing.base_etag.clone(),
+                )
+            } else if staging.len() >= MAX_STAGED_UPLOADS {
+                StagingDecision::CapacityExceeded
+            } else {
+                staging.insert(
+                    path.to_string(),
+                    StagedAppend {
+                        path: staging_path.clone(),
+                        size,
+                        base_etag: base_etag.clone(),
+                        budget_permits,
+                        reserved_units,
+                    },
+                );
+                StagingDecision::Ready(staging_path.clone(), size, base_etag)
+            }
+        };
+        match decision {
+            StagingDecision::Ready(result, size, base_etag) => Ok((result, size, base_etag)),
+            StagingDecision::Existing(result, size, base_etag) => {
+                drop(file);
+                let _ = fs::remove_file(&staging_path).await;
+                Ok((result, size, base_etag))
+            }
+            StagingDecision::CapacityExceeded => {
+                drop(file);
+                let _ = fs::remove_file(&staging_path).await;
+                Err(S3StorageError::aws_message(
+                    "S3 append staging capacity exceeded; too many concurrent uploads",
+                ))
+            }
+        }
+    }
+
+    /// Removes staging state for an object, returning whether staging existed.
+    async fn remove_staging(&self, path: &str) -> bool {
+        let operation_lock = self.staging_operation_lock(path);
+        let _operation = operation_lock.lock().await;
+        let Some(entry) = self.append_staging.lock().remove(path) else {
+            return false;
+        };
+        let _ = fs::remove_file(entry.path).await;
+        true
+    }
+
+    /// Drops staging entries for a repository prefix (used during repository deletion).
+    async fn remove_staging_prefix(&self, repository: &Uuid) {
+        let prefix = format!("{repository}/");
+        let entries: Vec<(String, PathBuf)> = {
+            let staging = self.append_staging.lock();
+            staging
+                .iter()
+                .filter(|(key, _)| key.starts_with(&prefix))
+                .map(|(key, entry)| (key.clone(), entry.path.clone()))
+                .collect()
+        };
+        for (key, path) in entries {
+            let operation_lock = self.staging_operation_lock(&key);
+            let _operation = operation_lock.lock().await;
+            self.append_staging.lock().remove(&key);
+            let _ = fs::remove_file(path).await;
+        }
+    }
+
+    async fn cleanup_staging(&self) -> Result<(), S3StorageError> {
+        let keys: Vec<String> = self.append_staging.lock().keys().cloned().collect();
+        for key in keys {
+            let operation_lock = self.staging_operation_lock(&key);
+            let _operation = operation_lock.lock().await;
+            let staged_path = self
+                .append_staging
+                .lock()
+                .remove(&key)
+                .map(|entry| entry.path);
+            if let Some(path) = staged_path {
+                let _ = fs::remove_file(path).await;
+            }
+        }
+        match fs::remove_dir_all(&self.staging_dir).await {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error.into()),
+        }
+    }
+
+    /// Records that a concrete object was created at `path`, invalidating any memoized
+    /// "clear ancestor" probe for that path.
+    fn note_object_created(&self, path: &str) {
+        let mut generation = self.creation_probe_generation.lock();
+        *generation = generation.wrapping_add(1);
+        self.creation_probes.lock().pop(path);
+    }
+
+    fn creation_probe_generation(&self) -> u64 {
+        *self.creation_probe_generation.lock()
+    }
+
+    /// Returns a per-repository lock coordinating cold manifest listing loads.
+    async fn manifest_load_lock(&self, repository: Uuid) -> Arc<Mutex<()>> {
+        let mut locks = self.manifest_load_locks.lock();
+        if locks.len() > MANIFEST_LOAD_LOCK_CAPACITY {
+            locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+        }
+        locks
+            .entry(repository)
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    fn cache_load_lock(&self, key: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.cache_load_locks.lock();
+        if locks.len() > CACHE_LOAD_LOCK_CAPACITY {
+            locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+        }
+        locks
+            .entry(key.to_owned())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Returns the per-path lock coordinating staging appends with finalization and
+    /// cleanup for a single upload, leaving unrelated uploads uncontended.
+    fn staging_operation_lock(&self, path: &str) -> Arc<Mutex<()>> {
+        let mut locks = self.append_operation_locks.lock();
+        if locks.len() > CACHE_LOAD_LOCK_CAPACITY {
+            locks.retain(|_, lock| Arc::strong_count(lock) > 1);
+        }
+        locks
+            .entry(path.to_owned())
+            .or_insert_with(|| Arc::new(Mutex::new(())))
+            .clone()
+    }
+
+    /// Atomically reserves `additional` staged bytes for one upload under the shared
+    /// budget. Returns the newly acquired permit units, or None when the upload has no
+    /// staging entry or the budget would be exceeded.
+    fn reserve_staged_size(&self, path: &str, additional: u64) -> Option<usize> {
+        let mut staging = self.append_staging.lock();
+        let entry = staging.get_mut(path)?;
+        let new_size = entry.size.saturating_add(additional);
+        let required_units = new_size.div_ceil(S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize;
+        let additional_units = required_units.saturating_sub(entry.reserved_units);
+        if additional_units > 0 {
+            let permit = self
+                .upload_spool_budget
+                .clone()
+                .try_acquire_many_owned(additional_units as u32)
+                .ok()?;
+            entry.budget_permits.push(Arc::new(permit));
+            entry.reserved_units = required_units;
+        }
+        entry.size = new_size;
+        Some(additional_units)
+    }
+
+    /// Rolls back a reservation after a failed append.
+    fn release_staged_size(&self, path: &str, amount: u64, reserved_units: usize) {
+        if let Some(entry) = self.append_staging.lock().get_mut(path) {
+            entry.size = entry.size.saturating_sub(amount);
+            if reserved_units > 0 {
+                entry.reserved_units = entry.reserved_units.saturating_sub(reserved_units);
+                entry.budget_permits.pop();
+            }
+        }
     }
 
     async fn multipart_copy(
@@ -1876,13 +2425,24 @@ impl S3StorageInner {
             conflicting_path.push_mut(part.as_ref());
 
             let is_last = iter.peek().is_none();
-            if !is_last && self.does_path_exist(&path).await? {
-                // A parent segment is a concrete object, so we cannot place a child under it.
-                return Err(PathCollisionError {
-                    path: location.clone(),
-                    conflicts_with: conflicting_path,
+            if !is_last {
+                // Memoize ancestor probes: the S3 object set changes only through this storage
+                // instance, and every concrete object creation invalidates its own path.
+                let already_checked = self.creation_probes.lock().peek(&path).is_some();
+                if !already_checked {
+                    let probe_generation = self.creation_probe_generation();
+                    if self.does_path_exist(&path).await? {
+                        // A parent segment is a concrete object, so we cannot place a child under it.
+                        return Err(PathCollisionError {
+                            path: location.clone(),
+                            conflicts_with: conflicting_path,
+                        }
+                        .into());
+                    }
+                    if self.creation_probe_generation() == probe_generation {
+                        self.creation_probes.lock().put(path.clone(), ());
+                    }
                 }
-                .into());
             }
         }
 
@@ -2000,10 +2560,60 @@ const FAILED_DELETION_BASE_DELAY_MS: u64 = 100;
 const FAILED_DELETION_MAX_DELAY_MS: u64 = 30_000;
 const FAILED_DELETION_BACKOFF_CUTOFF: u32 = 8;
 
+// Shared budget for concurrently buffered S3 bodies (GET bodies, cache pre-warming reads).
+// Permits are 1 MiB each; operations needing more than the budget stream instead of buffering.
+const BODY_BUDGET_BYTES: u64 = 256 * 1024 * 1024;
+const BODY_BUDGET_PERMIT_BYTES: u64 = 1024 * 1024;
+static GLOBAL_BODY_BUDGET: OnceLock<Arc<Semaphore>> = OnceLock::new();
+
+// Staged (local-disk) append uploads bound concurrent in-flight Docker pushes. The flat cap makes
+// capacity exhaustion explicit instead of allowing uploads to spill without a bound. Incoming
+// upload chunk files spool against the same budget through `upload_spool_budget`, so staged
+// bytes plus in-flight spool files never exceed MAX_STAGED_BYTES.
+const MAX_STAGED_UPLOADS: usize = 64;
+const MAX_STAGED_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+/// Permit granularity of the shared upload spool budget (see `S3Storage::upload_spool_budget`).
+pub const S3_UPLOAD_SPOOL_PERMIT_BYTES: u64 = 1024 * 1024;
+const CREATION_PROBE_CACHE_CAPACITY: usize = 4096;
+const CACHE_LOAD_LOCK_CAPACITY: usize = 4096;
+const MANIFEST_LOAD_LOCK_CAPACITY: usize = 1024;
+
 #[derive(Debug, Copy, Clone, PartialEq, Eq)]
 enum BodyRetrievalStrategy {
     BufferAndCache,
     StreamWithoutCache,
+}
+
+/// Keeps a buffered response's memory reservation until its bytes have been consumed.
+struct BudgetedBytesReader {
+    bytes: Bytes,
+    offset: usize,
+    _permit: OwnedSemaphorePermit,
+}
+
+impl AsyncRead for BudgetedBytesReader {
+    fn poll_read(
+        mut self: Pin<&mut Self>,
+        _cx: &mut std::task::Context<'_>,
+        buffer: &mut ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        if self.offset < self.bytes.len() && buffer.remaining() > 0 {
+            let count = (self.bytes.len() - self.offset).min(buffer.remaining());
+            buffer.put_slice(&self.bytes[self.offset..self.offset + count]);
+            self.offset += count;
+        }
+        std::task::Poll::Ready(Ok(()))
+    }
+}
+
+fn global_body_budget() -> Arc<Semaphore> {
+    GLOBAL_BODY_BUDGET
+        .get_or_init(|| {
+            Arc::new(Semaphore::new(
+                (BODY_BUDGET_BYTES / BODY_BUDGET_PERMIT_BYTES) as usize,
+            ))
+        })
+        .clone()
 }
 
 impl BodyRetrievalStrategy {
@@ -2063,6 +2673,7 @@ impl Storage for S3Storage {
     #[instrument(name = "Storage::unload", fields(storage_type = "s3"))]
     async fn unload(&self) -> Result<(), S3StorageError> {
         info!("Unloading S3 Storage");
+        self.cleanup_staging().await?;
         Ok(())
     }
     #[instrument(fields(storage_type = "s3"))]
@@ -2075,7 +2686,7 @@ impl Storage for S3Storage {
     #[instrument(
         name = "Storage::save_file",
         fields(storage_type = "s3", repository = %repository, path = %location),
-        skip(file)
+        skip(self, file)
     )]
     async fn save_file(
         &self,
@@ -2084,6 +2695,7 @@ impl Storage for S3Storage {
         location: &StoragePath,
     ) -> Result<(usize, bool), S3StorageError> {
         let path = self.get_path_for_creation(repository, location).await?;
+        self.note_object_created(&path);
         let already_exists = self.does_path_exist(&path).await?;
         if already_exists {
             debug!("File already exists, overwriting");
@@ -2093,39 +2705,102 @@ impl Storage for S3Storage {
         } else {
             "application/octet-stream"
         };
-        let file_as_bytes = file_into_bytes(file).await?;
-        let size = file_as_bytes.len();
-        let cache_buffer = (self.should_cache(location)
-            && size as u64 <= self.cache.as_ref().map_or(0, |cache| cache.max_bytes))
-        .then(|| file_as_bytes.clone());
-        let (body, _) = bytes_to_stream(file_as_bytes);
-        self.aws_client()
-            .put_object()
-            .bucket(self.bucket())
-            .key(&path)
-            .body(body)
-            .content_type(content_type)
-            .customize()
-            .config_override(timeout_override(streaming_timeout_config()))
-            .send()
-            .await
-            .map_err(S3StorageError::from_sdk_error)?;
-        debug!(path = %path, "File saved to S3");
-        self.invalidate_manifest_cache(repository);
-        let modified = Local::now().fixed_offset();
-        if let Some(cache_buffer) = cache_buffer {
-            self.cache_put(
-                &repository,
-                location,
-                cache_buffer,
-                Some(content_type.to_string()),
-                Some(modified),
-            )
-            .await?;
-        } else {
-            self.cache_remove(&repository, location).await?;
-        }
-        Ok((size, !already_exists))
+        let size = match file {
+            // Stream paths directly into S3 instead of buffering whole files in memory.
+            FileContent::Path(ref file_path) => {
+                let size = fs::metadata(file_path).await?.len();
+                let cacheable = self.should_cache(location)
+                    && size <= self.cache.as_ref().map_or(0, |cache| cache.max_bytes)
+                    && size <= BODY_BUDGET_BYTES;
+                let body = ByteStream::read_from()
+                    .path(file_path.clone())
+                    .build()
+                    .await
+                    .map_err(|error| S3StorageError::IOError(std::io::Error::other(error)))?;
+                self.aws_client()
+                    .put_object()
+                    .bucket(self.bucket())
+                    .key(&path)
+                    .body(body)
+                    .content_type(content_type)
+                    .customize()
+                    .config_override(timeout_override(streaming_timeout_config()))
+                    .send()
+                    .await
+                    .map_err(S3StorageError::from_sdk_error)?;
+                self.note_object_created(&path);
+                debug!(path = %path, "File streamed to S3");
+                self.invalidate_manifest_cache(repository);
+                let modified = Local::now().fixed_offset();
+                if cacheable {
+                    if let Some(_budget) = self.acquire_body_budget(size).await {
+                        let data = fs::read(file_path).await?;
+                        self.cache_put(
+                            &repository,
+                            location,
+                            Bytes::from(data),
+                            Some(content_type.to_string()),
+                            Some(modified),
+                        )
+                        .await?;
+                    } else {
+                        self.cache_remove(&repository, location).await?;
+                    }
+                } else {
+                    self.cache_remove(&repository, location).await?;
+                }
+                size
+            }
+            other => {
+                let body_size = match &other {
+                    FileContent::Content(content) => content.len() as u64,
+                    FileContent::Bytes(bytes) => bytes.len() as u64,
+                    FileContent::Path(_) => 0,
+                };
+                let _budget = if body_size <= BODY_BUDGET_BYTES {
+                    self.acquire_body_budget(body_size).await
+                } else {
+                    None
+                };
+                let file_as_bytes = file_into_bytes(other).await?;
+                let size = file_as_bytes.len() as u64;
+                let cache_buffer = (self.should_cache(location)
+                    && size <= self.cache.as_ref().map_or(0, |cache| cache.max_bytes)
+                    && size <= BODY_BUDGET_BYTES)
+                    .then(|| file_as_bytes.clone());
+                let (body, _) = bytes_to_stream(file_as_bytes);
+                self.aws_client()
+                    .put_object()
+                    .bucket(self.bucket())
+                    .key(&path)
+                    .body(body)
+                    .content_type(content_type)
+                    .customize()
+                    .config_override(timeout_override(streaming_timeout_config()))
+                    .send()
+                    .await
+                    .map_err(S3StorageError::from_sdk_error)?;
+                self.note_object_created(&path);
+                debug!(path = %path, "File saved to S3");
+                self.invalidate_manifest_cache(repository);
+                let modified = Local::now().fixed_offset();
+                if let Some(cache_buffer) = cache_buffer {
+                    self.cache_put(
+                        &repository,
+                        location,
+                        cache_buffer,
+                        Some(content_type.to_string()),
+                        Some(modified),
+                    )
+                    .await?;
+                } else {
+                    self.cache_remove(&repository, location).await?;
+                }
+                size
+            }
+        };
+        let size_usize = usize::try_from(size).unwrap_or(usize::MAX);
+        Ok((size_usize, !already_exists))
     }
     #[instrument(name = "Storage::append_file", fields(storage_type = "s3"))]
     async fn append_file(
@@ -2134,11 +2809,7 @@ impl Storage for S3Storage {
         file: FileContent,
         location: &StoragePath,
     ) -> Result<usize, S3StorageError> {
-        // S3 doesn't support native append operations
-        // We need to read, append, and write back
-        // This is still O(n) for S3 since network I/O dominates
         let path = self.get_path_for_creation(repository, location).await?;
-
         let (current_bytes, current_etag) = match self
             .aws_client()
             .get_object()
@@ -2166,13 +2837,11 @@ impl Storage for S3Storage {
                 }
             }
         };
-
         let appended = file_into_bytes(file).await?;
         let mut combined_buffer = BytesMut::with_capacity(current_bytes.len() + appended.len());
         combined_buffer.extend_from_slice(&current_bytes);
         combined_buffer.extend_from_slice(&appended);
         let combined_bytes = combined_buffer.freeze();
-
         let content_type = if location.is_directory() {
             "application/x-directory"
         } else {
@@ -2196,22 +2865,9 @@ impl Storage for S3Storage {
             .await
             .map_err(S3StorageError::from_sdk_error)?;
         let appended_size = appended.len();
+        self.note_object_created(&path);
+        self.cache_remove(&repository, location).await?;
         self.invalidate_manifest_cache(repository);
-        let modified = Local::now().fixed_offset();
-        if self.should_cache(location)
-            && combined_bytes.len() as u64 <= self.cache.as_ref().map_or(0, |cache| cache.max_bytes)
-        {
-            self.cache_put(
-                &repository,
-                location,
-                combined_bytes,
-                Some(content_type.to_string()),
-                Some(modified),
-            )
-            .await?;
-        } else {
-            self.cache_remove(&repository, location).await?;
-        }
         Ok(appended_size)
     }
     #[instrument(name = "Storage::put_repository_meta", fields(storage_type = "s3"))]
@@ -2312,9 +2968,10 @@ impl Storage for S3Storage {
         location: &StoragePath,
     ) -> Result<bool, S3StorageError> {
         let path = self.s3_path(&repository, location);
+        let had_staging = self.remove_staging(&path).await;
         let exists = self.does_path_exist(&path).await?;
         if !exists {
-            return Ok(false);
+            return Ok(had_staging);
         }
         with_timeout(
             S3_CONTROL_TIMEOUT,
@@ -2343,6 +3000,93 @@ impl Storage for S3Storage {
         let from_path = self.s3_path(&repository, from);
         let to_path = self.s3_path(&repository, to);
 
+        // Finalize a staged append-style upload: upload the local staging file once and delete
+        // the pre-existing S3 source object (if any) with the same conditional guard as before.
+        // Serialize with appends and cleanup for this upload only, so the S3 transfer does not
+        // block unrelated uploads; drop the guard before an ordinary server-side move.
+        let staging_lock = self.staging_operation_lock(&from_path);
+        let staging_operation = staging_lock.lock().await;
+        let staged = self.append_staging.lock().get(&from_path).cloned();
+        if let Some(staged) = staged {
+            self.note_object_created(&to_path);
+            let content_type = if to.is_directory() {
+                "application/x-directory"
+            } else {
+                "application/octet-stream"
+            };
+            let body = ByteStream::read_from()
+                .path(staged.path.clone())
+                .build()
+                .await
+                .map_err(|error| S3StorageError::IOError(std::io::Error::other(error)))?;
+            let mut request = self
+                .aws_client()
+                .put_object()
+                .bucket(self.bucket())
+                .key(&to_path)
+                .content_type(content_type)
+                .body(body);
+            request = request.if_none_match("*");
+            let upload_result = request
+                .customize()
+                .config_override(timeout_override(streaming_timeout_config()))
+                .send()
+                .await;
+            if let Err(error) = upload_result {
+                let error = S3StorageError::from_sdk_error(error);
+                if !error.is_conflict() {
+                    return Err(error);
+                }
+                // A previous attempt may have uploaded the destination before failing while
+                // deleting the source. Treat a same-sized destination as an idempotent retry.
+                let destination = match with_timeout(
+                    S3_CONTROL_TIMEOUT,
+                    self.aws_client()
+                        .head_object()
+                        .bucket(self.bucket())
+                        .key(&to_path)
+                        .send(),
+                )
+                .await
+                {
+                    Ok(destination) => destination,
+                    Err(head_error) if head_error.is_not_found() => return Err(error),
+                    Err(_) => return Err(error),
+                };
+                let destination_size =
+                    destination.content_length().unwrap_or_default().max(0) as u64;
+                if destination_size != staged.size {
+                    return Err(error);
+                }
+            }
+            self.note_object_created(&to_path);
+            if let Some(etag) = staged.base_etag.clone()
+                && let Err(error) = with_timeout(
+                    S3_CONTROL_TIMEOUT,
+                    self.aws_client()
+                        .delete_object()
+                        .bucket(self.bucket())
+                        .key(&from_path)
+                        .if_match(etag)
+                        .send(),
+                )
+                .await
+            {
+                warn!(path = %from_path, %error, "Conditional source deletion failed after staged finalize");
+                self.cache_remove(&repository, to).await?;
+                self.cache_remove(&repository, from).await?;
+                self.invalidate_manifest_cache(repository);
+                return Err(error);
+            }
+            self.append_staging.lock().remove(&from_path);
+            let _ = fs::remove_file(&staged.path).await;
+            self.cache_remove(&repository, to).await?;
+            self.cache_remove(&repository, from).await?;
+            self.invalidate_manifest_cache(repository);
+            return Ok(true);
+        }
+        drop(staging_operation);
+
         let head = match with_timeout(
             S3_CONTROL_TIMEOUT,
             self.aws_client()
@@ -2359,6 +3103,7 @@ impl Storage for S3Storage {
             }
             Err(error) => return Err(error),
         };
+        self.note_object_created(&to_path);
         let Some(source_etag) = head.e_tag().map(str::to_owned) else {
             return Err(S3StorageError::aws_message(
                 "S3 source object did not return an ETag; refusing an unguarded move",
@@ -2385,6 +3130,7 @@ impl Storage for S3Storage {
             self.multipart_copy(&to_path, &source, &source_etag, object_size, &head)
                 .await?;
         }
+        self.note_object_created(&to_path);
 
         // The destination changed as soon as the copy completed. Drop any stale destination
         // cache before attempting the guarded source deletion.
@@ -2421,6 +3167,22 @@ impl Storage for S3Storage {
         repository: uuid::Uuid,
         location: &StoragePath,
     ) -> Result<Option<crate::StorageFileMeta<FileType>>, S3StorageError> {
+        // Staged append uploads exist only locally until finalized; report their size directly.
+        let path = self.s3_path(&repository, location);
+        if let Some(entry) = self.append_staging.lock().get(&path) {
+            let modified = Local::now().fixed_offset();
+            return Ok(Some(StorageFileMeta::<FileType> {
+                name: location.to_string(),
+                file_type: FileType::File(FileFileType {
+                    file_size: entry.size,
+                    mime_type: None,
+                    file_hash: FileHashes::default(),
+                }),
+                modified,
+                created: modified,
+            }));
+        }
+
         // Metadata describes the S3 object even if its local content copy is evicted
         // or damaged. Only content reads need to read and verify the cache file.
         let cached = if self.should_cache(location) {
@@ -2448,7 +3210,12 @@ impl Storage for S3Storage {
                 file_type: FileType::File(FileFileType {
                     file_size: size,
                     mime_type,
-                    file_hash: FileHashes::default(),
+                    file_hash: FileHashes {
+                        md5: None,
+                        sha1: None,
+                        sha2_256: Some(cached.digest),
+                        sha3_256: None,
+                    },
                 }),
                 modified,
                 created: modified,
@@ -2555,33 +3322,106 @@ impl Storage for S3Storage {
         repository: uuid::Uuid,
         location: &StoragePath,
     ) -> Result<Option<crate::StorageFile>, S3StorageError> {
+        // Staged append uploads live only on local disk until finalized; serve them directly.
+        let path = self.s3_path(&repository, location);
+        let staged = self.append_staging.lock().get(&path).cloned();
+        if let Some(staged) = staged {
+            let modified = Local::now().fixed_offset();
+            let meta = StorageFileMeta::<FileFileType> {
+                name: location.to_string(),
+                file_type: FileFileType {
+                    file_size: staged.size,
+                    mime_type: None,
+                    file_hash: FileHashes::default(),
+                },
+                modified,
+                created: modified,
+            };
+            let file = fs::File::open(&staged.path).await?;
+            return Ok(Some(StorageFile::File {
+                meta,
+                content: crate::StorageFileReader::File(file),
+            }));
+        }
         if let Some(cached) = self.cache_get(&repository, location).await? {
             let mime_type = cached
                 .content_type
                 .as_deref()
                 .and_then(|ct| Mime::from_str(ct).ok())
                 .map(SerdeMime);
-            let size = cached.bytes.len() as u64;
             let modified = cached
                 .last_modified
                 .unwrap_or_else(|| Local::now().fixed_offset());
             let meta = StorageFileMeta::<FileFileType> {
                 name: location.to_string(),
                 file_type: FileFileType {
-                    file_size: size,
+                    file_size: cached.size,
                     mime_type,
-                    file_hash: FileHashes::default(),
+                    // Retain the digest verified when the cache entry was written so callers
+                    // (e.g. Docker blob delivery) can skip re-hashing the content.
+                    file_hash: FileHashes {
+                        md5: None,
+                        sha1: None,
+                        sha2_256: Some(cached.digest),
+                        sha3_256: None,
+                    },
                 },
                 modified,
                 created: modified,
             };
             let result = StorageFile::File {
                 meta,
-                content: crate::StorageFileReader::Bytes(FileContentBytes::Bytes(cached.bytes)),
+                content: crate::StorageFileReader::File(cached.file),
             };
             return Ok(Some(result));
         }
+        let cache_allowed = self.should_cache(location);
+        let cache_load_lock =
+            cache_allowed.then(|| self.cache_load_lock(&self.cache_key(&repository, location)));
+        let cache_load_guard = if let Some(lock) = cache_load_lock.as_ref() {
+            Some(lock.lock().await)
+        } else {
+            None
+        };
+        // Another request may have populated the cache while this request was waiting for the
+        // per-key lock.
+        if cache_allowed && let Some(cached) = self.cache_get(&repository, location).await? {
+            let mime_type = cached
+                .content_type
+                .as_deref()
+                .and_then(|ct| Mime::from_str(ct).ok())
+                .map(SerdeMime);
+            let modified = cached
+                .last_modified
+                .unwrap_or_else(|| Local::now().fixed_offset());
+            let meta = StorageFileMeta::<FileFileType> {
+                name: location.to_string(),
+                file_type: FileFileType {
+                    file_size: cached.size,
+                    mime_type,
+                    file_hash: FileHashes {
+                        md5: None,
+                        sha1: None,
+                        sha2_256: Some(cached.digest),
+                        sha3_256: None,
+                    },
+                },
+                modified,
+                created: modified,
+            };
+            return Ok(Some(StorageFile::File {
+                meta,
+                content: crate::StorageFileReader::File(cached.file),
+            }));
+        }
         let path = self.s3_path(&repository, location);
+        // Capture the generation before starting the S3 request. A mutation that completes while
+        // the response is in flight must prevent this response from being cached.
+        let cache_generation = if cache_allowed {
+            self.cache_generation(&repository, location).await
+        } else {
+            None
+        };
         let response = match self
             .aws_client()
             .get_object()
@@ -2614,8 +3454,11 @@ impl Storage for S3Storage {
             .content_length()
             .and_then(|len| len.try_into().ok());
         let response_length = response_length_opt.unwrap_or_default();
-        let cache_allowed = self.should_cache(location);
-        let buffer_limit = self.config.adaptive_buffer.buffer_limit_bytes();
+        let buffer_limit = self
+            .config
+            .adaptive_buffer
+            .buffer_limit_bytes()
+            .min(BODY_BUDGET_BYTES);
         let strategy = BodyRetrievalStrategy::from_content_length(
             response_length_opt,
             cache_allowed,
@@ -2657,21 +3500,31 @@ impl Storage for S3Storage {
         };
         let content = match strategy {
             BodyRetrievalStrategy::BufferAndCache => {
+                let budget = self
+                    .acquire_body_budget(response_length)
+                    .await
+                    .ok_or_else(|| S3StorageError::aws_message("S3 body budget is unavailable"))?;
                 let body = collect_body(response.body).await?;
-                if strategy.should_cache() {
-                    self.cache_put(
+                if let Some(generation) = cache_generation {
+                    self.cache_put_if_generation(
                         &repository,
                         location,
                         body.clone(),
                         response_content_type.clone(),
                         Some(modified),
+                        generation,
                     )
                     .await?;
                 }
-                crate::StorageFileReader::Bytes(FileContentBytes::Bytes(body))
+                crate::StorageFileReader::AsyncReader(Box::pin(BudgetedBytesReader {
+                    bytes: body,
+                    offset: 0,
+                    _permit: budget,
+                }))
             }
             BodyRetrievalStrategy::StreamWithoutCache => byte_stream_to_reader(response.body),
         };
+        drop(cache_load_guard);
         let result = StorageFile::File { meta, content };
 
         Ok(Some(result))
@@ -2707,6 +3560,7 @@ impl Storage for S3Storage {
         skip(self)
     )]
     async fn delete_repository(&self, repository: uuid::Uuid) -> Result<(), S3StorageError> {
+        self.remove_staging_prefix(&repository).await;
         let prefix = format!("{repository}/");
         let deadline = Instant::now() + S3_CONTROL_TIMEOUT;
         let mut continuation: Option<String> = None;
@@ -2876,6 +3730,88 @@ impl Storage for S3Storage {
 }
 
 impl S3Storage {
+    /// Drops a cached object so maintenance reads observe the backing S3 object.
+    pub async fn invalidate_cached_file(
+        &self,
+        repository: Uuid,
+        location: &StoragePath,
+    ) -> Result<(), S3StorageError> {
+        self.cache_remove(&repository, location).await
+    }
+
+    /// Returns the shared capacity budget for spooled incoming upload chunk files. Upload
+    /// handlers reserve permits (1 MiB each, see `S3_UPLOAD_SPOOL_PERMIT_BYTES`) before
+    /// writing spool bytes so in-flight uploads stay within the staged temporary-storage
+    /// budget; the reservation is held until the spooled bytes have been consumed.
+    pub fn upload_spool_budget(&self) -> Arc<Semaphore> {
+        Arc::clone(&self.upload_spool_budget)
+    }
+
+    /// Appends a Docker upload chunk to local staging. The staged bytes are uploaded only when
+    /// the upload is finalized through `move_file`.
+    pub async fn append_file_staged(
+        &self,
+        repository: Uuid,
+        file: FileContent,
+        location: &StoragePath,
+    ) -> Result<usize, S3StorageError> {
+        let path = self.get_path_for_creation(repository, location).await?;
+        // Serialize with finalization and cleanup for this upload only; unrelated uploads
+        // keep making progress while this append runs.
+        let operation_lock = self.staging_operation_lock(&path);
+        let _operation = operation_lock.lock().await;
+        self.note_object_created(&path);
+        let (staging_path, current_size, _) = self.ensure_staging(&path).await?;
+        let mut staging_file = fs::OpenOptions::new()
+            .append(true)
+            .open(&staging_path)
+            .await?;
+        let incoming_size = match &file {
+            FileContent::Path(file_path) => fs::metadata(file_path).await?.len(),
+            FileContent::Content(content) => content.len() as u64,
+            FileContent::Bytes(bytes) => bytes.len() as u64,
+        };
+        // Reserve shared capacity before writing: staged bytes across every upload plus
+        // outstanding spool reservations must stay within MAX_STAGED_BYTES. The reservation
+        // and the size bump happen atomically so concurrent appends cannot collectively
+        // exceed the budget; a failed write rolls the reservation back.
+        let Some(reserved_units) = self.reserve_staged_size(&path, incoming_size) else {
+            return Err(S3StorageError::aws_message(
+                "S3 append staging byte capacity exceeded",
+            ));
+        };
+        let appended_size = match file {
+            FileContent::Path(file_path) => match fs::File::open(file_path).await {
+                Ok(mut source) => tokio::io::copy(&mut source, &mut staging_file)
+                    .await
+                    .map(|size| size as usize),
+                Err(error) => Err(error),
+            },
+            FileContent::Content(content) => staging_file
+                .write_all(&content)
+                .await
+                .map(|()| content.len()),
+            FileContent::Bytes(bytes) => staging_file.write_all(&bytes).await.map(|()| bytes.len()),
+        };
+        let appended_size = match appended_size {
+            Ok(size) => size,
+            Err(error) => {
+                let _ = staging_file.set_len(current_size).await;
+                self.release_staged_size(&path, incoming_size, reserved_units);
+                return Err(error.into());
+            }
+        };
+        if let Err(error) = staging_file.flush().await {
+            let _ = staging_file.set_len(current_size).await;
+            self.release_staged_size(&path, incoming_size, reserved_units);
+            return Err(error.into());
+        }
+        self.note_object_created(&path);
+        self.cache_remove(&repository, location).await?;
+        self.invalidate_manifest_cache(repository);
+        Ok(appended_size)
+    }
+
     /// List all objects for a repository under an optional prefix, returning repository-relative
     /// keys. Uses S3's paginator to minimize the number of API calls while avoiding per-directory
     /// traversal.
@@ -3028,13 +3964,16 @@ impl S3Storage {
         if let Some(cached) = cached {
             return Ok(cached);
         }
-        let _load_lock = self.manifest_load_lock.lock().await;
+        // Coordinate cold loads per repository instead of globally so a slow repository listing
+        // does not serialize listings of unrelated repositories.
+        let load_lock = self.manifest_load_lock(repository).await;
+        let _load_guard = load_lock.lock().await;
         let generation = {
             let mut cache = self.manifest_cache.lock();
             if let Some(cached) = cache.get(repository, Instant::now()) {
                 return Ok(cached);
             }
-            cache.generation()
+            cache.generation(repository)
         };
         let manifests = self.load_docker_manifests(repository).await?;
         self.manifest_cache.lock().insert_if_generation(
@@ -3061,9 +4000,40 @@ impl S3Storage {
         start: usize,
         limit: usize,
     ) -> Result<(Vec<S3ListedObject>, usize), S3StorageError> {
-        let manifests = self.list_docker_manifests(repository).await?;
-        let total = manifests.len();
-        let items = manifests.into_iter().skip(start).take(limit).collect();
+        let load_lock = self.manifest_load_lock(repository).await;
+        let _load_guard = load_lock.lock().await;
+        let prefix = format!("{repository}/v2/");
+        let deadline = Instant::now() + S3_CONTROL_TIMEOUT;
+        let mut paginator = self
+            .aws_client()
+            .list_objects_v2()
+            .bucket(self.bucket())
+            .prefix(prefix)
+            .max_keys(1000)
+            .into_paginator()
+            .send();
+        let mut total = 0usize;
+        let mut items = Vec::with_capacity(limit);
+        while let Some(page) = next_control_page(deadline, paginator.next()).await? {
+            for object in page.contents() {
+                let Some(key) = object.key() else { continue };
+                let relative = S3StorageInner::strip_repository_prefix(&repository, key);
+                if S3StorageInner::is_hidden_file(key)
+                    || !relative.contains("/manifests/")
+                    || relative.ends_with(".nr-docker-tagmeta")
+                {
+                    continue;
+                }
+                if total >= start && items.len() < limit {
+                    items.push(S3ListedObject {
+                        key: relative.to_string(),
+                        size: object.size().unwrap_or_default().max(0) as u64,
+                        last_modified: s3_last_modified(object.last_modified()),
+                    });
+                }
+                total = total.saturating_add(1);
+            }
+        }
         Ok((items, total))
     }
 
@@ -3112,6 +4082,9 @@ impl S3Storage {
     ) -> Result<usize, S3StorageError> {
         if paths.is_empty() {
             return Ok(0);
+        }
+        for path in paths {
+            self.remove_staging(&self.s3_path(&repository, path)).await;
         }
 
         use aws_sdk_s3::types::ObjectIdentifier;
@@ -3273,13 +4246,25 @@ impl StaticStorageFactory for S3StorageFactory {
     ) -> Result<Self::StorageType, S3StorageError> {
         let client = S3StorageInner::load_client(&type_config).await?;
         let cache = S3StorageInner::build_cache(&type_config, &inner).await?;
+        let staging_dir = S3StorageInner::prepare_staging_dir(&inner.storage_name).await?;
         let inner = S3StorageInner {
             config: type_config,
             storage_config: inner,
             client,
             cache,
+            cache_load_locks: ParkingMutex::new(HashMap::default()),
             manifest_cache: ParkingMutex::new(ManifestCache::new()),
-            manifest_load_lock: Mutex::new(()),
+            manifest_load_locks: ParkingMutex::new(HashMap::default()),
+            append_staging: ParkingMutex::new(HashMap::default()),
+            append_operation_locks: ParkingMutex::new(HashMap::default()),
+            upload_spool_budget: Arc::new(Semaphore::new(
+                (MAX_STAGED_BYTES / S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize,
+            )),
+            staging_dir,
+            creation_probes: ParkingMutex::new(LruCache::new(
+                NonZeroUsize::new(CREATION_PROBE_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
+            )),
+            creation_probe_generation: ParkingMutex::new(0),
         };
         let storage = S3Storage::from(inner);
         Ok(storage)
@@ -3313,13 +4298,26 @@ impl StorageFactory for S3StorageFactory {
             let storage_config = config.storage_config;
             let client = S3StorageInner::load_client(&s3_config).await?;
             let cache = S3StorageInner::build_cache(&s3_config, &storage_config).await?;
+            let staging_dir =
+                S3StorageInner::prepare_staging_dir(&storage_config.storage_name).await?;
             let inner = S3StorageInner {
                 config: s3_config,
                 storage_config,
                 client,
                 cache,
+                cache_load_locks: ParkingMutex::new(HashMap::default()),
                 manifest_cache: ParkingMutex::new(ManifestCache::new()),
-                manifest_load_lock: Mutex::new(()),
+                manifest_load_locks: ParkingMutex::new(HashMap::default()),
+                append_staging: ParkingMutex::new(HashMap::default()),
+                append_operation_locks: ParkingMutex::new(HashMap::default()),
+                upload_spool_budget: Arc::new(Semaphore::new(
+                    (MAX_STAGED_BYTES / S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize,
+                )),
+                staging_dir,
+                creation_probes: ParkingMutex::new(LruCache::new(
+                    NonZeroUsize::new(CREATION_PROBE_CACHE_CAPACITY).unwrap_or(NonZeroUsize::MIN),
+                )),
+                creation_probe_generation: ParkingMutex::new(0),
             };
             let storage = S3Storage::from(inner);
             Ok(DynStorage::S3(storage))

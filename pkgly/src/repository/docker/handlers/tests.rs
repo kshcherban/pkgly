@@ -29,6 +29,27 @@ fn test_stream_from_bytes(
     stream::iter(chunks.into_iter().map(|bytes| Ok(bytes)))
 }
 
+#[test]
+fn spool_capacity_tracks_owned_permit_units() {
+    let budget = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut permits = Vec::new();
+
+    reserve_spool_capacity(
+        Some(&budget),
+        &mut permits,
+        2 * S3_UPLOAD_SPOOL_PERMIT_BYTES,
+    )
+    .expect("initial reservation");
+    reserve_spool_capacity(
+        Some(&budget),
+        &mut permits,
+        3 * S3_UPLOAD_SPOOL_PERMIT_BYTES,
+    )
+    .expect("incremental reservation");
+
+    assert_eq!(budget.available_permits(), 1);
+}
+
 #[tokio::test]
 async fn stream_writer_persists_full_payload() -> anyhow::Result<()> {
     let payload = (0u32..(512 * 1024))

@@ -334,11 +334,9 @@ impl LocationMeta {
     }
     #[instrument(
         level = "debug",
-        skip(path),
+        skip(self, path),
         fields(
             path = ?path.as_ref(),
-            path.meta = Empty,
-            created = Empty,
         )
     )]
     pub(crate) fn save_meta(&self, path: impl AsRef<Path>) -> Result<(), LocalStorageError> {
