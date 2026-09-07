@@ -1,11 +1,9 @@
-use std::path::{Path, PathBuf};
+// ABOUTME: Provides small path transformations used by local storage metadata.
+// ABOUTME: Reports non-UTF-8 extensions without hiding filesystem errors.
+use std::path::PathBuf;
 
 use thiserror::Error;
 use tracing::instrument;
-
-#[derive(Debug, Error)]
-#[error("Parent directory for {0} does not exist")]
-pub struct ParentDirectoryDoesNotExist(pub PathBuf);
 
 #[derive(Debug, Error)]
 pub enum ExtensionError {
@@ -14,19 +12,12 @@ pub enum ExtensionError {
 }
 
 pub trait PathUtils {
-    /// Gets the parent directory of the path or returns an error if it does not exist.
-    #[allow(unused)]
-    fn parent_or_err(&self) -> Result<&Path, ParentDirectoryDoesNotExist>;
     /// Appends an extension to the path.
     fn add_extension(&self, extension: &str) -> Result<PathBuf, ExtensionError>;
     /// Gets the current extension and attempts to convert it to a string.
     fn extension_to_string(&self) -> Result<Option<&str>, ExtensionError>;
 }
 impl PathUtils for PathBuf {
-    fn parent_or_err(&self) -> Result<&Path, ParentDirectoryDoesNotExist> {
-        self.parent()
-            .ok_or_else(|| ParentDirectoryDoesNotExist(self.clone()))
-    }
     fn extension_to_string(&self) -> Result<Option<&str>, ExtensionError> {
         self.extension()
             .map(|v| {

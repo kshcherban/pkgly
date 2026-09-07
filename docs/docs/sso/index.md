@@ -148,7 +148,6 @@ Configure Pkgly to validate the Cloudflare Access token via JWKS:
 
 ```toml
 [security]
-allow_basic_without_tokens = false
 
   [security.sso]
   enabled = true
@@ -285,4 +284,3 @@ server {
   }
 }
 ```
-

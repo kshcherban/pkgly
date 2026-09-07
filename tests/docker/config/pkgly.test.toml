@@ -30,7 +30,6 @@ encryption = "NONE"
 from = "pkgly@test.local"
 
 [security]
-allow_basic_without_tokens = false
 
 [security.egress]
 # Proxy fixtures intentionally point back to the in-stack Pkgly service.

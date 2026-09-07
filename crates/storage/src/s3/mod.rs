@@ -27,7 +27,6 @@ use aws_types::{SdkConfig, region::Region};
 use bytes::{Bytes, BytesMut};
 use chrono::{DateTime as ChronoDateTime, FixedOffset, Local, Utc};
 use futures::future::BoxFuture;
-use hex::encode;
 use lru::LruCache;
 use mime::Mime;
 use nr_core::storage::{FileHashes, FileTypeCheck, SerdeMime, StoragePath};
@@ -818,7 +817,7 @@ impl S3DiskCache {
 
     fn hashed_filename(key: &str) -> PathBuf {
         let digest = Sha256::digest(key.as_bytes());
-        let hex = encode(digest);
+        let hex = format!("{digest:x}");
         let (prefix, rest) = hex.split_at(2);
         PathBuf::from(prefix).join(rest)
     }
@@ -909,7 +908,7 @@ impl S3DiskCache {
             size = size.saturating_add(read as u64);
             hasher.update(&buffer[..read]);
         }
-        size == expected_size && encode(hasher.finalize()) == expected_digest
+        size == expected_size && format!("{:x}", hasher.finalize()) == expected_digest
     }
 
     async fn recover_entries(
@@ -1209,7 +1208,7 @@ impl S3DiskCache {
         }
         let temp_path = path.with_extension(format!("tmp-{}", Uuid::new_v4().simple()));
         fs::write(&temp_path, data.as_ref()).await?;
-        let digest = hex::encode(Sha256::digest(data.as_ref()));
+        let digest = format!("{:x}", Sha256::digest(data.as_ref()));
         let cached_at_ms = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap_or_default()

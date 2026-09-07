@@ -46,29 +46,7 @@ impl EmailRequest {
         }
     }
 }
-macro_rules! template {
-    ($template:expr) => {
-        fn template_html() -> &'static str {
-            concat!($template, ".html")
-        }
-        fn template_txt() -> &'static str {
-            concat!($template, ".txt")
-        }
-    };
-}
-pub(crate) use template;
-
 use super::email::{EmailEncryption, EmailSetting};
-pub trait Email: Serialize + Debug {
-    /// template().html and template().txt must exist in the resources/emails folder
-    fn template_html() -> &'static str;
-
-    fn template_txt() -> &'static str;
-
-    fn subject() -> &'static str;
-
-    fn debug_info(self) -> EmailDebug;
-}
 
 #[derive(Debug)]
 pub struct EmailAccess {
@@ -91,10 +69,15 @@ impl EmailAccess {
         };
     }
     #[inline]
-    #[instrument()]
-    pub fn build_body<E: Email>(&self, data: &E) -> MultiPart {
+    #[instrument(skip(data))]
+    fn build_body<S: Serialize>(
+        &self,
+        data: &S,
+        template_txt: &str,
+        template_html: &str,
+    ) -> MultiPart {
         let multipart = MultiPart::alternative();
-        let mut multipart = match self.email_handlebars.render(E::template_txt(), &data) {
+        let mut multipart = match self.email_handlebars.render(template_txt, data) {
             Ok(ok) => multipart.singlepart(
                 SinglePart::builder()
                     .header(header::ContentType::TEXT_PLAIN)
@@ -105,7 +88,7 @@ impl EmailAccess {
                 multipart.build()
             }
         };
-        match self.email_handlebars.render(E::template_html(), &data) {
+        match self.email_handlebars.render(template_html, data) {
             Ok(ok) => {
                 multipart = multipart.singlepart(
                     SinglePart::builder()
@@ -125,9 +108,16 @@ impl EmailAccess {
     pub fn prep_builder(&self) -> MessageBuilder {
         self.message_builder.clone()
     }
-    #[instrument()]
-    pub fn send_one_fn(&self, to: Address, data: impl Email) {
-        let body = self.build_body(&data);
+    #[instrument(skip(data, debug_info))]
+    pub fn send_one<S: Serialize, F: FnOnce() -> EmailDebug>(
+        &self,
+        to: Address,
+        data: &S,
+        template_txt: &str,
+        template_html: &str,
+        debug_info: F,
+    ) {
+        let body = self.build_body(data, template_txt, template_html);
 
         let message = match self.prep_builder().to(to.into()).multipart(body) {
             Ok(ok) => ok,
@@ -137,7 +127,7 @@ impl EmailAccess {
             }
         };
         let debug = if log_enabled!(tracing::log::Level::Debug) {
-            Some(data.debug_info())
+            Some(debug_info())
         } else {
             None
         };

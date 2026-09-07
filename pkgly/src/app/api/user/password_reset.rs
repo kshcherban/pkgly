@@ -1,3 +1,5 @@
+// ABOUTME: Handles password reset requests, token checks, and password changes.
+// ABOUTME: Builds trusted reset links and queues reset notifications.
 use std::{io, net::SocketAddr, str::FromStr};
 
 use axum::{
@@ -19,12 +21,7 @@ use url::Url;
 use utoipa::ToSchema;
 
 use crate::{
-    app::{
-        Pkgly,
-        authentication::password,
-        config::normalize_app_url,
-        email_service::{Email, EmailDebug, template},
-    },
+    app::{Pkgly, authentication::password, config::normalize_app_url, email_service::EmailDebug},
     error::{InternalError, OtherInternalError},
     utils::{ResponseBuilder, request_logging::access_log::AccessLogContext},
 };
@@ -50,6 +47,16 @@ pub struct PasswordResetEmail {
     pub required: bool,
 }
 
+const PASSWORD_RESET_TEMPLATE_HTML: &str = "password_reset.html";
+const PASSWORD_RESET_TEMPLATE_TXT: &str = "password_reset.txt";
+
+fn password_reset_debug_info(username: &str) -> EmailDebug {
+    EmailDebug {
+        to: username.to_owned(),
+        subject: "Password Reset",
+    }
+}
+
 fn build_reset_url(panel_url: &str, token: &str) -> Result<String, OtherInternalError> {
     let mut reset_url = Url::parse(panel_url).map_err(OtherInternalError::new)?;
     {
@@ -62,20 +69,6 @@ fn build_reset_url(panel_url: &str, token: &str) -> Result<String, OtherInternal
     Ok(reset_url.to_string())
 }
 
-impl Email for PasswordResetEmail {
-    template!("password_reset");
-
-    fn subject() -> &'static str {
-        "Password Reset"
-    }
-
-    fn debug_info(self) -> EmailDebug {
-        EmailDebug {
-            to: self.username,
-            subject: Self::subject(),
-        }
-    }
-}
 #[utoipa::path(
     post,
     path = "/password-reset/request",
@@ -127,7 +120,14 @@ async fn request_password_reset(
             username: user.username.into(),
             required: false,
         };
-        site.email_access.send_one_fn(address, email)
+        let username = email.username.clone();
+        site.email_access.send_one(
+            address,
+            &email,
+            PASSWORD_RESET_TEMPLATE_TXT,
+            PASSWORD_RESET_TEMPLATE_HTML,
+            || password_reset_debug_info(&username),
+        )
     }
     Ok(ResponseBuilder::ok().empty())
 }

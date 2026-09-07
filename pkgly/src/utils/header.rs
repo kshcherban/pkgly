@@ -1,12 +1,12 @@
+// ABOUTME: Provides typed accessors for HTTP header values and maps.
+// ABOUTME: Preserves empty-header handling while reducing duplicate conversions.
 use http::{HeaderName, HeaderValue, header::ToStrError};
-use tracing::{error, warn};
+use tracing::warn;
 pub mod date_time;
 /// Extension trait for [http::HeaderValue]
 pub trait HeaderValueExt {
     /// Converts the header value to a string
     fn to_string(&self) -> Result<String, ToStrError>;
-    /// Converts the header value to a string
-    fn to_string_as_option(&self) -> Option<String>;
     /// Parses the header value into a type Over the [TryFrom] trait
     ///
     /// Error must be convertible from [ToStrError]
@@ -18,15 +18,6 @@ pub trait HeaderValueExt {
 impl HeaderValueExt for HeaderValue {
     fn to_string(&self) -> Result<String, ToStrError> {
         self.to_str().map(|x| x.to_string())
-    }
-
-    fn to_string_as_option(&self) -> Option<String> {
-        self.to_str()
-            .map(|x| x.to_string())
-            .inspect_err(|error| {
-                error!("Failed to convert header value to string: {}", error);
-            })
-            .ok()
     }
 
     fn parsed<T, E>(&self) -> Result<T, E>
@@ -46,16 +37,7 @@ pub trait HeaderMapExt {
 
 impl HeaderMapExt for http::HeaderMap {
     fn get_string_ignore_empty(&self, header: &HeaderName) -> Option<String> {
-        self.get(header)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|v| {
-                if v.is_empty() {
-                    warn!(?header, "Empty header Value",);
-                    None
-                } else {
-                    Some(v.to_owned())
-                }
-            })
+        self.get_str_ignore_empty(header).map(str::to_owned)
     }
 
     fn get_str_ignore_empty<'headers>(&'headers self, key: &HeaderName) -> Option<&'headers str> {

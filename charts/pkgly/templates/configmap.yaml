@@ -55,7 +55,6 @@ data:
     # Security Configuration
     # ==========================================================================
     [security]
-    allow_basic_without_tokens = {{ .Values.security.allowBasicWithoutTokens }}
 
     [security.password_rules]
     min_length = {{ .Values.security.passwordRules.minLength }}

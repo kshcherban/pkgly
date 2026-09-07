@@ -1,4 +1,5 @@
-pub mod time;
+// ABOUTME: Provides shared encoding, hashing, duration, and URL utilities.
+// ABOUTME: Keeps serialization helpers consistent across core and application crates.
 pub mod utopia;
 pub mod base64_utils {
     use base64::{DecodeError, Engine, engine::general_purpose::STANDARD};

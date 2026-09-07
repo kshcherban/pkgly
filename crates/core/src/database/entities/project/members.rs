@@ -1,3 +1,5 @@
+// ABOUTME: Defines project membership rows and their database mapping.
+// ABOUTME: Carries user access flags for project-level authorization.
 use crate::database::prelude::*;
 use serde::Serialize;
 use utoipa::ToSchema;
@@ -14,4 +16,3 @@ pub struct DBProjectMember {
     pub can_manage: bool,
     pub added: chrono::DateTime<chrono::FixedOffset>,
 }
-impl DBProjectMember {}

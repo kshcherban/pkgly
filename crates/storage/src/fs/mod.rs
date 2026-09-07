@@ -1,3 +1,5 @@
+// ABOUTME: Groups local filesystem storage primitives and metadata helpers.
+// ABOUTME: Re-exports the file, stream, path, and content interfaces.
 mod content;
 mod file;
 mod file_meta;
@@ -7,7 +9,7 @@ pub(crate) mod utils;
 pub use content::*;
 pub use file::*;
 pub use file_meta::*;
-pub use path::{ExtensionError, ParentDirectoryDoesNotExist};
+pub use path::ExtensionError;
 mod file_reader;
 pub use file_reader::*;
 use nr_core::storage::StoragePath;

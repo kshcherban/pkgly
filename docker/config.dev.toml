@@ -14,7 +14,6 @@ cleanup_interval = 3600
 database_location = "/data/sessions.redb"
 
 [security]
-allow_basic_without_tokens = true
 
 [security.password_rules]
 min_length = 12

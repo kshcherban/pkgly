@@ -1,3 +1,5 @@
+// ABOUTME: Defines security, password, SSO, OAuth, and egress configuration.
+// ABOUTME: Supplies safe defaults and validation for authentication settings.
 use std::{fmt, path::PathBuf, str::FromStr};
 
 use serde::{Deserialize, Serialize};
@@ -8,7 +10,6 @@ const DEFAULT_CASBIN_POLICY: &str = include_str!("../../../resources/rbac/policy
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
 pub struct SecuritySettings {
-    pub allow_basic_without_tokens: bool,
     pub password_rules: Option<PasswordRules>,
     pub sso: Option<SsoSettings>,
     pub oauth2: Option<OAuth2Settings>,
@@ -18,7 +19,6 @@ pub struct SecuritySettings {
 impl Default for SecuritySettings {
     fn default() -> Self {
         Self {
-            allow_basic_without_tokens: false,
             password_rules: Some(PasswordRules::default()),
             sso: None,
             oauth2: None,

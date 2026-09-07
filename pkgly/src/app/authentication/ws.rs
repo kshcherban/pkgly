@@ -1,6 +1,8 @@
+// ABOUTME: Authenticates WebSocket clients with sessions or bearer tokens.
+// ABOUTME: Exposes authenticated user identity and permission access for sockets.
 use nr_core::{
     database::entities::user::{UserSafeData, UserType, auth_token::AuthToken},
-    user::permissions::{HasPermissions, HasUserType, UserPermissions},
+    user::permissions::{HasPermissions, UserPermissions},
 };
 use serde::{Deserialize, Serialize};
 use tracing::{Span, debug, instrument};
@@ -65,6 +67,13 @@ pub enum WebSocketAuthentication {
         user: UserSafeData,
     },
 }
+impl WebSocketAuthentication {
+    pub fn user(&self) -> &UserSafeData {
+        match self {
+            Self::AuthToken { user, .. } | Self::Session { user, .. } => user,
+        }
+    }
+}
 impl HasPermissions for WebSocketAuthentication {
     fn user_id(&self) -> Option<i32> {
         match self {
@@ -77,16 +86,6 @@ impl HasPermissions for WebSocketAuthentication {
         match self {
             WebSocketAuthentication::AuthToken { user, .. }
             | WebSocketAuthentication::Session { user, .. } => user.get_permissions(),
-        }
-    }
-}
-impl HasUserType for WebSocketAuthentication {
-    type UserType = UserSafeData;
-
-    fn user(&self) -> Option<&Self::UserType> {
-        match self {
-            WebSocketAuthentication::AuthToken { user, .. }
-            | WebSocketAuthentication::Session { user, .. } => Some(user),
         }
     }
 }
