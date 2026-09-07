@@ -59,8 +59,6 @@ workspace = true
 
 [dev-dependencies]
 toml.workspace = true
-tracing-subscriber.workspace = true
-tracing-appender.workspace = true
 nr-core = { workspace = true, features = ["testing"] }
 anyhow = { workspace = true }
 parking_lot.workspace = true

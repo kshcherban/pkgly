@@ -54,11 +54,6 @@ pub enum AuthenticationError {
     #[error("Forbidden")]
     Forbidden,
 }
-impl AuthenticationError {
-    pub fn is_internal_error(&self) -> bool {
-        matches!(self, AuthenticationError::InternalError(_))
-    }
-}
 macro_rules! internal_errors {
     (
         $($error:ty),*

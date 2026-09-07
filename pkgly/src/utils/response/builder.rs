@@ -105,13 +105,6 @@ impl ResponseBuilder {
             Err(err) => err.into_response(),
         }
     }
-    /// Checks if the data is present and returns a JSON response or a not found response
-    pub fn json_or_not_found<T: serde::Serialize>(self, data: &Option<T>) -> Response {
-        match data {
-            Some(data) => self.json(data),
-            None => self.status(StatusCode::NOT_FOUND).empty(),
-        }
-    }
     pub fn html_or_err(self, html: impl Into<Vec<u8>>) -> Result<Response, ResponseBuildError> {
         self.content_type(mime::TEXT_HTML_UTF_8)
             .body_or_err(html.into())

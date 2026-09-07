@@ -116,15 +116,6 @@ Recommended Prometheus alerts:
 - High p95 query latency (>50 ms) sustained for 5 minutes.
 - Zero rows returned while metadata exists (implies filters overly strict or missing indexes).
 
-### Benchmark harness
-`benches/search_db.rs` seeds 10k manifests and exercises the search query. Run it locally or in CI with:
-
-```bash
-PKGLY_SEARCH_BENCH_DSN=postgres://user:pass@localhost:5432/pkgly_bench cargo bench search_db_query
-```
-
-Use this to validate schema/index changes before rollout.
-
 ## 6. Troubleshooting Checklist
 
 | Symptom | Probable cause | Action |

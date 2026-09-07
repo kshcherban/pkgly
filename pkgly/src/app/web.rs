@@ -1,13 +1,6 @@
 // ABOUTME: Starts the HTTP/TLS server and coordinates graceful shutdown.
 // ABOUTME: Logs startup build metadata and owns runtime worker configuration.
-use std::{
-    fs::File,
-    io::BufReader,
-    net::SocketAddr,
-    num::NonZeroUsize,
-    path::{Path, PathBuf},
-    sync::Arc,
-};
+use std::{fs::File, io::BufReader, net::SocketAddr, num::NonZeroUsize, path::Path, sync::Arc};
 
 use anyhow::Context;
 use axum::{Router, extract::Request};
@@ -25,7 +18,7 @@ use super::Pkgly;
 use super::routes;
 use crate::app::build_info::{BuildInfo, current_build_info};
 use crate::app::config::WebServer;
-use crate::config::{PkglyConfig, load_config};
+use crate::config::PkglyConfig;
 /// Decide how many Tokio worker threads to start.
 pub(crate) fn resolve_worker_threads(web_server: &WebServer) -> usize {
     let configured = web_server
@@ -42,12 +35,6 @@ fn default_worker_threads() -> usize {
 
 pub(crate) fn startup_build_info() -> BuildInfo {
     current_build_info()
-}
-
-#[allow(dead_code)] // Useful for callers that already hold a runtime
-pub(crate) async fn start(config_path: Option<PathBuf>) -> anyhow::Result<()> {
-    let config = load_config(config_path)?;
-    start_with_config(config).await
 }
 
 pub(crate) async fn start_with_config(config: PkglyConfig) -> anyhow::Result<()> {

@@ -166,13 +166,7 @@ impl RepositoryType for PythonRepositoryType {
 
             match config {
                 PythonRepositoryConfig::Hosted => {
-                    let hosted = hosted::PythonHosted::load(
-                        website,
-                        storage,
-                        repo,
-                        PythonRepositoryConfig::Hosted,
-                    )
-                    .await?;
+                    let hosted = hosted::PythonHosted::load(website, storage, repo).await?;
                     Ok(DynRepository::Python(PythonRepository::Hosted(hosted)))
                 }
                 PythonRepositoryConfig::Proxy(proxy_config) => {

@@ -17,8 +17,5 @@ bytes.workspace = true
 url.workspace = true
 [dev-dependencies]
 tokio.workspace = true
-anyhow = "1"
-tracing-subscriber.workspace = true
-tracing-appender.workspace = true
 [lints]
 workspace = true

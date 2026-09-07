@@ -159,35 +159,6 @@ impl Manifest {
             Manifest::OciIndex(m) => serde_json::to_vec(m),
         }
     }
-
-    /// Get all blob digests referenced by this manifest
-    pub fn get_blob_digests(&self) -> Vec<String> {
-        let mut digests = Vec::new();
-
-        match self {
-            Manifest::DockerV2(m) => {
-                digests.push(m.config.digest.clone());
-                for layer in &m.layers {
-                    digests.push(layer.digest.clone());
-                }
-            }
-            Manifest::OciImage(m) => {
-                if let Some(config) = &m.config {
-                    digests.push(config.digest.clone());
-                }
-                for layer in &m.layers {
-                    digests.push(layer.digest.clone());
-                }
-            }
-            Manifest::OciIndex(index) => {
-                for manifest in &index.manifests {
-                    digests.push(manifest.digest.clone());
-                }
-            }
-        }
-
-        digests
-    }
 }
 
 /// Standard media types for Docker and OCI

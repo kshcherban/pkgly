@@ -11,7 +11,6 @@ build = "build.rs"
 mockall = "0.14"
 pretty_assertions = "1.1"
 rsa = { version = "0.9" }
-criterion = "0.5"
 testcontainers = "0.14"
 opentelemetry_sdk = { workspace = true, features = ["testing", "experimental_metrics_custom_reader"] }
 [dependencies]

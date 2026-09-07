@@ -1,10 +1,7 @@
+use crate::database::prelude::*;
 use serde::Serialize;
 use utoipa::ToSchema;
 use uuid::Uuid;
-mod new;
-pub use new::*;
-
-use crate::database::prelude::*;
 
 /// On the first push. The pusher will be added as a project member with write and manage permissions
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, FromRow, ToSchema, TableType)]

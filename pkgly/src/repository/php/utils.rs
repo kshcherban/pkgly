@@ -17,10 +17,6 @@ impl PhpPackagePathInfo {
         format!("{}/{}", self.vendor, self.package)
     }
 
-    pub fn normalized_package_name(&self) -> String {
-        self.package_name().to_ascii_lowercase()
-    }
-
     pub fn project_storage_path(&self) -> String {
         format!(
             "{}/{}",

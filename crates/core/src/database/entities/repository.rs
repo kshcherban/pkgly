@@ -6,8 +6,6 @@ use sqlx::{PgPool, Row, postgres::PgRow, prelude::FromRow, types::Json};
 use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
-mod hostname;
-pub use hostname::*;
 mod virtual_member;
 pub use virtual_member::*;
 

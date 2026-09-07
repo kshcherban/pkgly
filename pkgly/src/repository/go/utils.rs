@@ -190,22 +190,6 @@ impl GoModuleRequest {
             .ok_or(RepositoryHandlerError::NotFound)
     }
 
-    /// Check if this is a read request
-    pub fn is_read_request(&self) -> bool {
-        matches!(
-            self.request_type,
-            GoRequestType::ListVersions
-                | GoRequestType::VersionInfo
-                | GoRequestType::GoMod
-                | GoRequestType::ModuleZip
-                | GoRequestType::Latest
-                | GoRequestType::GoModWithoutVersion
-                | GoRequestType::SumdbSupported
-                | GoRequestType::SumdbLookup
-                | GoRequestType::SumdbTile
-        )
-    }
-
     /// Check if this request requires a version
     pub fn requires_version(&self) -> bool {
         matches!(
@@ -323,32 +307,4 @@ pub fn generate_go_module_info(
 /// Generate a basic go.mod file content
 pub fn generate_go_mod(module_path: &str) -> String {
     format!("module {}\n\ngo 1.21\n", module_path)
-}
-
-/// Validate that a version string is compatible with Go module requirements
-pub fn validate_version_for_go(version: &str) -> Result<(), GoModuleError> {
-    let _go_version = GoVersion::new(version)?;
-    Ok(())
-}
-
-/// Check if a module path is a major version suffix
-pub fn has_major_version_suffix(module_path: &str) -> bool {
-    if let Some((_, suffix)) = module_path.rsplit_once('/') {
-        suffix.starts_with('v') && suffix[1..].chars().all(|c| c.is_ascii_digit())
-    } else {
-        false
-    }
-}
-
-/// Extract major version from module path if present
-pub fn extract_major_version(module_path: &str) -> Option<u32> {
-    if let Some((_, suffix)) = module_path.rsplit_once('/') {
-        if suffix.starts_with('v') && suffix.len() > 1 {
-            suffix[1..].parse::<u32>().ok()
-        } else {
-            None
-        }
-    } else {
-        None
-    }
 }

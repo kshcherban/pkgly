@@ -128,7 +128,6 @@ services:
       - PKGLY_DOCKER_HOST=pkgly:8888
     volumes:
       - ../integration:/tests:ro
-      - ../performance:/perf-tests:ro
       - ../fixtures:/fixtures:ro
       - test-storage:/pkgly-storage:ro
       - test-results:/results

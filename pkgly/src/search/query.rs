@@ -9,10 +9,7 @@
 use std::{sync::LazyLock, time::Instant};
 
 use chrono::{DateTime, FixedOffset};
-use opentelemetry::{
-    global,
-    metrics::{Histogram, Meter},
-};
+use opentelemetry::{global, metrics::Histogram};
 use serde_json::Value;
 use sqlx::{FromRow, Postgres, QueryBuilder};
 use uuid::Uuid;
@@ -179,8 +176,6 @@ fn push_collated_lower(builder: &mut QueryBuilder<Postgres>, expression: &str) {
 }
 
 struct SearchMetrics {
-    #[allow(dead_code)]
-    meter: Meter,
     query_duration_ms: Histogram<f64>,
     rows_returned: Histogram<u64>,
 }
@@ -198,7 +193,6 @@ impl SearchMetrics {
             .with_description("Rows returned per repository search query")
             .build();
         Self {
-            meter,
             query_duration_ms,
             rows_returned,
         }

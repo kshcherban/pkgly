@@ -16,4 +16,3 @@ syn = { version = "2", features = ["full", "extra-traits", "parsing"] }
 
 [dev-dependencies]
 prettyplease = "0.2"
-anyhow = "1"

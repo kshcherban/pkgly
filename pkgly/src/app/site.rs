@@ -68,7 +68,7 @@ use super::{
     webhooks::WebhookService,
 };
 use current_semver::current_semver;
-use http::{HeaderName, Uri};
+use http::HeaderName;
 
 #[derive(Debug, Default)]
 pub struct InternalServices {
@@ -551,10 +551,6 @@ impl Pkgly {
             .filter(|cfg| cfg.enabled)
     }
 
-    pub fn sso_settings_raw(&self) -> Option<SsoSettings> {
-        self.inner.general_security_settings.read().sso.clone()
-    }
-
     pub fn oauth2_settings(&self) -> Option<OAuth2Settings> {
         self.inner
             .general_security_settings
@@ -581,20 +577,6 @@ impl Pkgly {
             rbac.set_roles_for_user(subject, roles).await?;
         }
         Ok(())
-    }
-
-    pub async fn check_oauth_permission(
-        &self,
-        subject: &str,
-        object: &str,
-        action: &str,
-    ) -> anyhow::Result<Option<bool>> {
-        if let Some(rbac) = self.oauth2_rbac() {
-            let decision = rbac.enforce(subject, object, action).await?;
-            Ok(Some(decision))
-        } else {
-            Ok(None)
-        }
     }
 
     pub async fn update_oauth2_settings(
@@ -729,14 +711,6 @@ impl Pkgly {
         self.ensure_upload_state_handle(repository, upload_id, true)
     }
 
-    fn ensure_blob_upload_state_handle(
-        &self,
-        repository: Uuid,
-        upload_id: &str,
-    ) -> BlobUploadStateHandle {
-        self.ensure_upload_state_handle(repository, upload_id, false)
-    }
-
     pub fn update_upload_state_handle(&self, handle: &BlobUploadStateHandle, chunk: &[u8]) -> u64 {
         let mut guard = handle.lock();
         guard.update(chunk);
@@ -747,34 +721,9 @@ impl Pkgly {
         handle.lock().length
     }
 
-    pub fn begin_blob_upload_state(&self, repository: Uuid, upload_id: &str) {
-        self.ensure_blob_upload_state_handle(repository, upload_id);
-    }
-
     /// Begin blob upload state for Docker (SHA256 only)
     pub fn begin_docker_blob_upload_state(&self, repository: Uuid, upload_id: &str) {
         self.ensure_docker_blob_upload_state_handle(repository, upload_id);
-    }
-
-    pub fn update_blob_upload_state(&self, repository: Uuid, upload_id: &str, chunk: &[u8]) -> u64 {
-        let state = self.ensure_blob_upload_state_handle(repository, upload_id);
-        self.update_upload_state_handle(&state, chunk)
-    }
-
-    /// Update blob upload state for Docker (ensures SHA256-only hashing)
-    pub fn update_docker_blob_upload_state(
-        &self,
-        repository: Uuid,
-        upload_id: &str,
-        chunk: &[u8],
-    ) -> u64 {
-        let state = self.ensure_docker_blob_upload_state_handle(repository, upload_id);
-        self.update_upload_state_handle(&state, chunk)
-    }
-
-    pub fn current_blob_upload_length(&self, repository: Uuid, upload_id: &str) -> Option<u64> {
-        self.get_upload_state_handle(repository, upload_id)
-            .map(|handle| handle.lock().length)
     }
 
     pub fn finalize_blob_upload_state(
@@ -799,11 +748,6 @@ impl Pkgly {
     pub fn abandon_blob_upload_state(&self, repository: Uuid, upload_id: &str) {
         self.blob_upload_states
             .remove(&(repository, upload_id.to_owned()));
-    }
-
-    pub fn update_app_url(&self, app_url: &Uri) {
-        info!(?app_url, "Updating app url");
-        // TODO: Update persisted application URL if needed.
     }
 
     pub async fn update_sso_settings(&self, settings: Option<SsoSettings>) -> anyhow::Result<()> {

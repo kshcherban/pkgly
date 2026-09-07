@@ -1391,25 +1391,5 @@ async fn finalize_delivery_attempt(
     Ok(())
 }
 
-pub fn latest_delivery_summary(
-    status: Option<WebhookDeliveryStatus>,
-    last_attempt_at: Option<DateTime<Utc>>,
-    delivered_at: Option<DateTime<Utc>>,
-    last_http_status: Option<i32>,
-    last_error: Option<String>,
-) -> (
-    Option<WebhookDeliveryStatus>,
-    Option<DateTime<Utc>>,
-    Option<i32>,
-    Option<String>,
-) {
-    (
-        status,
-        delivered_at.or(last_attempt_at),
-        last_http_status,
-        last_error,
-    )
-}
-
 #[cfg(test)]
 mod tests;

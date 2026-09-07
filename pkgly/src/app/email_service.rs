@@ -90,9 +90,6 @@ impl EmailAccess {
             warn!("Email Queue Error: {}", error);
         };
     }
-    pub fn get_handlebars(&self) -> &Handlebars<'static> {
-        &self.email_handlebars
-    }
     #[inline]
     #[instrument()]
     pub fn build_body<E: Email>(&self, data: &E) -> MultiPart {

@@ -77,20 +77,8 @@ impl AccessLogContext {
         self.0.lock().storage_id = Some(storage_id);
     }
 
-    pub fn set_target_user_id(&self, user_id: i32) {
-        self.0.lock().target_user_id = Some(user_id);
-    }
-
-    pub fn set_token_id(&self, token_id: i32) {
-        self.0.lock().token_id = Some(token_id);
-    }
-
     pub fn set_audit_path(&self, path: impl Into<String>) {
         self.0.lock().audit_path = Some(path.into());
-    }
-
-    pub fn set_audit_query(&self, query: impl Into<String>) {
-        self.0.lock().audit_query = Some(query.into());
     }
 
     pub fn set_client_address(&self, client_address: impl Into<String>) {

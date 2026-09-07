@@ -25,7 +25,6 @@ mod repo_http;
 pub use repo_http::*;
 mod auth_config;
 pub mod cargo;
-pub mod commands;
 pub mod deb;
 pub mod docker;
 pub mod go;
@@ -99,6 +98,3 @@ pub(crate) mod test_helpers {
         DynStorage::Local(local)
     }
 }
-
-#[cfg(test)]
-mod base_tests;

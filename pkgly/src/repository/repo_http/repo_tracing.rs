@@ -2,22 +2,15 @@ use std::{error::Error, sync::Arc};
 
 use nr_core::storage::StoragePath;
 use nr_storage::Storage;
-use opentelemetry::{
-    KeyValue, global,
-    metrics::{Histogram, Meter, UpDownCounter},
-};
+use opentelemetry::{KeyValue, global, metrics::Histogram};
 use parking_lot::Mutex;
 use tracing::{Level, Span, event, field::Empty, info_span};
 
 use super::DynRepository;
 use crate::repository::Repository;
 #[derive(Debug, Clone)]
-/// Dead Code is allowed as this stuff is still in development
-#[allow(dead_code)]
 pub struct RepositoryMetricsMeter {
-    meter: Meter,
     project_access_bytes: Histogram<u64>,
-    project_number_of_versions: UpDownCounter<i64>,
     project_write_bytes: Histogram<u64>,
 }
 impl Default for RepositoryMetricsMeter {
@@ -25,10 +18,7 @@ impl Default for RepositoryMetricsMeter {
         let meter = global::meter("pkgly::repository::metrics");
         Self {
             project_access_bytes: meter.u64_histogram("nr.project.access.bytes").build(),
-            project_number_of_versions: meter.i64_up_down_counter("nr.project.versions").build(),
             project_write_bytes: meter.u64_histogram("nr.project.write.bytes").build(),
-
-            meter,
         }
     }
 }
@@ -159,11 +149,6 @@ impl RepositoryRequestTracing {
             self.push_metric_and_span("project.version", &project_version);
         }
     }
-    pub fn add_metric_attribute(&self, key: &'static str, value: impl Into<opentelemetry::Value>) {
-        let value = value.into();
-        self.metrics.add_attribute(key, value);
-    }
-
     fn push_metric_and_span(&self, key: &'static str, value: &str) {
         self.span.record(key, value);
         self.metrics.add_attribute(key, value.to_string());
