@@ -52,6 +52,38 @@ async fn compute_repository_storage_usage(
     };
 
     let usage = calculate_repository_storage_usage(&repository).await?;
+
+    // Docker object accounting lives in PostgreSQL but storage is the source of truth. Repair
+    // drift opportunistically during the periodic usage refresh instead of scanning on every read.
+    if let DynRepository::Docker(docker) = &repository {
+        match crate::repository::docker::metadata::reconcile_docker_objects(
+            &site.database,
+            &docker.get_storage(),
+            repository_id,
+        )
+        .await
+        {
+            Ok(summary) => {
+                if summary.backfilled > 0 || summary.corrected > 0 || summary.removed > 0 {
+                    tracing::info!(
+                        %repository_id,
+                        backfilled = summary.backfilled,
+                        corrected = summary.corrected,
+                        removed = summary.removed,
+                        "Reconciled Docker object accounting"
+                    );
+                }
+            }
+            Err(err) => {
+                tracing::warn!(
+                    %repository_id,
+                    %err,
+                    "Docker object accounting reconciliation failed"
+                );
+            }
+        }
+    }
+
     Ok(StorageUsageComputeResult::Usage(usage))
 }
 

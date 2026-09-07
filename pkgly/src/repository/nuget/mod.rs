@@ -241,19 +241,5 @@ impl RepositoryType for NugetRepositoryType {
     }
 }
 
-impl NugetRepository {
-    pub async fn resolve_project_and_version(
-        &self,
-        path: &StoragePath,
-    ) -> Result<ProjectResolution, NugetError> {
-        match self {
-            NugetRepository::Hosted(repo) => repo.resolve_project(path).await,
-            NugetRepository::Proxy(_) | NugetRepository::Virtual(_) => {
-                Ok(ProjectResolution::default())
-            }
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests;

@@ -607,7 +607,7 @@ async fn delete_docker_manifest_removes_all_payloads() -> Result<()> {
 
     let tag_cache_path = tag_path.to_string();
     let result =
-        delete_docker_package(&storage, repository_id, tag_cache_path.as_str(), None).await?;
+        delete_docker_package(&storage, repository_id, tag_cache_path.as_str(), None, None).await?;
     assert_eq!(result.removed_manifests, 2);
     assert_eq!(result.removed_blobs, 3);
 
@@ -681,8 +681,14 @@ async fn delete_docker_manifest_handles_digest_path() -> Result<()> {
     }
 
     let digest_cache_path = digest_path.to_string();
-    let result =
-        delete_docker_package(&storage, repository_id, digest_cache_path.as_str(), None).await?;
+    let result = delete_docker_package(
+        &storage,
+        repository_id,
+        digest_cache_path.as_str(),
+        None,
+        None,
+    )
+    .await?;
     assert_eq!(result.removed_manifests, 1);
     assert_eq!(result.removed_blobs, 2);
 
@@ -765,6 +771,7 @@ async fn delete_docker_package_notifies_indexer() -> Result<()> {
         repository_id,
         tag_path.to_string().as_str(),
         Some(indexer.as_ref()),
+        None,
     )
     .await?;
 
@@ -859,6 +866,7 @@ async fn collect_docker_deletions_batch_deduplicates_shared_layers() -> Result<(
         &storage,
         repository_id,
         &tag_paths.iter().cloned().collect::<Vec<_>>(),
+        None,
         None,
     )
     .await?;
@@ -967,7 +975,7 @@ async fn collect_docker_deletions_batch_streams_large_batches() -> Result<()> {
     }
 
     let batch =
-        super::collect_docker_deletions_batch(&storage, repository_id, &manifest_paths, None)
+        super::collect_docker_deletions_batch(&storage, repository_id, &manifest_paths, None, None)
             .await?;
 
     assert!(batch.deleted_objects > 0);
@@ -1442,6 +1450,126 @@ mod catalog_db_tests {
             .expect("run migrations");
 
         db
+    }
+
+    #[tokio::test]
+    async fn docker_object_accounting_tracks_arrivals_deletion_and_tag_replacement() {
+        use nr_core::database::entities::docker_object::DBDockerObject;
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        let storage = insert_storage(db.pool()).await;
+        let repository = insert_docker_repository(db.pool(), storage).await;
+        let root = "v2/image/manifests/latest";
+        let child = "v2/image/manifests/sha256:child";
+        let blob = "v2/image/blobs/sha256:blob";
+        DBDockerObject::upsert(
+            db.pool(),
+            repository,
+            root,
+            10,
+            &[child.into(), blob.into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, root)
+                .await
+                .unwrap(),
+            Some(10)
+        );
+        assert!(
+            DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
+        );
+        DBDockerObject::upsert(
+            db.pool(),
+            repository,
+            child,
+            20,
+            &[blob.into(), root.into()],
+        )
+        .await
+        .unwrap();
+        DBDockerObject::upsert(db.pool(), repository, blob, 30, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, root)
+                .await
+                .unwrap(),
+            Some(60)
+        );
+        assert!(
+            !DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
+        );
+        DBDockerObject::insert_missing(db.pool(), repository, root, 999, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, root)
+                .await
+                .unwrap(),
+            Some(60)
+        );
+        let roots: Vec<String> = (0..5)
+            .map(|n| format!("v2/concurrent/manifests/{n}"))
+            .collect();
+        for path in &roots {
+            DBDockerObject::upsert(db.pool(), repository, path, 1, &[blob.into()])
+                .await
+                .unwrap();
+        }
+        let writes = roots
+            .iter()
+            .map(|path| DBDockerObject::upsert(db.pool(), repository, path, 2, &[]));
+        for result in futures::future::join_all(writes).await {
+            result.unwrap();
+        }
+        for path in roots {
+            assert_eq!(
+                DBDockerObject::referenced_size(db.pool(), repository, &path)
+                    .await
+                    .unwrap(),
+                Some(2)
+            );
+        }
+        assert!(
+            DBDockerObject::upsert(db.pool(), repository, "overflow", u64::MAX, &[])
+                .await
+                .is_err()
+        );
+        DBDockerObject::delete_paths(db.pool(), repository, &[blob.into()])
+            .await
+            .unwrap();
+        assert!(
+            DBDockerObject::needs_backfill(db.pool(), repository, root)
+                .await
+                .unwrap()
+        );
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, root)
+                .await
+                .unwrap(),
+            Some(30)
+        );
+        DBDockerObject::upsert(db.pool(), repository, root, 15, &[])
+            .await
+            .unwrap();
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, root)
+                .await
+                .unwrap(),
+            Some(15)
+        );
+        assert_eq!(
+            DBDockerObject::referenced_size(db.pool(), repository, "missing")
+                .await
+                .unwrap(),
+            None
+        );
     }
 
     async fn reset_database(db: &TestDb) {
@@ -1977,6 +2105,90 @@ mod catalog_db_tests {
             size,
             manifest.len() as u64 + config.len() as u64 + layer.len() as u64
         );
+        site.close().await;
+    }
+
+    #[tokio::test]
+    async fn docker_package_listing_uses_persisted_referenced_size_without_storage_access() {
+        let _guard = DB_TEST_LOCK.lock().await;
+        let db = fresh_pool().await;
+        reset_database(&db).await;
+        let root = tempfile::tempdir().expect("tempdir");
+        let storage_id = insert_storage_at(db.pool(), root.path()).await;
+        let repository_id = insert_docker_repository(db.pool(), storage_id).await;
+        let fetched = chrono::Utc
+            .with_ymd_and_hms(2025, 1, 2, 12, 0, 0)
+            .single()
+            .unwrap();
+        insert_proxy_version(
+            db.pool(),
+            repository_id,
+            "library/alpine",
+            "library/alpine",
+            "latest",
+            "v2/library/alpine/manifests/latest",
+            10,
+            fetched,
+        )
+        .await;
+
+        nr_core::database::entities::docker_object::DBDockerObject::upsert(
+            db.pool(),
+            repository_id,
+            "v2/library/alpine/manifests/latest",
+            4242,
+            &[],
+        )
+        .await
+        .expect("persist object size");
+
+        insert_proxy_version(
+            db.pool(),
+            repository_id,
+            "library/small",
+            "library/small",
+            "latest",
+            "v2/library/small/manifests/latest",
+            99999,
+            fetched,
+        )
+        .await;
+        nr_core::database::entities::docker_object::DBDockerObject::upsert(
+            db.pool(),
+            repository_id,
+            "v2/library/small/manifests/latest",
+            1,
+            &[],
+        )
+        .await
+        .expect("persist smaller image");
+
+        let site = build_site(&db, root.path()).await;
+
+        let response = super::list_cached_packages(
+            State(site.clone()),
+            Some(sample_auth()),
+            Path(repository_id),
+            Query(PackageListQuery {
+                page: 1,
+                per_page: 1,
+                q: None,
+                sort_by: PackageSortBy::Size,
+                sort_dir: PackageSortDirection::Desc,
+            }),
+        )
+        .await
+        .expect("list packages succeeds");
+
+        assert_eq!(response.status(), http::StatusCode::OK);
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("read response body");
+        let payload: serde_json::Value = serde_json::from_slice(&body).expect("json response");
+        let size = payload["items"][0]["size"].as_u64().expect("size value");
+
+        // No manifest or blobs were stored; the size must come from the object inventory.
+        assert_eq!(size, 4242);
         site.close().await;
     }
 

@@ -1,3 +1,5 @@
+// ABOUTME: Persists cached proxy artifacts in the project and package catalogs.
+// ABOUTME: Tracks Docker object references alongside manifest catalog updates.
 use async_trait::async_trait;
 use nr_core::{
     database::entities::project::{
@@ -130,6 +132,16 @@ impl ProxyIndexing for DatabaseProxyIndexer {
             return Err(ProxyIndexingError::MissingCachePath);
         }
 
+        if let Some(references) = &meta.docker_references {
+            nr_core::database::entities::docker_object::DBDockerObject::upsert(
+                &self.site.database,
+                self.repository_id,
+                &meta.cache_path,
+                meta.size.unwrap_or_default(),
+                references,
+            )
+            .await?;
+        }
         let project = self.ensure_project(&meta).await?;
         let db = &self.site.database;
 

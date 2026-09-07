@@ -1,98 +1,65 @@
-use aws_types::region::Region;
+// ABOUTME: Defines S3 region suggestions and custom endpoint configuration.
+// ABOUTME: Region values remain raw strings so new providers need no code release.
 use serde::{Deserialize, Serialize};
-use std::fmt::{Display, Formatter};
-use strum::EnumIter;
 use url::Url;
 use utoipa::ToSchema;
 
-#[derive(Clone, Debug, Eq, Copy, PartialEq, Serialize, Deserialize, ToSchema, EnumIter)]
-pub enum S3StorageRegion {
-    /// us-east-1
-    UsEast1,
-    /// us-east-2
-    UsEast2,
-    /// us-west-1
-    UsWest1,
-    /// us-west-2
-    UsWest2,
-    /// ca-central-1
-    CaCentral1,
-    /// af-south-1
-    AfSouth1,
-    /// ap-east-1
-    ApEast1,
-    /// ap-south-1
-    ApSouth1,
-    /// ap-northeast-1
-    ApNortheast1,
-    /// ap-northeast-2
-    ApNortheast2,
-    /// ap-northeast-3
-    ApNortheast3,
-    /// ap-southeast-1
-    ApSoutheast1,
-    /// ap-southeast-2
-    ApSoutheast2,
-    /// cn-north-1
-    CnNorth1,
-    /// cn-northwest-1
-    CnNorthwest1,
-    /// eu-north-1
-    EuNorth1,
-    /// eu-central-1
-    EuCentral1,
-    /// eu-central-2
-    EuCentral2,
-    /// eu-west-1
-    EuWest1,
-    /// eu-west-2
-    EuWest2,
-    /// eu-west-3
-    EuWest3,
-    /// il-central-1
-    IlCentral1,
-    /// me-south-1
-    MeSouth1,
-    /// sa-east-1
-    SaEast1,
-}
-impl Display for S3StorageRegion {
-    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
-        let value = match self {
-            S3StorageRegion::UsEast1 => "us-east-1",
-            S3StorageRegion::UsEast2 => "us-east-2",
-            S3StorageRegion::UsWest1 => "us-west-1",
-            S3StorageRegion::UsWest2 => "us-west-2",
-            S3StorageRegion::CaCentral1 => "ca-central-1",
-            S3StorageRegion::AfSouth1 => "af-south-1",
-            S3StorageRegion::ApEast1 => "ap-east-1",
-            S3StorageRegion::ApSouth1 => "ap-south-1",
-            S3StorageRegion::ApNortheast1 => "ap-northeast-1",
-            S3StorageRegion::ApNortheast2 => "ap-northeast-2",
-            S3StorageRegion::ApNortheast3 => "ap-northeast-3",
-            S3StorageRegion::ApSoutheast1 => "ap-southeast-1",
-            S3StorageRegion::ApSoutheast2 => "ap-southeast-2",
-            S3StorageRegion::CnNorth1 => "cn-north-1",
-            S3StorageRegion::CnNorthwest1 => "cn-northwest-1",
-            S3StorageRegion::EuNorth1 => "eu-north-1",
-            S3StorageRegion::EuCentral1 => "eu-central-1",
-            S3StorageRegion::EuCentral2 => "eu-central-2",
-            S3StorageRegion::EuWest1 => "eu-west-1",
-            S3StorageRegion::EuWest2 => "eu-west-2",
-            S3StorageRegion::EuWest3 => "eu-west-3",
-            S3StorageRegion::IlCentral1 => "il-central-1",
-            S3StorageRegion::MeSouth1 => "me-south-1",
-            S3StorageRegion::SaEast1 => "sa-east-1",
-        };
-        f.write_str(value)
-    }
-}
+/// Canonical region identifiers offered as UI suggestions.
+///
+/// The S3 configuration accepts any non-empty region string; this list is only a convenience for
+/// commonly used AWS partitions and does not constrain configuration or deserialization.
+pub const KNOWN_S3_REGIONS: &[&str] = &[
+    "af-south-1",
+    "ap-east-1",
+    "ap-east-2",
+    "ap-northeast-1",
+    "ap-northeast-2",
+    "ap-northeast-3",
+    "ap-south-1",
+    "ap-south-2",
+    "ap-southeast-1",
+    "ap-southeast-2",
+    "ap-southeast-3",
+    "ap-southeast-4",
+    "ap-southeast-5",
+    "ap-southeast-6",
+    "ap-southeast-7",
+    "ca-central-1",
+    "ca-west-1",
+    "cn-north-1",
+    "cn-northwest-1",
+    "eu-central-1",
+    "eu-central-2",
+    "eu-central-3",
+    "eu-north-1",
+    "eu-south-1",
+    "eu-south-2",
+    "eu-west-1",
+    "eu-west-2",
+    "eu-west-3",
+    "eusc-de-east-1",
+    "eusc-de-east-2",
+    "il-central-1",
+    "me-central-1",
+    "me-south-1",
+    "mx-central-1",
+    "sa-east-1",
+    "us-east-1",
+    "us-east-2",
+    "us-gov-east-1",
+    "us-gov-west-1",
+    "us-iso-east-1",
+    "us-iso-west-1",
+    "us-isob-east-1",
+    "us-isob-west-1",
+    "us-isof-east-1",
+    "us-isof-south-1",
+    "us-isof-south-2",
+    "us-west-1",
+    "us-west-2",
+];
 
-impl From<S3StorageRegion> for Region {
-    fn from(value: S3StorageRegion) -> Self {
-        Region::new(value.to_string())
-    }
-}
+/// An optional custom endpoint and the region label used to sign requests to it.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, ToSchema)]
 pub struct CustomRegion {
     pub custom_region: Option<String>,

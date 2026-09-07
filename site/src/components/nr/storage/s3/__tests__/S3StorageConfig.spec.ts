@@ -1,3 +1,5 @@
+// ABOUTME: Verifies raw S3 region suggestions and editable provider identifiers.
+// ABOUTME: Keeps the configuration form contract executable under a lightweight combobox stub.
 import { flushPromises, mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent } from "vue";
@@ -52,18 +54,35 @@ const stubs = {
     emits: ["update:modelValue"],
     template: "<select :id='id' :value='modelValue'><option v-for='option in options' :key='option.value' :value='option.value'>{{ option.label }}</option></select>",
   }),
-  "v-autocomplete": defineComponent({
-    props: ["modelValue", "items", "itemTitle", "itemValue", "id", "label"],
+  "v-combobox": defineComponent({
+    props: {
+      modelValue: {},
+      items: { type: Array, default: () => [] },
+      itemTitle: String,
+      itemValue: String,
+      id: String,
+      label: String,
+      returnObject: { type: Boolean, default: true },
+    },
     emits: ["update:modelValue"],
     template: `
       <label>
         {{ label }}
         <input
           :id="id"
-          data-testid="region-search"
-          type="search"
-          :value="modelValue" />
-        <select data-testid="region-options" :value="modelValue">
+          data-testid="region-input"
+          type="text"
+          :value="modelValue"
+          @input="$emit('update:modelValue', $event.target.value)" />
+        <select
+          data-testid="region-options"
+          :value="modelValue"
+          @change="$emit(
+            'update:modelValue',
+            returnObject
+              ? items.find((item) => item[itemValue] === $event.target.value)
+              : $event.target.value,
+          )">
           <option
             v-for="item in items"
             :key="item[itemValue]"
@@ -81,9 +100,27 @@ describe("S3StorageConfig.vue", () => {
     (http.get as vi.Mock).mockReset();
   });
 
-  it("displays AWS region ids while preserving backend enum values", async () => {
+  it("prefills the cache directory for new storage settings", async () => {
+    (http.get as vi.Mock).mockResolvedValue({ data: ["us-east-1"] });
+
+    const settings = baseSettings();
+    mount(S3StorageConfig, {
+      props: {
+        modelValue: settings,
+      },
+      global: {
+        stubs,
+      },
+    });
+
+    await flushPromises();
+
+    expect(settings.cache.path).toBe("/tmp/s3cache");
+  });
+
+  it("displays raw region identifiers without enum conversion", async () => {
     (http.get as vi.Mock).mockResolvedValue({
-      data: ["UsEast1", "EuWest1", "SaEast1"],
+      data: ["us-east-1", "eu-west-1", "sa-east-1"],
     });
 
     const wrapper = mount(S3StorageConfig, {
@@ -101,18 +138,18 @@ describe("S3StorageConfig.vue", () => {
     expect(options.text()).toContain("us-east-1");
     expect(options.text()).toContain("eu-west-1");
     expect(options.text()).toContain("sa-east-1");
-    expect(options.text()).not.toContain("Us East1");
-    expect((options.find("option").element as HTMLOptionElement).value).toBe("UsEast1");
+    expect((options.find("option").element as HTMLOptionElement).value).toBe("us-east-1");
   });
 
-  it("uses a searchable AWS region control", async () => {
+  it("allows manually typed provider region identifiers", async () => {
     (http.get as vi.Mock).mockResolvedValue({
-      data: ["UsEast1", "EuWest1"],
+      data: ["us-east-1", "eu-west-1"],
     });
 
+    const settings = baseSettings();
     const wrapper = mount(S3StorageConfig, {
       props: {
-        modelValue: baseSettings(),
+        modelValue: settings,
       },
       global: {
         stubs,
@@ -121,6 +158,30 @@ describe("S3StorageConfig.vue", () => {
 
     await flushPromises();
 
-    expect(wrapper.get('[data-testid="region-search"]').attributes("type")).toBe("search");
+    const input = wrapper.get('[data-testid="region-input"]');
+    expect(input.attributes("type")).toBe("text");
+    await input.setValue("us-iso-east-1");
+    expect(settings.region).toBe("us-iso-east-1");
+  });
+
+  it("stores a suggested region as its raw string value", async () => {
+    (http.get as vi.Mock).mockResolvedValue({
+      data: ["us-east-1", "eu-west-1"],
+    });
+
+    const settings = baseSettings();
+    const wrapper = mount(S3StorageConfig, {
+      props: {
+        modelValue: settings,
+      },
+      global: {
+        stubs,
+      },
+    });
+
+    await flushPromises();
+    await wrapper.get('[data-testid="region-options"]').setValue("eu-west-1");
+
+    expect(settings.region).toBe("eu-west-1");
   });
 });

@@ -21,8 +21,6 @@ use chrono::{DateTime, FixedOffset};
 use http::header::HeaderValue;
 #[cfg(test)]
 use nr_storage::StorageFileMeta;
-#[cfg(test)]
-use nr_storage::s3::S3Storage;
 use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile};
 use serde::{Deserialize, Serialize};
 #[cfg(test)]
@@ -36,10 +34,6 @@ use tracing::{debug, instrument, warn};
 use utoipa::{IntoParams, ToSchema};
 use uuid::Uuid;
 
-#[cfg(test)]
-use crate::repository::docker::metadata::collect_manifest_entries;
-#[cfg(test)]
-use crate::repository::helm::HelmChartVersionExtra;
 use crate::{
     app::{
         Pkgly,
@@ -52,9 +46,7 @@ use crate::{
         DynRepository, Repository,
         docker::{
             DockerRegistry,
-            metadata::{
-                calculate_referenced_manifest_size, docker_package_key, split_manifest_cache_path,
-            },
+            metadata::{backfill_manifest_objects, docker_package_key, split_manifest_cache_path},
             types::{Manifest as DockerManifest, MediaType},
         },
         go::GoRepository,
@@ -69,7 +61,7 @@ use crate::{
 };
 use ahash::{HashSet, HashSetExt};
 #[cfg(test)]
-use nr_core::repository::project::{CargoPackageMetadata, DebPackageMetadata, VersionData};
+use nr_core::repository::project::{CargoPackageMetadata, VersionData};
 use nr_core::user::permissions::{HasPermissions, RepositoryActions};
 #[cfg(test)]
 use nr_core::utils::base64_utils;
@@ -471,10 +463,7 @@ async fn collect_go_package_page(
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PackageStrategy {
-    #[allow(dead_code)]
-    PackagesDirectory {
-        base: Option<&'static str>,
-    },
+    PackagesDirectory { base: Option<&'static str> },
     MavenHosted,
     MavenProxy,
     PythonHosted,
@@ -751,20 +740,22 @@ pub async fn list_cached_packages(
         };
 
         if is_docker_repository {
-            let manifest_path = StoragePath::from(entry.cache_path.as_str());
-            match calculate_referenced_manifest_size(&storage, repository.id(), &manifest_path)
+            if let Some(size) = row.referenced_size_bytes {
+                entry.size = size.max(0) as u64;
+            } else {
+                match backfill_manifest_objects(
+                    &site.database,
+                    &storage,
+                    repository.id(),
+                    &entry.cache_path,
+                )
                 .await
-            {
-                Ok(Some(size)) => {
-                    entry.size = size;
-                }
-                Ok(None) => {}
-                Err(err) => {
-                    warn!(
-                        ?err,
-                        cache_path = %entry.cache_path,
-                        "Failed to calculate Docker referenced size"
-                    );
+                {
+                    Ok(Some(size)) => entry.size = size,
+                    Ok(None) => {}
+                    Err(err) => {
+                        warn!(?err, cache_path = %entry.cache_path, "Failed to backfill Docker object accounting")
+                    }
                 }
             }
         } else if is_maven_repository {
@@ -839,10 +830,6 @@ async fn calculate_stored_path_size(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-const MAX_STORAGE_CONCURRENCY: usize = 8;
-
-#[cfg(test)]
 async fn map_ordered_concurrent<T, R, E, Fut, F>(
     items: Vec<T>,
     concurrency: usize,
@@ -868,98 +855,6 @@ where
     }
     ordered.sort_by_key(|(idx, _)| *idx);
     Ok(ordered.into_iter().map(|(_, value)| value).collect())
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_directory_packages(
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    base: Option<&str>,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let storage = repository.get_storage();
-    let response =
-        collect_directory_package_page(&storage, repository.id(), base, page, per_page_raw, search)
-            .await?;
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-fn file_name_from_path(path: &str) -> String {
-    path.rsplit('/')
-        .next()
-        .filter(|value| !value.is_empty())
-        .unwrap_or(path)
-        .to_string()
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn load_single_file_entry(
-    storage: DynStorage,
-    repository_id: Uuid,
-    package: String,
-    cache_path: String,
-    updated_at: DateTime<FixedOffset>,
-) -> Result<PackageFileEntry, InternalError> {
-    let storage_path = nr_core::storage::StoragePath::from(cache_path.as_str());
-    if let Some(StorageFile::File { meta, .. }) =
-        storage.open_file(repository_id, &storage_path).await?
-    {
-        return Ok(PackageFileEntry {
-            package,
-            name: file_name_from_path(&cache_path),
-            cache_path,
-            blob_digest: blob_digest_from_file_type(&meta.file_type),
-            size: meta.file_type.file_size,
-            modified: meta.modified,
-        });
-    }
-
-    Ok(PackageFileEntry {
-        package,
-        name: file_name_from_path(&cache_path),
-        cache_path,
-        blob_digest: None,
-        size: 0,
-        modified: updated_at,
-    })
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_directory_packages_s3(
-    repository_id: Uuid,
-    storage: S3Storage,
-    page: usize,
-    per_page_raw: usize,
-    base: Option<&str>,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let objects = storage
-        .list_repository_objects(repository_id, base)
-        .await
-        .map_err(StorageError::from)?;
-
-    let mut objects: Vec<PackageObject> = objects
-        .into_iter()
-        .map(|obj| PackageObject {
-            key: obj.key,
-            size: obj.size,
-            modified: obj
-                .last_modified
-                .unwrap_or_else(|| chrono::Local::now().fixed_offset()),
-        })
-        .collect();
-
-    // Ensure deterministic ordering independent of S3 pagination
-    objects.sort_by(|a, b| a.key.cmp(&b.key));
-
-    let response = build_package_page_from_objects(objects, base, page, per_page_raw, search);
-
-    Ok(ResponseBuilder::ok().json(&response))
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
@@ -1026,16 +921,6 @@ async fn collect_go_package_entries(
 struct GoDeletionResult {
     removed: usize,
     missing: Vec<String>,
-}
-
-#[derive(sqlx::FromRow)]
-#[cfg(test)]
-#[allow(dead_code)]
-struct DebPackageRow {
-    project_name: String,
-    version: String,
-    extra: SqlxJson<VersionData>,
-    created_at: DateTime<FixedOffset>,
 }
 
 #[derive(sqlx::FromRow)]
@@ -1120,68 +1005,6 @@ async fn fetch_maven_catalog_page(
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-async fn fetch_maven_proxy_catalog_page(
-    database: &PgPool,
-    repository_id: Uuid,
-    per_page: usize,
-    offset: i64,
-    search: Option<&str>,
-) -> Result<Vec<ProxyCatalogRow>, sqlx::Error> {
-    if let Some(term) = search {
-        let pattern = format!("%{}%", term.to_lowercase());
-        return sqlx::query_as::<_, ProxyCatalogRow>(
-            r#"
-            SELECT
-                p.key AS project_key,
-                pv.version,
-                pv.path AS cache_path,
-                pv.extra AS version_data,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE pv.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            ORDER BY LOWER(p.key) COLLATE "C", LOWER(pv.version) COLLATE "C"
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(database)
-        .await;
-    }
-
-    sqlx::query_as::<_, ProxyCatalogRow>(
-        r#"
-        SELECT
-            p.key AS project_key,
-            pv.version,
-            pv.path AS cache_path,
-            pv.extra AS version_data,
-            pv.updated_at
-        FROM project_versions pv
-        INNER JOIN projects p ON pv.project_id = p.id
-        WHERE pv.repository_id = $1
-        ORDER BY LOWER(p.key) COLLATE "C", LOWER(pv.version) COLLATE "C"
-        LIMIT $2 OFFSET $3
-        "#,
-    )
-    .bind(repository_id)
-    .bind(per_page as i64)
-    .bind(offset)
-    .fetch_all(database)
-    .await
-}
-
-#[cfg(test)]
 async fn fetch_php_catalog_page(
     database: &PgPool,
     repository_id: Uuid,
@@ -1191,70 +1014,6 @@ async fn fetch_php_catalog_page(
 ) -> Result<Vec<HostedCatalogRow>, sqlx::Error> {
     // PHP uses the same project_versions schema as Maven; reuse the same shape.
     fetch_maven_catalog_page(database, repository_id, per_page, offset, search).await
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn fetch_php_proxy_catalog_page(
-    database: &PgPool,
-    repository_id: Uuid,
-    per_page: usize,
-    offset: i64,
-    search: Option<&str>,
-) -> Result<Vec<HostedCatalogRow>, sqlx::Error> {
-    if let Some(term) = search {
-        let pattern = format!("%{}%", term.to_lowercase());
-        return sqlx::query_as::<_, HostedCatalogRow>(
-            r#"
-            SELECT
-                p.key AS project_key,
-                pv.version AS version,
-                pv.path AS version_path,
-                pv.extra AS version_data,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (pv.extra->'extra'->>'size') IS NOT NULL
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            ORDER BY LOWER(p.key) COLLATE "C", LOWER(pv.version) COLLATE "C"
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(database)
-        .await;
-    }
-
-    sqlx::query_as::<_, HostedCatalogRow>(
-        r#"
-        SELECT
-            p.key AS project_key,
-            pv.version AS version,
-            pv.path AS version_path,
-            pv.extra AS version_data,
-            pv.updated_at
-        FROM project_versions pv
-        INNER JOIN projects p ON pv.project_id = p.id
-        WHERE p.repository_id = $1
-          AND (pv.extra->'extra'->>'size') IS NOT NULL
-        ORDER BY LOWER(p.key) COLLATE "C", LOWER(pv.version) COLLATE "C"
-        LIMIT $2 OFFSET $3
-        "#,
-    )
-    .bind(repository_id)
-    .bind(per_page as i64)
-    .bind(offset)
-    .fetch_all(database)
-    .await
 }
 
 #[cfg(test)]
@@ -1327,14 +1086,6 @@ async fn fetch_proxy_catalog_page(
     .bind(offset)
     .fetch_all(database)
     .await
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn deb_metadata(data: &VersionData) -> Option<DebPackageMetadata> {
-    data.extra
-        .as_ref()
-        .and_then(|value| serde_json::from_value(value.clone()).ok())
 }
 
 fn go_related_paths(path: &str) -> Option<Vec<String>> {
@@ -1656,337 +1407,6 @@ fn build_go_entries_from_directory(
     versions.into_values().map(|(entry, _)| entry).collect()
 }
 
-#[allow(dead_code)]
-#[cfg(test)]
-async fn list_go_packages(
-    repository: DynRepository,
-    base: &str,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let storage = repository.get_storage();
-    let response =
-        collect_go_package_page(&storage, repository.id(), base, page, per_page_raw, search)
-            .await?;
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_helm_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository.id())
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows = if let Some(pattern) = &search_pattern {
-        sqlx::query(
-            r#"
-            SELECT
-                p.name AS chart_name,
-                pv.version,
-                pv.path,
-                pv.extra,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            ORDER BY p.name ASC, pv.version ASC
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    } else {
-        sqlx::query(
-            r#"
-            SELECT
-                p.name AS chart_name,
-                pv.version,
-                pv.path,
-                pv.extra,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            ORDER BY p.name ASC, pv.version ASC
-            LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(repository.id())
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    };
-
-    let mut items = Vec::with_capacity(rows.len());
-
-    for row in rows {
-        let chart_name: String = row.try_get("chart_name")?;
-        let version: String = row.try_get("version")?;
-        let path: String = row.try_get("path")?;
-        let version_data: sqlx::types::Json<VersionData> = row.try_get("extra")?;
-        let updated_at: DateTime<FixedOffset> = row.try_get("updated_at")?;
-
-        let Some(extra_value) = version_data.0.extra else {
-            debug!(
-                chart = %chart_name,
-                version = %version,
-                "Skipping Helm version without extra metadata"
-            );
-            continue;
-        };
-        let chart_extra: HelmChartVersionExtra = serde_json::from_value(extra_value)?;
-        let cache_path = if chart_extra.canonical_path.is_empty() {
-            path.clone()
-        } else {
-            chart_extra.canonical_path.clone()
-        };
-        items.push(PackageFileEntry {
-            package: chart_name,
-            name: version,
-            cache_path,
-            blob_digest: Some(chart_extra.digest),
-            size: chart_extra.size_bytes,
-            modified: updated_at,
-        });
-    }
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_cargo_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository.id())
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows = if let Some(pattern) = &search_pattern {
-        sqlx::query(
-            r#"
-            SELECT
-                p.name AS crate_name,
-                p.key AS project_key,
-                pv.version AS version,
-                pv.extra AS extra,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            ORDER BY p.name ASC, pv.version ASC
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    } else {
-        sqlx::query(
-            r#"
-            SELECT
-                p.name AS crate_name,
-                p.key AS project_key,
-                pv.version AS version,
-                pv.extra AS extra,
-                pv.updated_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            ORDER BY p.name ASC, pv.version ASC
-            LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(repository.id())
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    };
-
-    let mut items = Vec::with_capacity(rows.len());
-
-    for row in rows {
-        let crate_name: String = row.try_get("crate_name")?;
-        let project_key: String = row.try_get("project_key")?;
-        let version: String = row.try_get("version")?;
-        let version_data: sqlx::types::Json<VersionData> = row.try_get("extra")?;
-        let updated_at: DateTime<FixedOffset> = row.try_get("updated_at")?;
-
-        let VersionData { extra, .. } = version_data.0;
-        let Some(extra_value) = extra else {
-            debug!(
-                crate = %crate_name,
-                version = %version,
-                "Skipping Cargo version without metadata"
-            );
-            continue;
-        };
-        let metadata: CargoPackageMetadata = serde_json::from_value(extra_value)?;
-        items.push(build_cargo_package_entry(
-            &crate_name,
-            &project_key,
-            &version,
-            updated_at,
-            &metadata,
-        ));
-    }
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
 #[cfg(test)]
 fn build_cargo_package_entry(
     crate_name: &str,
@@ -2015,1035 +1435,31 @@ fn cargo_cache_path(project_key: &str, version: &str) -> String {
 }
 
 #[cfg(test)]
-#[allow(dead_code)]
-async fn list_npm_proxy_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE pv.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            WHERE pv.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_npm_proxy_catalog_page(&site.database, repository_id, per_page, offset, search)
-            .await?;
-
-    let items: Vec<PackageFileEntry> = rows.iter().filter_map(proxy_entry_from_row).collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_npm_hosted_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_maven_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let storage = repository.get_storage();
-    let items = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move {
-            load_single_file_entry(
-                storage,
-                repository_id,
-                row.project_key.clone(),
-                row.version_path.clone(),
-                row.updated_at,
-            )
-            .await
-        }
-    })
-    .await?;
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_npm_virtual_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    list_npm_hosted_packages(site, repository, page, per_page_raw, search).await
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_python_hosted_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_maven_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let storage = repository.get_storage();
-    let items = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move {
-            load_single_file_entry(
-                storage,
-                repository_id,
-                row.project_key.clone(),
-                row.version_path.clone(),
-                row.updated_at,
-            )
-            .await
-        }
-    })
-    .await?;
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_python_proxy_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_proxy_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let items: Vec<PackageFileEntry> = rows.iter().filter_map(proxy_entry_from_row).collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_go_catalog_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_maven_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let storage = repository.get_storage();
-    let items = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move {
-            let mut entry = load_single_file_entry(
-                storage,
-                repository_id,
-                row.project_key.clone(),
-                row.version_path.clone(),
-                row.updated_at,
-            )
-            .await?;
-            entry.name = row.version.clone();
-            Ok::<_, InternalError>(entry)
-        }
-    })
-    .await?;
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn go_entry_from_proxy_row(row: &ProxyCatalogRow) -> Option<PackageFileEntry> {
-    let (size, modified, blob_digest) = match row.version_data.0.proxy_artifact() {
+fn proxy_entry_from_row(row: &ProxyCatalogRow) -> Option<PackageFileEntry> {
+    let (cache_path, size, modified, blob_digest) = match row.version_data.0.proxy_artifact() {
         Some(proxy_meta) => (
+            proxy_meta.cache_path,
             proxy_meta.size.unwrap_or_default(),
             DateTime::<FixedOffset>::from(proxy_meta.fetched_at),
-            proxy_meta.upstream_digest.clone(),
+            proxy_meta.upstream_digest,
         ),
-        None => (0, row.updated_at, None),
+        None => (row.cache_path.clone(), 0, row.updated_at, None),
     };
+
+    let name = cache_path
+        .rsplit('/')
+        .next()
+        .filter(|value| !value.is_empty())
+        .unwrap_or(&cache_path)
+        .to_string();
     Some(PackageFileEntry {
         package: row.project_key.clone(),
-        name: row.version.clone(),
-        cache_path: row.cache_path.clone(),
-        blob_digest,
-        size,
-        modified,
-    })
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_go_proxy_catalog_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_proxy_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-    let items = rows
-        .iter()
-        .filter_map(go_entry_from_proxy_row)
-        .collect::<Vec<_>>();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-fn docker_entry_from_row(row: &ProxyCatalogRow) -> Option<PackageFileEntry> {
-    let (package, size, modified, blob_digest) = match row.version_data.0.proxy_artifact() {
-        Some(proxy_meta) => (
-            proxy_meta.package_name,
-            proxy_meta.size.unwrap_or_default(),
-            DateTime::<FixedOffset>::from(proxy_meta.fetched_at),
-            proxy_meta.upstream_digest.clone(),
-        ),
-        None => (
-            row.project_key.clone(),
-            0,
-            row.updated_at,
-            if row.version.starts_with("sha256:") {
-                Some(row.version.clone())
-            } else {
-                None
-            },
-        ),
-    };
-    Some(PackageFileEntry {
-        package,
-        name: row.version.clone(),
-        cache_path: row.cache_path.clone(),
-        blob_digest,
-        size,
-        modified,
-    })
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_docker_catalog_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows =
-        fetch_proxy_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let items: Vec<PackageFileEntry> = rows.iter().filter_map(docker_entry_from_row).collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_maven_hosted_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows =
-        fetch_maven_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let storage = repository.get_storage();
-    let version_chunks = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move { load_maven_version_entries(storage, repository_id, row).await }
-    })
-    .await?;
-
-    let items: Vec<PackageFileEntry> = version_chunks.into_iter().flatten().collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_php_hosted_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows =
-        fetch_php_catalog_page(&site.database, repository_id, per_page, offset, search).await?;
-
-    let storage = repository.get_storage();
-    let version_chunks = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move { load_php_version_entries(storage, repository_id, row).await }
-    })
-    .await?;
-
-    let items: Vec<PackageFileEntry> = version_chunks.into_iter().flatten().collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn load_maven_version_entries(
-    storage: DynStorage,
-    repository_id: Uuid,
-    row: HostedCatalogRow,
-) -> Result<Vec<PackageFileEntry>, InternalError> {
-    let HostedCatalogRow {
-        project_key,
-        version,
-        version_path,
-        version_data,
-        updated_at: _updated_at,
-    } = row;
-    let version_data = version_data.0;
-    let package_label = format!("{}:{}", project_key, version);
-    let cache_prefix = version_path.trim_end_matches('/');
-    let normalized_path = ensure_trailing_slash(&version_path);
-    let storage_path = nr_core::storage::StoragePath::from(normalized_path);
-
-    if let Some(StorageFile::Directory { files, .. }) =
-        storage.open_file(repository_id, &storage_path).await?
-    {
-        let mut file_entries: Vec<_> = files.iter().collect();
-        file_entries.sort_by(|a, b| a.name().cmp(b.name()));
-
-        let mut items = Vec::new();
-        for meta in file_entries {
-            if should_ignore(meta.name()) {
-                continue;
-            }
-            if let FileType::File(file_meta) = meta.file_type() {
-                let cache_path = if cache_prefix.is_empty() {
-                    meta.name().to_string()
-                } else {
-                    format!("{cache_prefix}/{}", meta.name())
-                };
-                items.push(PackageFileEntry {
-                    package: package_label.clone(),
-                    name: meta.name().to_string(),
-                    cache_path,
-                    blob_digest: blob_digest_from_file_type(file_meta),
-                    size: file_meta.file_size,
-                    modified: meta.modified().clone(),
-                });
-            }
-        }
-        return Ok(items);
-    }
-
-    if let Some(proxy_meta) = version_data.proxy_artifact() {
-        let modified: DateTime<FixedOffset> = proxy_meta.fetched_at.into();
-        let file_name = proxy_meta
-            .cache_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&proxy_meta.cache_path)
-            .to_string();
-        return Ok(vec![PackageFileEntry {
-            package: package_label,
-            name: file_name,
-            cache_path: proxy_meta.cache_path.clone(),
-            blob_digest: proxy_meta.upstream_digest.clone(),
-            size: proxy_meta.size.unwrap_or_default(),
-            modified,
-        }]);
-    }
-
-    let direct_path = nr_core::storage::StoragePath::from(version_path.as_str());
-    if let Some(StorageFile::File { meta, .. }) =
-        storage.open_file(repository_id, &direct_path).await?
-    {
-        let name = version_path
-            .rsplit('/')
-            .next()
-            .unwrap_or(&version_path)
-            .to_string();
-        return Ok(vec![PackageFileEntry {
-            package: package_label,
-            name,
-            cache_path: version_path,
-            blob_digest: blob_digest_from_file_type(&meta.file_type),
-            size: meta.file_type.file_size,
-            modified: meta.modified,
-        }]);
-    }
-
-    Ok(Vec::new())
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn load_maven_proxy_version_entries(
-    storage: DynStorage,
-    repository_id: Uuid,
-    row: ProxyCatalogRow,
-) -> Result<Vec<PackageFileEntry>, InternalError> {
-    let ProxyCatalogRow {
-        project_key,
-        version,
+        name,
         cache_path,
-        version_data,
-        updated_at,
-    } = row;
-    let version_data = version_data.0;
-    let package_label = format!("{}:{}", project_key, version);
-    let cache_prefix = cache_path.trim_end_matches('/');
-    let normalized_path = ensure_trailing_slash(&cache_path);
-    let storage_path = nr_core::storage::StoragePath::from(normalized_path);
-
-    if let Some(StorageFile::Directory { files, .. }) =
-        storage.open_file(repository_id, &storage_path).await?
-    {
-        let mut file_entries: Vec<_> = files.iter().collect();
-        file_entries.sort_by(|a, b| a.name().cmp(b.name()));
-
-        let mut items = Vec::new();
-        for meta in file_entries {
-            if should_ignore(meta.name()) {
-                continue;
-            }
-            if let FileType::File(file_meta) = meta.file_type() {
-                let child_path = if cache_prefix.is_empty() {
-                    meta.name().to_string()
-                } else {
-                    format!("{cache_prefix}/{}", meta.name())
-                };
-                items.push(PackageFileEntry {
-                    package: package_label.clone(),
-                    name: meta.name().to_string(),
-                    cache_path: child_path,
-                    blob_digest: blob_digest_from_file_type(file_meta),
-                    size: file_meta.file_size,
-                    modified: meta.modified().clone(),
-                });
-            }
-        }
-        return Ok(items);
-    }
-
-    if let Some(proxy_meta) = version_data.proxy_artifact() {
-        let modified: DateTime<FixedOffset> = proxy_meta.fetched_at.into();
-        return Ok(vec![PackageFileEntry {
-            package: package_label,
-            name: file_name_from_path(&proxy_meta.cache_path),
-            cache_path: proxy_meta.cache_path,
-            blob_digest: proxy_meta.upstream_digest,
-            size: proxy_meta.size.unwrap_or_default(),
-            modified,
-        }]);
-    }
-
-    let direct_path = nr_core::storage::StoragePath::from(cache_path.as_str());
-    if let Some(StorageFile::File { meta, .. }) =
-        storage.open_file(repository_id, &direct_path).await?
-    {
-        return Ok(vec![PackageFileEntry {
-            package: package_label,
-            name: file_name_from_path(&cache_path),
-            cache_path,
-            blob_digest: blob_digest_from_file_type(&meta.file_type),
-            size: meta.file_type.file_size,
-            modified: meta.modified,
-        }]);
-    }
-
-    let _ = updated_at;
-    Ok(Vec::new())
+        blob_digest,
+        size,
+        modified,
+    })
 }
 
 #[cfg(test)]
@@ -3087,7 +1503,6 @@ async fn load_php_version_entries(
         return Ok(Vec::new());
     }
 
-    // PHP hosted: list only versions that have a dist file in storage.
     let storage_path = nr_core::storage::StoragePath::from(version_path.as_str());
     if let Some(StorageFile::File { meta, .. }) =
         storage.open_file(repository_id, &storage_path).await?
@@ -3102,358 +1517,14 @@ async fn load_php_version_entries(
         }]);
     }
 
-    let modified: DateTime<FixedOffset> = updated_at;
     Ok(vec![PackageFileEntry {
         package: project_key,
         name: version,
         cache_path: version_path,
         blob_digest: None,
         size: 0,
-        modified,
+        modified: updated_at,
     }])
-}
-
-#[cfg(test)]
-fn proxy_entry_from_row(row: &ProxyCatalogRow) -> Option<PackageFileEntry> {
-    let (cache_path, size, modified, blob_digest) = match row.version_data.0.proxy_artifact() {
-        Some(proxy_meta) => (
-            proxy_meta.cache_path,
-            proxy_meta.size.unwrap_or_default(),
-            DateTime::<FixedOffset>::from(proxy_meta.fetched_at),
-            proxy_meta.upstream_digest,
-        ),
-        None => (row.cache_path.clone(), 0, row.updated_at, None),
-    };
-
-    Some(PackageFileEntry {
-        package: row.project_key.clone(),
-        name: file_name_from_path(&cache_path),
-        cache_path,
-        blob_digest,
-        size,
-        modified,
-    })
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_deb_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2 OR
-                LOWER(COALESCE(pv.extra::text, '')) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            "#,
-        )
-        .bind(repository.id())
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if offset >= total_versions {
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    let rows = if let Some(pattern) = &search_pattern {
-        sqlx::query_as::<_, DebPackageRow>(
-            r#"
-            SELECT
-                p.name AS project_name,
-                pv.version,
-                pv.extra,
-                pv.created_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2 OR
-                LOWER(COALESCE(pv.extra::text, '')) COLLATE "C" LIKE $2
-              )
-            ORDER BY pv.created_at DESC
-            LIMIT $3 OFFSET $4
-            "#,
-        )
-        .bind(repository.id())
-        .bind(pattern)
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    } else {
-        sqlx::query_as::<_, DebPackageRow>(
-            r#"
-            SELECT
-                p.name AS project_name,
-                pv.version,
-                pv.extra,
-                pv.created_at
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-            ORDER BY pv.created_at DESC
-            LIMIT $2 OFFSET $3
-            "#,
-        )
-        .bind(repository.id())
-        .bind(per_page as i64)
-        .bind(offset)
-        .fetch_all(&site.database)
-        .await?
-    };
-
-    let mut items = Vec::new();
-    for row in rows {
-        if let Some(metadata) = deb_metadata(&row.extra.0) {
-            items.push(PackageFileEntry {
-                package: row.project_name.clone(),
-                name: row.version.clone(),
-                cache_path: metadata.filename.clone(),
-                blob_digest: normalize_sha256_digest(&metadata.sha256),
-                size: metadata.size,
-                modified: row.created_at,
-            });
-        }
-    }
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_php_proxy_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (pv.extra->'extra'->>'size') IS NOT NULL
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE p.repository_id = $1
-              AND (pv.extra->'extra'->>'size') IS NOT NULL
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows =
-        fetch_php_proxy_catalog_page(&site.database, repository_id, per_page, offset, search)
-            .await?;
-
-    let storage = repository.get_storage();
-    let version_chunks = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move { load_php_version_entries(storage, repository_id, row).await }
-    })
-    .await?;
-
-    let items: Vec<PackageFileEntry> = version_chunks.into_iter().flatten().collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
-#[cfg(test)]
-#[allow(dead_code)]
-async fn list_maven_proxy_packages(
-    site: Pkgly,
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let offset = ((current_page - 1) * per_page) as i64;
-    let repository_id = repository.id();
-    let search_pattern = search.map(|term| format!("%{}%", term.to_lowercase()));
-
-    let total_versions: i64 = if let Some(pattern) = &search_pattern {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            INNER JOIN projects p ON pv.project_id = p.id
-            WHERE pv.repository_id = $1
-              AND (
-                LOWER(p.name) COLLATE "C" LIKE $2 OR
-                LOWER(p.key) COLLATE "C" LIKE $2 OR
-                LOWER(pv.version) COLLATE "C" LIKE $2 OR
-                LOWER(pv.path) COLLATE "C" LIKE $2
-              )
-            "#,
-        )
-        .bind(repository_id)
-        .bind(pattern)
-        .fetch_one(&site.database)
-        .await?
-    } else {
-        sqlx::query_scalar(
-            r#"
-            SELECT COUNT(*)
-            FROM project_versions pv
-            WHERE pv.repository_id = $1
-            "#,
-        )
-        .bind(repository_id)
-        .fetch_one(&site.database)
-        .await?
-    };
-
-    if total_versions == 0 {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: 0,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    if offset >= total_versions {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages: total_versions as usize,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let rows =
-        fetch_maven_proxy_catalog_page(&site.database, repository_id, per_page, offset, search)
-            .await?;
-    let storage = repository.get_storage();
-    let version_chunks = map_ordered_concurrent(rows, MAX_STORAGE_CONCURRENCY, move |row| {
-        let storage = storage.clone();
-        async move { load_maven_proxy_version_entries(storage, repository_id, row).await }
-    })
-    .await?;
-
-    let items: Vec<PackageFileEntry> = version_chunks.into_iter().flatten().collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages: total_versions as usize,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
 }
 
 #[allow(dead_code)]
@@ -3600,172 +1671,6 @@ fn derive_maven_package_label(path: &str) -> Option<String> {
     Some(format!("{project_key}:{version}"))
 }
 
-#[allow(dead_code)]
-#[cfg(test)]
-async fn list_docker_packages(
-    repository: DynRepository,
-    page: usize,
-    per_page_raw: usize,
-    search: Option<&str>,
-) -> Result<Response, InternalError> {
-    let storage = repository.get_storage();
-    let per_page = per_page_raw.clamp(1, MAX_PER_PAGE);
-    let current_page = page.max(1);
-    let start = (current_page - 1) * per_page;
-    let search_term = search.map(|value| value.to_lowercase());
-
-    if search_term.is_some() {
-        let mut manifests = collect_manifest_entries(&storage, repository.id())
-            .await
-            .map_err(InternalError::from)?;
-
-        manifests.sort_by(|a, b| {
-            a.repository
-                .cmp(&b.repository)
-                .then(a.reference.cmp(&b.reference))
-        });
-
-        let mut entries: Vec<PackageFileEntry> = manifests
-            .into_iter()
-            .filter_map(|entry| {
-                let pkg = PackageFileEntry {
-                    package: entry.repository.clone(),
-                    name: entry.reference.clone(),
-                    cache_path: entry.cache_path.clone(),
-                    blob_digest: if entry.reference.starts_with("sha256:") {
-                        Some(entry.reference.clone())
-                    } else {
-                        None
-                    },
-                    size: entry.size,
-                    modified: entry.modified,
-                };
-                if let Some(term) = &search_term {
-                    if !matches_search(&pkg, term) {
-                        return None;
-                    }
-                }
-                Some(pkg)
-            })
-            .collect();
-
-        let total_packages = entries.len();
-        if total_packages == 0 || start >= total_packages {
-            let empty = PackageListResponse {
-                page: current_page,
-                per_page,
-                total_packages,
-                items: Vec::new(),
-            };
-            return Ok(ResponseBuilder::ok().json(&empty));
-        }
-
-        let end = min(start + per_page, total_packages);
-        let items = entries.drain(start..end).collect();
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages,
-            items,
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    if let DynStorage::S3(s3_storage) = storage.clone() {
-        let (manifests, total_packages) = s3_storage
-            .list_docker_manifests_paginated(repository.id(), start, per_page)
-            .await
-            .map_err(StorageError::from)?;
-
-        if total_packages == 0 || start >= total_packages {
-            let empty = PackageListResponse {
-                page: current_page,
-                per_page,
-                total_packages,
-                items: Vec::new(),
-            };
-            return Ok(ResponseBuilder::ok().json(&empty));
-        }
-
-        let now = chrono::Local::now().fixed_offset();
-        let items = manifests
-            .into_iter()
-            .filter_map(|obj| {
-                let repo_relative = obj.key.strip_prefix("v2/")?.to_string();
-                let (repository, reference) = repo_relative.split_once("/manifests/")?;
-                Some(PackageFileEntry {
-                    package: repository.to_string(),
-                    name: reference.to_string(),
-                    cache_path: obj.key,
-                    blob_digest: if reference.starts_with("sha256:") {
-                        Some(reference.to_string())
-                    } else {
-                        None
-                    },
-                    size: obj.size,
-                    modified: obj.last_modified.unwrap_or(now),
-                })
-            })
-            .collect();
-
-        let response = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages,
-            items,
-        };
-        return Ok(ResponseBuilder::ok().json(&response));
-    }
-
-    // Fallback for non-S3 storage: load manifests into memory (local FS)
-    let mut manifests = collect_manifest_entries(&storage, repository.id())
-        .await
-        .map_err(InternalError::from)?;
-
-    manifests.sort_by(|a, b| {
-        a.repository
-            .cmp(&b.repository)
-            .then(a.reference.cmp(&b.reference))
-    });
-
-    let total_packages = manifests.len();
-
-    if total_packages == 0 || start >= total_packages {
-        let empty = PackageListResponse {
-            page: current_page,
-            per_page,
-            total_packages,
-            items: Vec::new(),
-        };
-        return Ok(ResponseBuilder::ok().json(&empty));
-    }
-
-    let end = min(start + per_page, total_packages);
-    let items = manifests[start..end]
-        .iter()
-        .map(|entry| PackageFileEntry {
-            package: entry.repository.clone(),
-            name: entry.reference.clone(),
-            cache_path: entry.cache_path.clone(),
-            blob_digest: if entry.reference.starts_with("sha256:") {
-                Some(entry.reference.clone())
-            } else {
-                None
-            },
-            size: entry.size,
-            modified: entry.modified,
-        })
-        .collect();
-
-    let response = PackageListResponse {
-        page: current_page,
-        per_page,
-        total_packages,
-        items,
-    };
-    Ok(ResponseBuilder::ok().json(&response))
-}
-
 fn is_valid_cache_path(path: &str, strategy: PackageStrategy) -> bool {
     match strategy {
         PackageStrategy::PackagesDirectory { base } => {
@@ -3841,6 +1746,8 @@ pub enum DockerDeletionError {
     InvalidManifest(String),
     #[error("indexing error: {0}")]
     Indexing(#[from] ProxyIndexingError),
+    #[error("accounting error: {0}")]
+    Accounting(#[from] sqlx::Error),
 }
 
 fn docker_proxy_key_from_path(path: &str) -> Option<ProxyArtifactKey> {
@@ -3852,11 +1759,14 @@ fn docker_proxy_key_from_path(path: &str) -> Option<ProxyArtifactKey> {
     })
 }
 
+/// Deletes a Docker manifest graph and removes successfully deleted inventory entries.
+/// Returns storage, catalog, or accounting errors without suppressing failures.
 pub async fn delete_docker_package(
     storage: &nr_storage::DynStorage,
     repository_id: Uuid,
     cache_path: &str,
     indexer: Option<&dyn ProxyIndexing>,
+    database: Option<&PgPool>,
 ) -> Result<DockerDeletionResult, DockerDeletionError> {
     let (repository_name, _) =
         split_manifest_cache_path(cache_path).ok_or(DockerDeletionError::InvalidManifestPath)?;
@@ -3906,6 +1816,15 @@ pub async fn delete_docker_package(
         .delete_files_batch(repository_id, &paths_vec)
         .await?;
 
+    if let Some(database) = database {
+        nr_core::database::entities::docker_object::DBDockerObject::delete_paths(
+            database,
+            repository_id,
+            &paths_to_delete.iter().cloned().collect::<Vec<_>>(),
+        )
+        .await?;
+    }
+
     // Count manifests vs blobs for the result
     let manifest_count = paths_to_delete
         .iter()
@@ -3943,6 +1862,7 @@ struct StreamingDockerBatchDeletion {
     deleted_packages: usize,
     deleted_objects: usize,
     indexer: Option<Arc<dyn ProxyIndexing>>,
+    database: Option<PgPool>,
 }
 
 impl StreamingDockerBatchDeletion {
@@ -3962,6 +1882,7 @@ impl StreamingDockerBatchDeletion {
             deleted_packages: 0,
             deleted_objects: 0,
             indexer,
+            database: None,
         }
     }
 
@@ -3990,6 +1911,14 @@ impl StreamingDockerBatchDeletion {
             .delete_files_batch(self.repository_id, &paths)
             .await?;
 
+        if let Some(database) = &self.database {
+            nr_core::database::entities::docker_object::DBDockerObject::delete_paths(
+                database,
+                self.repository_id,
+                &drained,
+            )
+            .await?;
+        }
         self.deleted_objects += deleted;
         Ok(())
     }
@@ -4025,8 +1954,10 @@ async fn collect_docker_deletions_batch(
     repository_id: Uuid,
     paths: &[String],
     indexer: Option<Arc<dyn ProxyIndexing>>,
+    database: Option<&PgPool>,
 ) -> Result<DockerBatchDeletion, DockerDeletionError> {
     let mut batch = StreamingDockerBatchDeletion::new(storage, repository_id, indexer);
+    batch.database = database.cloned();
 
     for path in paths {
         if !is_valid_docker_manifest_path(path) {
@@ -4337,10 +2268,15 @@ pub async fn delete_cached_package_paths(
         PackageStrategy::DockerHosted | PackageStrategy::DockerProxy
     ) {
         let docker_indexer = docker_proxy.as_ref().map(|proxy| proxy.indexer().clone());
-        let batch =
-            collect_docker_deletions_batch(&storage, repository.id(), paths, docker_indexer)
-                .await
-                .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
+        let batch = collect_docker_deletions_batch(
+            &storage,
+            repository.id(),
+            paths,
+            docker_indexer,
+            Some(&site.database),
+        )
+        .await
+        .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
 
         debug!(
             paths = paths.len(),

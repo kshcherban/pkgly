@@ -598,7 +598,6 @@ impl From<Option<StorageFileMeta<FileType>>> for RepoResponse {
         }
     }
 }
-#[allow(dead_code)]
 #[derive(Debug, Clone)]
 pub struct RepoRequestPath {
     storage: String,

@@ -46,7 +46,7 @@ aws-config = { version = "1", default-features = false, features = ["behavior-ve
 aws-credential-types = "1"
 aws-sdk-s3 = "1"
 aws-types = "1"
-aws-smithy-types = "1"
+aws-smithy-types = { version = "1", features = ["rt-tokio"] }
 aws-smithy-runtime-api = "1"
 lru = "0.16"
 hex = "0.4"
@@ -59,8 +59,6 @@ workspace = true
 
 [dev-dependencies]
 toml.workspace = true
-tracing-subscriber.workspace = true
-tracing-appender.workspace = true
 nr-core = { workspace = true, features = ["testing"] }
 anyhow = { workspace = true }
 parking_lot.workspace = true

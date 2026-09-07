@@ -370,15 +370,6 @@ impl SessionManager {
         Ok(session)
     }
     #[instrument]
-    pub fn create_session_default_lifespan(
-        &self,
-        user_id: i32,
-        user_agent: String,
-        ip_address: String,
-    ) -> Result<Session, SessionError> {
-        self.create_session(user_id, user_agent, ip_address, self.config.lifespan)
-    }
-    #[instrument]
     pub fn get_session(&self, session_id: &str) -> Result<Option<Session>, SessionError> {
         let sessions = self.sessions.begin_read()?;
 

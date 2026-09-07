@@ -18,7 +18,8 @@ Please use one of the following options for your build
 ### SSL
 After installation you can add SSL
 
-Edit cfg/pkgly.toml
+Edit cfg/pkgly.toml. A complete configuration example is available in the
+[example config.toml](https://github.com/kshcherban/pkgly/blob/main/examples/config.toml).
 
 Under the application section
 

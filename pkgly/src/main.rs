@@ -1,3 +1,4 @@
+#![recursion_limit = "256"]
 #![allow(
     elided_lifetimes_in_paths,
     clippy::all,
@@ -217,6 +218,9 @@ fn web_start(config_path: Option<PathBuf>) -> anyhow::Result<()> {
     let tokio = tokio::runtime::Builder::new_multi_thread()
         .worker_threads(worker_threads)
         .thread_name_fn(thread_name)
+        // Request chains through S3-backed Docker repositories nest the axum handler stack
+        // inside the AWS SDK state machine; std::thread defaults (2 MiB) overflow there.
+        .thread_stack_size(8 * 1024 * 1024)
         .enable_all()
         .build()?;
     tokio.block_on(app::web::start_with_config(config))?;

@@ -1,3 +1,5 @@
+// ABOUTME: Exercises Docker proxy caching, upstream requests, and manifest validation.
+// ABOUTME: Checks request resource bounds and cache behavior across registry operations.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::repository::{
@@ -296,6 +298,50 @@ impl ProxyIndexing for RecordingIndexer {
 }
 
 #[tokio::test]
+async fn manifest_future_fits_worker_stack() -> anyhow::Result<()> {
+    let storage = test_storage().await;
+    let upstream = ProxyUpstream::new(&DockerProxyConfig {
+        upstream_url: "https://registry-1.docker.io".into(),
+        upstream_auth: None,
+        revalidation_ttl_seconds: default_revalidation_ttl(),
+        skip_tag_revalidation: false,
+    })?;
+    let future = fetch_and_cache_manifest(
+        &upstream,
+        &storage,
+        Uuid::new_v4(),
+        "library/nginx",
+        "alpine",
+        None,
+        None,
+    );
+    let size = std::mem::size_of_val(&future);
+    assert!(
+        size < 16 * 1024,
+        "manifest future occupies {size} bytes on the request stack"
+    );
+    Ok(())
+}
+
+#[test]
+fn repository_read_futures_fit_worker_stack() {
+    fn size<F: std::future::Future>(
+        _: impl Fn(&'static crate::repository::DynRepository, RepositoryRequest) -> F,
+    ) -> usize {
+        std::mem::size_of::<F>()
+    }
+    for (method, size) in [
+        ("GET", size(|repo, request| repo.handle_get(request))),
+        ("HEAD", size(|repo, request| repo.handle_head(request))),
+    ] {
+        assert!(
+            size < 16 * 1024,
+            "repository {method} future occupies {size} bytes"
+        );
+    }
+}
+
+#[tokio::test]
 async fn fetch_manifest_caches_locally() -> anyhow::Result<()> {
     let manifest = br#"{"schemaVersion":2,"mediaType":"application/vnd.oci.image.manifest.v1+json","config":{"mediaType":"application/vnd.oci.image.config.v1+json","size":7023,"digest":"sha256:0000000000000000000000000000000000000000000000000000000000000000"},"layers":[]}"#;
     let blob = b"blob-data";
@@ -401,6 +447,12 @@ async fn fetch_manifest_records_proxy_index_entries() -> anyhow::Result<()> {
             .iter()
             .all(|meta| meta.cache_path.starts_with("v2/library/alpine/manifests/"))
     );
+    // Direct references are indexed without probing their stored content.
+    assert!(recorded.iter().all(|meta| {
+        meta.docker_references
+            .as_ref()
+            .is_some_and(|paths| paths.len() == 1)
+    }));
 
     Ok(())
 }
@@ -721,6 +773,7 @@ async fn deleted_manifest_is_downloaded_again() -> anyhow::Result<()> {
         repository_id,
         manifest_path.to_string().as_str(),
         None,
+        None,
     )
     .await
     .expect("docker deletion should succeed");
@@ -930,6 +983,7 @@ fn streamed_from_bytes(bytes: &[u8]) -> anyhow::Result<StreamedDownload> {
         path,
         size: bytes.len() as u64,
         digest,
+        permits: Vec::new(),
     })
 }
 
@@ -1081,4 +1135,22 @@ async fn bearer_challenge_is_followed_for_public_token() -> anyhow::Result<()> {
     upstream_server.abort();
     token_server.abort();
     Ok(())
+}
+
+#[test]
+fn temp_reservations_track_units_and_fail_fast_when_exhausted() {
+    let budget = Arc::new(tokio::sync::Semaphore::new(4));
+    let mut permits = Vec::new();
+    reserve_temp_permits(&budget, &mut permits, 2 * TEMP_FILE_PERMIT_BYTES)
+        .expect("initial reservation");
+    reserve_temp_permits(&budget, &mut permits, 3 * TEMP_FILE_PERMIT_BYTES)
+        .expect("incremental reservation");
+    assert_eq!(budget.available_permits(), 1);
+
+    let error = reserve_temp_permits(&budget, &mut permits, 5 * TEMP_FILE_PERMIT_BYTES)
+        .expect_err("reservation must fail fast when the budget is exhausted");
+    assert!(
+        error.to_string().contains("temporary file budget"),
+        "unexpected error: {error}"
+    );
 }

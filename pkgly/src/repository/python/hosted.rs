@@ -27,7 +27,7 @@ use uuid::Uuid;
 
 use super::{
     PythonRepositoryError,
-    configs::{PythonRepositoryConfig, PythonRepositoryConfigType},
+    configs::PythonRepositoryConfigType,
     utils::{PythonPackagePathInfo, html_escape, normalize_package_name},
 };
 use crate::{
@@ -59,8 +59,6 @@ pub struct PythonRepositoryInner {
     pub name: String,
     pub visibility: RwLock<Visibility>,
     pub repository: DBRepository,
-    #[allow(dead_code)]
-    pub config: PythonRepositoryConfig,
     pub storage: DynStorage,
     pub site: Pkgly,
 }
@@ -73,7 +71,6 @@ impl PythonHosted {
         site: Pkgly,
         storage: DynStorage,
         repository: DBRepository,
-        config: PythonRepositoryConfig,
     ) -> Result<Self, RepositoryFactoryError> {
         let visibility = RwLock::new(repository.visibility);
         Ok(Self(Arc::new(PythonRepositoryInner {
@@ -81,7 +78,6 @@ impl PythonHosted {
             name: repository.name.to_string(),
             visibility,
             repository,
-            config,
             storage,
             site,
         })))

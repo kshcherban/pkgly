@@ -11,7 +11,6 @@ pub use new::*;
 use crate::{database::prelude::*, repository::project::ReleaseType};
 pub mod info;
 pub mod members;
-pub mod update;
 pub mod versions;
 /// Implemented on different types of Project query result. Such as ProjectLookupResult
 pub trait ProjectDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync + TableQuery {

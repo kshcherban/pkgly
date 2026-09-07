@@ -328,7 +328,7 @@ impl LocalStorageInner {
             new_directory_start,
         })
     }
-    #[instrument(skip(location))]
+    #[instrument(skip(self, location))]
     pub fn get_path(&self, repository: &Uuid, location: &StoragePath) -> PathBuf {
         let location: PathBuf = location.into();
         let path = self.config.path.join(repository.to_string());
@@ -373,7 +373,7 @@ impl LocalStorageInner {
             content: StorageFileReader::from(file),
         })
     }
-    #[instrument(skip(path), fields(entries.read, entries.skipped))]
+    #[instrument(skip(self, path), fields(entries.read, entries.skipped))]
     pub async fn open_folder(&self, path: PathBuf) -> Result<StorageFile, LocalStorageError> {
         let mut set = JoinSet::<Result<StorageFileMeta<FileType>, LocalStorageError>>::new();
         let current_span = Span::current();

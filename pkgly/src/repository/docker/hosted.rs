@@ -96,23 +96,6 @@ impl DockerHosted {
 
         Ok(Self(Arc::new(inner)))
     }
-
-    pub async fn load_proxy(
-        repository: DBRepository,
-        storage: DynStorage,
-        site: Pkgly,
-        upstream_url: &str,
-    ) -> Result<Self, RepositoryFactoryError> {
-        let mut hosted = Self::load(repository, storage, site).await?;
-        let upstream = Url::parse(upstream_url).map_err(|err| {
-            RepositoryFactoryError::InvalidConfig(super::REPOSITORY_TYPE_ID, err.to_string())
-        })?;
-        let client = reqwest::Client::new();
-        Arc::get_mut(&mut hosted.0)
-            .expect("no other references during construction")
-            .proxy = Some(ProxySettings { upstream, client });
-        Ok(hosted)
-    }
 }
 
 impl Repository for DockerHosted {
@@ -215,10 +198,6 @@ impl Repository for DockerHosted {
 }
 
 impl DockerHosted {
-    pub fn is_proxy(&self) -> bool {
-        self.0.proxy.is_some()
-    }
-
     pub fn upstream(&self) -> Option<&ProxySettings> {
         self.0.proxy.as_ref()
     }

@@ -1,3 +1,5 @@
+// ABOUTME: Implements Docker pull-through caching and upstream authentication.
+// ABOUTME: Serves manifests and blobs through the shared repository storage interface.
 //! Docker proxy (pull-through cache) support.
 //!
 //! This module implements a read-only proxy repository that forwards
@@ -32,18 +34,22 @@ use http::{
     header::{ACCEPT, CONTENT_LENGTH, CONTENT_TYPE},
 };
 use nr_core::{
+    database::entities::docker_object::DBDockerObject,
     repository::{Visibility, config::RepositoryConfigType, project::ProxyArtifactMeta},
     storage::StoragePath,
     utils::base64_utils,
 };
-use nr_storage::{DynStorage, FileContent, FileType, Storage, StorageFile, StorageFileReader};
+use nr_storage::{
+    DynStorage, FileContent, FileContentBytes, FileType, Storage, StorageFile, StorageFileReader,
+};
 use parking_lot::RwLock;
 use reqwest::{Client, Response};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use sha2::Digest;
 use tempfile::Builder;
-use tokio::io::{AsyncRead, AsyncWriteExt};
+use tokio::io::{AsyncRead, AsyncReadExt, AsyncWriteExt};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::time::sleep;
 use tracing::{info, instrument, warn};
 use url::Url;
@@ -56,6 +62,7 @@ use crate::{
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
         RepositoryRequest,
+        docker::metadata::manifest_references,
         proxy_indexing::{DatabaseProxyIndexer, ProxyIndexing, ProxyIndexingError},
         utils::can_read_repository_with_auth,
     },
@@ -471,10 +478,12 @@ fn accept_priority(token: &str) -> u8 {
     }
 }
 
+#[derive(Debug)]
 struct StreamedDownload {
     path: tempfile::TempPath,
     size: u64,
     digest: String,
+    permits: Vec<OwnedSemaphorePermit>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -626,11 +635,12 @@ async fn record_docker_manifest_cache_hit(
     cache_path: &StoragePath,
     digest: &str,
     size: u64,
+    references: Vec<String>,
 ) -> Result<(), ProxyIndexingError> {
     let Some(indexer) = indexer else {
         return Ok(());
     };
-    let meta = ProxyArtifactMeta::builder(
+    let mut builder = ProxyArtifactMeta::builder(
         repository_name.to_string(),
         docker_proxy_package_key(repository_name),
         cache_path.to_string(),
@@ -638,9 +648,41 @@ async fn record_docker_manifest_cache_hit(
     .version(reference.to_string())
     .upstream_digest(digest.to_string())
     .size(size)
-    .fetched_at(Utc::now())
-    .build();
-    indexer.record_cached_artifact(meta).await
+    .fetched_at(Utc::now());
+    builder = builder.docker_references(references);
+    indexer.record_cached_artifact(builder.build()).await
+}
+
+/// Grows the temporary-file reservation to cover `total_bytes`, failing fast when the
+/// shared budget is exhausted. Blocking while holding earlier permits would deadlock
+/// competing downloads once incomplete ones exhausted the budget, and an object larger
+/// than the budget could never satisfy a blocking reservation at all; releasing the
+/// partial download instead lets the caller retry once capacity frees up.
+fn reserve_temp_permits(
+    budget: &Arc<Semaphore>,
+    permits: &mut Vec<OwnedSemaphorePermit>,
+    total_bytes: u64,
+) -> Result<(), DockerError> {
+    let required = total_bytes.div_ceil(TEMP_FILE_PERMIT_BYTES) as usize;
+    let reserved = permits
+        .iter()
+        .map(|permit| permit.num_permits())
+        .sum::<usize>();
+    if reserved >= required {
+        return Ok(());
+    }
+    match budget
+        .clone()
+        .try_acquire_many_owned((required - reserved) as u32)
+    {
+        Ok(permit) => {
+            permits.push(permit);
+            Ok(())
+        }
+        Err(_) => Err(DockerError::InvalidManifest(
+            "temporary file budget exhausted".to_string(),
+        )),
+    }
 }
 
 async fn stream_response_to_tempfile(response: Response) -> Result<StreamedDownload, DockerError> {
@@ -649,11 +691,25 @@ async fn stream_response_to_tempfile(response: Response) -> Result<StreamedDownl
     let mut file = tokio::fs::File::from_std(std_file);
     let mut hasher = sha2::Sha256::new();
     let mut total = 0u64;
+    let mut permits = Vec::new();
+    let budget = temp_file_budget();
+
+    // Reserve the advertised size upfront so oversized downloads fail before any bytes
+    // are transferred; growth beyond the advertisement still fails fast per chunk.
+    let advertised = response
+        .headers()
+        .get("content-length")
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| value.parse::<u64>().ok());
+    if let Some(length) = advertised {
+        reserve_temp_permits(&budget, &mut permits, length)?;
+    }
 
     let mut stream = response.bytes_stream();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk?;
         total += chunk.len() as u64;
+        reserve_temp_permits(&budget, &mut permits, total)?;
         hasher.update(&chunk);
         file.write_all(&chunk).await?;
     }
@@ -665,17 +721,27 @@ async fn stream_response_to_tempfile(response: Response) -> Result<StreamedDownl
         path,
         size: total,
         digest,
+        permits,
     })
 }
 
 struct TempFileReader {
     file: tokio::fs::File,
     _path: tempfile::TempPath,
+    _permits: Vec<OwnedSemaphorePermit>,
 }
 
 impl TempFileReader {
-    fn new(file: tokio::fs::File, path: tempfile::TempPath) -> Self {
-        Self { file, _path: path }
+    fn new(
+        file: tokio::fs::File,
+        path: tempfile::TempPath,
+        permits: Vec<OwnedSemaphorePermit>,
+    ) -> Self {
+        Self {
+            file,
+            _path: path,
+            _permits: permits,
+        }
     }
 }
 
@@ -687,6 +753,59 @@ impl AsyncRead for TempFileReader {
     ) -> Poll<std::io::Result<()>> {
         Pin::new(&mut self.file).poll_read(cx, buf)
     }
+}
+
+/// Blobs up to this size are hashed in memory and delivered from that buffer; larger blobs are
+/// hashed into a temp file and delivered from there, keeping peak memory bounded.
+const BLOB_HASH_BUFFER_LIMIT: usize = 8 * 1024 * 1024;
+const TEMP_FILE_BUDGET_BYTES: u64 = 64 * 1024 * 1024 * 1024;
+const TEMP_FILE_PERMIT_BYTES: u64 = 1024 * 1024;
+static TEMP_FILE_BUDGET: std::sync::OnceLock<Arc<Semaphore>> = std::sync::OnceLock::new();
+
+fn temp_file_budget() -> Arc<Semaphore> {
+    TEMP_FILE_BUDGET
+        .get_or_init(|| {
+            Arc::new(Semaphore::new(
+                (TEMP_FILE_BUDGET_BYTES / TEMP_FILE_PERMIT_BYTES) as usize,
+            ))
+        })
+        .clone()
+}
+
+/// Streams a reader through a hasher into a temp file so large blobs are verified and delivered
+/// from a single storage read without holding the whole object in memory.
+async fn hash_reader_to_tempfile(
+    reader: StorageFileReader,
+) -> Result<StreamedDownload, DockerError> {
+    let named = Builder::new().prefix("docker-proxy-blob-").tempfile()?;
+    let (std_file, path) = named.into_parts();
+    let mut file = tokio::fs::File::from_std(std_file);
+    let mut hasher = sha2::Sha256::new();
+    let mut reader = reader;
+    let mut buffer = vec![0u8; 64 * 1024];
+    let mut total = 0u64;
+    let mut permits = Vec::new();
+    let budget = temp_file_budget();
+
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        total += read as u64;
+        reserve_temp_permits(&budget, &mut permits, total)?;
+        hasher.update(&buffer[..read]);
+        file.write_all(&buffer[..read]).await?;
+    }
+    file.flush().await?;
+
+    let digest = format!("sha256:{:x}", hasher.finalize());
+    Ok(StreamedDownload {
+        path,
+        size: total,
+        digest,
+        permits,
+    })
 }
 
 fn upstream_image_name(repository_name: &str, upstream: &ProxyUpstream) -> String {
@@ -787,6 +906,15 @@ impl DockerProxy {
                 .await?
             {
                 if let FileType::File(file_meta) = meta.file_type() {
+                    DBDockerObject::upsert(
+                        &self.0.site.database,
+                        self.id(),
+                        &blob_path.to_string(),
+                        file_meta.file_size,
+                        &[],
+                    )
+                    .await
+                    .map_err(ProxyIndexingError::from)?;
                     let digest_value = file_meta
                         .file_hash
                         .sha2_256
@@ -806,6 +934,17 @@ impl DockerProxy {
             digest,
         )
         .await?;
+
+        let blob_path = format!("v2/{repository_name}/blobs/{digest}");
+        DBDockerObject::upsert(
+            &self.0.site.database,
+            self.id(),
+            &blob_path,
+            blob.length,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
 
         Ok(if head_only {
             blob_head_response(&blob.digest, blob.length)
@@ -948,20 +1087,14 @@ async fn load_cached_manifest(
             actual: computed_digest,
         });
     }
-    // S3 sets content-type to application/octet-stream; prefer detecting from content
+    // S3 sets content-type to application/octet-stream; prefer detecting from content.
     let content_type = content_type_from_meta
         .clone()
         .unwrap_or_else(|| manifest_media_type(&bytes, None));
-    let reopened = storage
-        .open_file(repository_id, manifest_path)
-        .await?
-        .ok_or_else(|| DockerError::ManifestNotFound(reference.to_string()))?;
-    let (reader, _) = reopened
-        .file()
-        .ok_or_else(|| DockerError::InvalidManifest("Expected file, got directory".into()))?;
 
+    // Deliver from the bytes we already read instead of re-opening the object.
     Ok(Some(CachedManifest {
-        reader,
+        reader: StorageFileReader::Bytes(FileContentBytes::Content(bytes)),
         digest: computed_digest,
         content_type,
         length,
@@ -1007,7 +1140,7 @@ async fn download_manifest_from_upstream(
     }
     let headers = response.headers().clone();
     let streamed = stream_response_to_tempfile(response).await?;
-    let manifest_bytes = tokio::fs::read(streamed.path.to_path_buf()).await?;
+    let mut manifest_bytes = tokio::fs::read(streamed.path.to_path_buf()).await?;
     let mut content_type = manifest_media_type(&manifest_bytes, Some(&headers));
     let mut streamed_download = streamed;
 
@@ -1032,6 +1165,7 @@ async fn download_manifest_from_upstream(
                 }
             }
 
+            manifest_bytes = modern_bytes;
             content_type = modern_content_type;
             streamed_download = modern_streamed;
         } else {
@@ -1072,6 +1206,8 @@ async fn download_manifest_from_upstream(
     )
     .await?;
 
+    let references = manifest_references(repository_name, &manifest_bytes);
+
     record_docker_manifest_cache_hit(
         indexer,
         repository_name,
@@ -1079,6 +1215,7 @@ async fn download_manifest_from_upstream(
         manifest_path,
         &computed_digest,
         streamed_download.size,
+        references.clone(),
     )
     .await?;
 
@@ -1105,6 +1242,7 @@ async fn download_manifest_from_upstream(
             &digest_path,
             &computed_digest,
             streamed_download.size,
+            references.clone(),
         )
         .await?;
     }
@@ -1117,6 +1255,7 @@ async fn download_manifest_from_upstream(
         reader: StorageFileReader::AsyncReader(Box::pin(TempFileReader::new(
             tokio::fs::File::open(streamed_download.path.to_path_buf()).await?,
             streamed_download.path,
+            streamed_download.permits,
         ))),
         digest: computed_digest,
         content_type,
@@ -1206,6 +1345,8 @@ pub(crate) async fn fetch_and_cache_manifest(
     );
     let manifest_path =
         StoragePath::from(format!("v2/{}/manifests/{}", repository_name, reference));
+    // Refresh/download futures contain nested SDK operations. Keep them heap-allocated so
+    // their state does not accumulate in the surrounding HTTP request's stack frames.
     if let Some(cached) =
         load_cached_manifest(storage, repository_id, &manifest_path, reference).await?
     {
@@ -1226,7 +1367,7 @@ pub(crate) async fn fetch_and_cache_manifest(
                 return Err(DockerError::ManifestNotFound(reference.to_string()));
             }
         } else {
-            match revalidate_manifest_tag(
+            match Box::pin(revalidate_manifest_tag(
                 upstream,
                 storage,
                 repository_id,
@@ -1235,7 +1376,7 @@ pub(crate) async fn fetch_and_cache_manifest(
                 &manifest_path,
                 cached,
                 indexer,
-            )
+            ))
             .await?
             {
                 RevalidationOutcome::Unchanged(cached) => {
@@ -1254,7 +1395,7 @@ pub(crate) async fn fetch_and_cache_manifest(
         } else {
             accept
         };
-        match download_manifest_from_upstream(
+        match Box::pin(download_manifest_from_upstream(
             upstream,
             storage,
             repository_id,
@@ -1263,7 +1404,7 @@ pub(crate) async fn fetch_and_cache_manifest(
             override_accept,
             &manifest_path,
             indexer,
-        )
+        ))
         .await
         {
             Ok(manifest) => return Ok(manifest),
@@ -1279,7 +1420,7 @@ pub(crate) async fn fetch_and_cache_manifest(
     }
 
     info!("fetch_and_cache_manifest: cache miss or refresh failed, downloading");
-    download_manifest_from_upstream(
+    Box::pin(download_manifest_from_upstream(
         upstream,
         storage,
         repository_id,
@@ -1288,7 +1429,7 @@ pub(crate) async fn fetch_and_cache_manifest(
         Some(MODERN_UPSTREAM_ACCEPT),
         &manifest_path,
         indexer,
-    )
+    ))
     .await
 }
 
@@ -1426,29 +1567,45 @@ async fn load_cached_blob(
         }));
     }
 
+    // No stored digest: hash the content once and deliver from that same copy so blob delivery
+    // performs a single storage read instead of re-opening the object after verification.
     let length_usize: usize = length
         .try_into()
         .map_err(|_| DockerError::InvalidManifest("blob size overflow".to_string()))?;
-    let bytes = reader.read_to_vec(length_usize).await?;
-    let computed_digest = compute_sha256_hex(&bytes);
-    if digest.starts_with("sha256:") && digest != computed_digest {
-        return Err(DockerError::DigestMismatch {
-            expected: digest.to_string(),
-            actual: computed_digest,
-        });
-    }
-    let reopened = storage
-        .open_file(repository_id, blob_path)
-        .await?
-        .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
-    let (reader, meta) = reopened
-        .file()
-        .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
+    let (reader, computed_digest) = if length_usize <= BLOB_HASH_BUFFER_LIMIT {
+        let bytes = reader.read_to_vec(length_usize).await?;
+        let computed_digest = compute_sha256_hex(&bytes);
+        if digest.starts_with("sha256:") && digest != computed_digest {
+            return Err(DockerError::DigestMismatch {
+                expected: digest.to_string(),
+                actual: computed_digest,
+            });
+        }
+        (
+            StorageFileReader::Bytes(FileContentBytes::Content(bytes)),
+            computed_digest,
+        )
+    } else {
+        let streamed = hash_reader_to_tempfile(reader).await?;
+        let computed_digest = streamed.digest.clone();
+        if digest.starts_with("sha256:") && digest != computed_digest {
+            return Err(DockerError::DigestMismatch {
+                expected: digest.to_string(),
+                actual: computed_digest,
+            });
+        }
+        let reader = StorageFileReader::AsyncReader(Box::pin(TempFileReader::new(
+            tokio::fs::File::open(streamed.path.to_path_buf()).await?,
+            streamed.path,
+            streamed.permits,
+        )));
+        (reader, computed_digest)
+    };
 
     Ok(Some(CachedBlob {
         reader,
         digest: computed_digest,
-        length: meta.file_type.file_size,
+        length,
     }))
 }
 
@@ -1514,6 +1671,7 @@ async fn download_blob_from_upstream(
         reader: StorageFileReader::AsyncReader(Box::pin(TempFileReader::new(
             tokio::fs::File::open(streamed.path.to_path_buf()).await?,
             streamed.path,
+            streamed.permits,
         ))),
         digest: computed_digest,
         length: streamed.size,

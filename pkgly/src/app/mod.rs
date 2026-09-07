@@ -17,7 +17,6 @@ pub mod email_service;
 pub mod frontend;
 pub mod open_api;
 pub mod request_logging;
-pub mod resources;
 pub mod scheduler;
 pub mod storage_usage;
 pub mod webhooks;

@@ -1,8 +1,11 @@
+// ABOUTME: Handles Docker Registry manifest and blob requests.
+// ABOUTME: Records stored object sizes and references for cached-byte accounting.
 //! Docker Registry API V2 HTTP handlers
 //!
 //! Implements the Docker Registry HTTP API V2 specification.
 //! Reference: https://docs.docker.com/registry/spec/api/
 
+use crate::repository::proxy_indexing::ProxyIndexingError;
 use axum::body::Body;
 use base64::Engine;
 use base64::engine::general_purpose::STANDARD as BASE64_STANDARD;
@@ -10,6 +13,7 @@ use bytes::Bytes;
 use chrono::Utc;
 use futures::StreamExt;
 use http::StatusCode;
+use nr_core::database::entities::docker_object::DBDockerObject;
 use nr_core::database::entities::project::{
     DBProject, NewProject, ProjectDBType,
     versions::{DBProjectVersion, NewVersion},
@@ -21,10 +25,13 @@ use nr_core::{
 };
 use nr_storage::{
     DynStorage, FileContent, FileType, Storage, StorageError, StorageFile, local::LocalStorage,
+    s3::S3_UPLOAD_SPOOL_PERMIT_BYTES,
 };
 use sha2::{Digest, Sha256};
-use std::{collections::BTreeSet, future::Future, io};
+use std::{collections::BTreeSet, future::Future, io, path::PathBuf, sync::Arc};
+use tempfile::{Builder, TempPath};
 use tokio::io::{AsyncReadExt, AsyncWrite, AsyncWriteExt, BufWriter};
+use tokio::sync::{OwnedSemaphorePermit, Semaphore};
 use tokio::task::spawn_blocking;
 use tokio_util::io::ReaderStream;
 use tracing::{debug, info, instrument, warn};
@@ -468,18 +475,114 @@ where
     Ok(())
 }
 
-async fn collect_stream_bytes<S>(mut stream: S) -> Result<Vec<u8>, DockerError>
+/// Reserves shared spool capacity before writing so incoming upload chunk files stay
+/// within the shared temporary-storage budget alongside staged uploads. Growth beyond the
+/// available capacity fails the request instead of blocking while holding earlier
+/// reservations; dropping the permits releases the capacity once the spool is consumed.
+fn reserve_spool_capacity(
+    budget: Option<&Arc<Semaphore>>,
+    permits: &mut Vec<OwnedSemaphorePermit>,
+    total_bytes: u64,
+) -> Result<(), DockerError> {
+    let Some(budget) = budget else {
+        return Ok(());
+    };
+    let required = total_bytes.div_ceil(S3_UPLOAD_SPOOL_PERMIT_BYTES) as usize;
+    let reserved = permits
+        .iter()
+        .map(|permit| permit.num_permits())
+        .sum::<usize>();
+    if reserved >= required {
+        return Ok(());
+    }
+    match budget
+        .clone()
+        .try_acquire_many_owned((required - reserved) as u32)
+    {
+        Ok(permit) => {
+            permits.push(permit);
+            Ok(())
+        }
+        Err(_) => Err(DockerError::InvalidManifest(
+            "upload temporary storage budget exhausted".to_string(),
+        )),
+    }
+}
+
+async fn spool_stream<S>(
+    mut stream: S,
+    spool_budget: Option<Arc<Semaphore>>,
+) -> Result<(PathBuf, TempPath, u64, Vec<OwnedSemaphorePermit>), DockerError>
 where
     S: futures::Stream<Item = Result<Bytes, RepositoryHandlerError>> + Unpin,
 {
-    let mut data = Vec::new();
+    let named = Builder::new().prefix("docker-upload-chunk-").tempfile()?;
+    let (std_file, path) = named.into_parts();
+    let path_buf = path.to_path_buf();
+    let mut file = tokio::fs::File::from_std(std_file);
+    let mut length = 0u64;
+    let mut permits = Vec::new();
     while let Some(chunk) = stream.next().await {
         let chunk = chunk.map_err(DockerError::from)?;
         if !chunk.is_empty() {
-            data.extend_from_slice(&chunk);
+            length = length.saturating_add(chunk.len() as u64);
+            reserve_spool_capacity(spool_budget.as_ref(), &mut permits, length)?;
+            file.write_all(&chunk).await.map_err(DockerError::from)?;
         }
     }
-    Ok(data)
+    file.flush().await.map_err(DockerError::from)?;
+    Ok((path_buf, path, length, permits))
+}
+
+/// Returns the shared spool budget to reserve against, if this storage spools uploads.
+fn upload_spool_budget(storage: &DynStorage) -> Option<Arc<Semaphore>> {
+    match storage {
+        DynStorage::S3(s3) => Some(s3.upload_spool_budget()),
+        _ => None,
+    }
+}
+
+async fn update_upload_state_from_file(
+    site: &Pkgly,
+    handle: &BlobUploadStateHandle,
+    path: &std::path::Path,
+) -> Result<u64, DockerError> {
+    let mut file = tokio::fs::File::open(path)
+        .await
+        .map_err(DockerError::from)?;
+    let mut buffer = vec![0u8; LOCAL_UPLOAD_BUFFER_SIZE];
+    loop {
+        let read = file.read(&mut buffer).await.map_err(DockerError::from)?;
+        if read == 0 {
+            break;
+        }
+        update_upload_state_background(
+            site.clone(),
+            handle.clone(),
+            Bytes::copy_from_slice(&buffer[..read]),
+        )
+        .await?;
+    }
+    Ok(site.blob_upload_state_length(handle))
+}
+
+async fn append_upload_chunk(
+    storage: &DynStorage,
+    repository: Uuid,
+    chunk: FileContent,
+    location: &StoragePath,
+) -> Result<usize, DockerError> {
+    match storage {
+        DynStorage::S3(s3) => s3
+            .append_file_staged(repository, chunk, location)
+            .await
+            .map_err(StorageError::from)
+            .map_err(DockerError::from),
+        _ => storage
+            .append_file(repository, chunk, location)
+            .await
+            .map_err(DockerError::from),
+    }
 }
 
 async fn update_upload_state_background(
@@ -902,6 +1005,17 @@ async fn get_blob(
         .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
 
     let size = meta.file_type.file_size;
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            size,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let stream = ReaderStream::new(reader);
 
     let mut builder = ResponseBuilder::ok();
@@ -933,6 +1047,17 @@ async fn head_blob(
         .ok_or_else(|| DockerError::BlobNotFound(digest.to_string()))?;
 
     let size = meta.file_type.file_size;
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            size,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let stored_digest = meta
         .file_type
         .file_hash
@@ -1025,6 +1150,8 @@ async fn put_manifest(
         }
     }
 
+    let references = super::metadata::manifest_references(repository_name, &body);
+
     // Save manifest by tag/reference
     let manifest_path =
         StoragePath::from(format!("v2/{}/manifests/{}", repository_name, reference));
@@ -1032,6 +1159,15 @@ async fn put_manifest(
         .save_file(repo.id(), body.clone().into(), &manifest_path)
         .await?;
     if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &manifest_path.to_string(),
+            body_size,
+            &references,
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
         record_manifest_in_catalog(
             &repo.site().database,
             repo.id(),
@@ -1052,6 +1188,15 @@ async fn put_manifest(
             .save_file(repo.id(), body.into(), &digest_path)
             .await?;
         if repo.catalog_indexing_enabled() {
+            DBDockerObject::upsert(
+                &repo.site().database,
+                repo.id(),
+                &digest_path.to_string(),
+                body_size,
+                &references,
+            )
+            .await
+            .map_err(ProxyIndexingError::from)?;
             record_manifest_in_catalog(
                 &repo.site().database,
                 repo.id(),
@@ -1278,16 +1423,19 @@ async fn upload_blob_chunk(
             .await?;
         }
         storage => {
-            let bytes = collect_stream_bytes(stream).await?;
-            if !bytes.is_empty() {
-                let chunk = Bytes::from(bytes);
-                storage
-                    .append_file(repo.id(), FileContent::Bytes(chunk.clone()), &upload_path)
-                    .await?;
+            let (chunk_path, _chunk_file, chunk_size, _spool_permits) =
+                spool_stream(stream, upload_spool_budget(&storage)).await?;
+            if chunk_size > 0 {
+                append_upload_chunk(
+                    &storage,
+                    repo.id(),
+                    FileContent::Path(chunk_path.clone()),
+                    &upload_path,
+                )
+                .await?;
 
                 total_size =
-                    update_upload_state_background(site.clone(), state_handle.clone(), chunk)
-                        .await?;
+                    update_upload_state_from_file(&site, &state_handle, &chunk_path).await?;
             }
         }
     }
@@ -1380,16 +1528,19 @@ async fn complete_blob_upload(
             .await?;
         }
         storage => {
-            let bytes = collect_stream_bytes(stream).await?;
-            if !bytes.is_empty() {
-                let chunk = Bytes::from(bytes);
-                storage
-                    .append_file(repo.id(), FileContent::Bytes(chunk.clone()), &upload_path)
-                    .await?;
+            let (chunk_path, _chunk_file, chunk_size, _spool_permits) =
+                spool_stream(stream, upload_spool_budget(&storage)).await?;
+            if chunk_size > 0 {
+                append_upload_chunk(
+                    &storage,
+                    repo.id(),
+                    FileContent::Path(chunk_path.clone()),
+                    &upload_path,
+                )
+                .await?;
 
                 _current_size =
-                    update_upload_state_background(site.clone(), state_handle.clone(), chunk)
-                        .await?;
+                    update_upload_state_from_file(&site, &state_handle, &chunk_path).await?;
             }
         }
     }
@@ -1434,6 +1585,17 @@ async fn complete_blob_upload(
         return Err(DockerError::BlobUploadNotFound(upload_id.to_string()));
     }
 
+    if repo.catalog_indexing_enabled() {
+        DBDockerObject::upsert(
+            &repo.site().database,
+            repo.id(),
+            &blob_path.to_string(),
+            finalized.length,
+            &[],
+        )
+        .await
+        .map_err(ProxyIndexingError::from)?;
+    }
     let location = format!("/v2/{}/blobs/{}", repository_name, digest);
 
     Ok(custom_response(
@@ -1524,6 +1686,7 @@ async fn delete_manifest(
         repo.id(),
         &manifest_path_str,
         None,
+        Some(&repo.site().database),
     )
     .await
     {
@@ -1572,6 +1735,9 @@ async fn delete_blob(
     repo.get_storage()
         .delete_file(repo.id(), &blob_path)
         .await?;
+    DBDockerObject::delete_paths(&repo.site().database, repo.id(), &[blob_path.to_string()])
+        .await
+        .map_err(ProxyIndexingError::from)?;
 
     Ok(custom_response(StatusCode::ACCEPTED, vec![], vec![]))
 }

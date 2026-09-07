@@ -1,3 +1,5 @@
+# ABOUTME: Defines the reproducible integration stack used by repository E2E suites.
+# ABOUTME: Includes a pinned MinIO service for end-to-end S3 storage coverage.
 services:
   postgres:
     image: postgres:17
@@ -25,6 +27,8 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
+      minio-init:
+        condition: service_completed_successfully
     environment:
       - RUST_LOG=debug
       - DATABASE_URL=postgresql://pkgly:pkgly@postgres:5432/pkgly_test
@@ -33,6 +37,33 @@ services:
     volumes:
       - ./config/pkgly.test.toml:/config/pkgly.test.toml:ro
       - test-storage:/storage
+    networks:
+      - integration
+
+  minio:
+    image: minio/minio:RELEASE.2025-03-12T18-04-18Z
+    command: ["server", "/data", "--console-address", ":9001"]
+    environment:
+      MINIO_ROOT_USER: minioadmin
+      MINIO_ROOT_PASSWORD: minioadmin
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      interval: 5s
+      timeout: 5s
+      retries: 12
+    volumes:
+      - minio-data:/data
+    networks:
+      - integration
+
+  minio-init:
+    image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+    depends_on:
+      minio:
+        condition: service_healthy
+    entrypoint: ["/bin/sh", "-c"]
+    command:
+      - mc alias set local http://minio:9000 minioadmin minioadmin && mc mb --ignore-existing local/pkgly-test
     networks:
       - integration
 
@@ -86,6 +117,8 @@ services:
         condition: service_completed_successfully
       docker:
         condition: service_healthy
+      minio:
+        condition: service_healthy
     environment:
       - PKGLY_URL=http://pkgly:8888
       - TEST_TOKEN=NPDxeLFM8ehXKteIHW7DFy1chf2QaYdf
@@ -95,7 +128,6 @@ services:
       - PKGLY_DOCKER_HOST=pkgly:8888
     volumes:
       - ../integration:/tests:ro
-      - ../performance:/perf-tests:ro
       - ../fixtures:/fixtures:ro
       - test-storage:/pkgly-storage:ro
       - test-results:/results
@@ -107,6 +139,7 @@ volumes:
   test-storage:
   test-results:
   docker-graph:
+  minio-data:
 
 networks:
   integration: {}
