@@ -1331,39 +1331,24 @@ async fn load_php_version_entries_uses_proxy_metadata_for_cached_dist() -> Resul
     Ok(())
 }
 
-#[tokio::test]
-async fn delete_version_records_by_path_normalizes_and_deletes() {
-    let repository_id = Uuid::new_v4();
+#[test]
+fn normalize_catalog_paths_normalizes_and_deduplicates() {
     let mut targets = ahash::HashSet::new();
     targets.insert("Crates/Demo/1.0.0/".to_string());
     targets.insert("crates/demo/1.0.0".to_string());
     targets.insert("   ".to_string());
 
-    let mut mock = super::MockCatalogDeletionExecutor::new();
-    mock.expect_delete_paths()
-        .times(1)
-        .withf(move |repo, paths| {
-            repo == &repository_id && paths == &vec!["crates/demo/1.0.0".to_string()]
-        })
-        .returning(|_, _| Box::pin(async { Ok(1) }));
-
-    let deleted = super::delete_version_records_by_path(&mock, repository_id, &targets)
-        .await
-        .expect("deletion succeeds");
-    assert_eq!(deleted, 1);
+    assert_eq!(
+        super::normalize_catalog_paths(&targets),
+        vec!["crates/demo/1.0.0".to_string()]
+    );
 }
 
-#[tokio::test]
-async fn delete_version_records_by_path_skips_executor_when_empty() {
-    let repository_id = Uuid::new_v4();
-    let mut mock = super::MockCatalogDeletionExecutor::new();
-    mock.expect_delete_paths().never();
+#[test]
+fn normalize_catalog_paths_skips_empty_paths() {
     let targets: ahash::HashSet<String> = ahash::HashSet::new();
 
-    let deleted = super::delete_version_records_by_path(&mock, repository_id, &targets)
-        .await
-        .expect("skip is ok");
-    assert_eq!(deleted, 0);
+    assert!(super::normalize_catalog_paths(&targets).is_empty());
 }
 
 mod catalog_db_tests {

@@ -1,3 +1,5 @@
+// ABOUTME: Manages persisted browser sessions and their cleanup lifecycle.
+// ABOUTME: Provides session creation, lookup, deletion, and expiration handling.
 use std::{
     fmt::Debug,
     fs, io,
@@ -31,8 +33,6 @@ use crate::{
     utils::{IntoErrorResponse, ResponseBuilder},
 };
 
-mod storage;
-pub use storage::SessionStorage;
 #[derive(Debug, Error)]
 pub enum SessionError {
     #[error("Session not found")]

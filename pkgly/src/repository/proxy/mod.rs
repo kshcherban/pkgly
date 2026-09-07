@@ -1,11 +1,11 @@
+// ABOUTME: Groups proxy repository modules and their shared utilities.
+// ABOUTME: Re-exports format-specific proxy implementations for callers.
 //! Grouping module for proxy repository implementations.
 //!
 //! This module provides a single place to find proxy-related types while
 //! keeping existing implementations unchanged.
 
 pub mod base_proxy;
-
-pub use base_proxy::ProxyRepository;
 
 // Re-export the main proxy repository types so callers can opt into
 // format-specific proxies from a single place without depending on

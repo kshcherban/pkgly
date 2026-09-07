@@ -66,7 +66,6 @@ multer = "3.1"
 uuid.workspace = true
 flume = "0.11"
 sha2.workspace = true
-sha2_0_11 = { package = "sha2", version = "0.11" }
 sha1.workspace = true
 sha3.workspace = true
 md-5.workspace = true
@@ -151,4 +150,3 @@ zip = { version = "5", default-features = false, features = ["deflate-flate2-zli
 
 walkdir = "2"
 anyhow = "1.0"
-camino = "1.1"

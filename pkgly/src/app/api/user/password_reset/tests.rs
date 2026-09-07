@@ -25,3 +25,11 @@ fn reset_url_encodes_token_and_preserves_panel_path() {
         "a+/=?&"
     );
 }
+
+#[test]
+fn password_reset_debug_info_contains_recipient_and_subject() {
+    let debug = password_reset_debug_info("alice");
+
+    assert_eq!(debug.to, "alice");
+    assert_eq!(debug.subject, "Password Reset");
+}

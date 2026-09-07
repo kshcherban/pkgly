@@ -1,4 +1,6 @@
-use super::{ExtensionError, ParentDirectoryDoesNotExist, PathCollisionError};
+// ABOUTME: Defines errors raised by local filesystem storage operations.
+// ABOUTME: Converts path, metadata, and serialization failures into one type.
+use super::{ExtensionError, PathCollisionError};
 use crate::error::WrongFileType;
 use nr_core::storage::InvalidStoragePath;
 
@@ -8,8 +10,6 @@ pub enum LocalStorageError {
     IOError(#[from] std::io::Error),
     #[error(transparent)]
     ExtensionError(#[from] ExtensionError),
-    #[error(transparent)]
-    ParentDirectoryDoesNotExist(#[from] ParentDirectoryDoesNotExist),
     #[error(transparent)]
     PathCollision(#[from] PathCollisionError),
     #[error("Metadata Error {0}")]

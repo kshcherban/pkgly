@@ -58,7 +58,6 @@ is_https = true
 # Security Configuration
 # ============================================================================
 [security]
-allow_basic_without_tokens = true
 
 # Outbound requests may use public addresses by default. Add exact hostnames
 # or CIDRs only for private proxy, webhook, OIDC, or S3 destinations.

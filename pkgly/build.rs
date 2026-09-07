@@ -162,20 +162,21 @@ where
     for entry in it {
         let absolute_path = entry.path();
         let stripped_path = entry.path().strip_prefix(prefix)?;
-        let name = camino::Utf8Path::from_path(stripped_path)
+        let name = stripped_path
+            .to_str()
             .with_context(|| format!("{stripped_path:?} Could not be converted to UTF-8"))?;
 
         // Write file or directory explicitly
         // Some unzip tools unzip files with directory paths correctly, some do not!
         if absolute_path.is_file() {
-            zip.start_file(name.as_str(), options)?;
+            zip.start_file(name, options)?;
             let mut f = File::open(absolute_path)?;
 
             f.read_to_end(&mut buffer)?;
             zip.write_all(&buffer)?;
             buffer.clear();
-        } else if !name.as_str().is_empty() {
-            zip.add_directory(name.to_string(), options)?;
+        } else if !name.is_empty() {
+            zip.add_directory(name, options)?;
         }
     }
     zip.finish()?;

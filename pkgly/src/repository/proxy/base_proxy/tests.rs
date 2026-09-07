@@ -1,3 +1,5 @@
+// ABOUTME: Tests proxy cache helper behavior with an in-memory recording indexer.
+// ABOUTME: Verifies optional metadata and eviction keys are dispatched correctly.
 use std::sync::Arc;
 
 use async_trait::async_trait;
@@ -5,26 +7,9 @@ use nr_core::repository::project::{ProxyArtifactKey, ProxyArtifactMeta};
 use tokio::sync::Mutex;
 
 use crate::repository::{
-    docker::proxy::DockerProxy,
-    go::proxy::GoProxy,
-    maven::proxy::MavenProxy,
-    npm::proxy::NpmProxyRegistry,
-    proxy::base_proxy::{ProxyRepository, evict_proxy_cache_entry, record_proxy_cache_hit},
+    proxy::base_proxy::{evict_proxy_cache_entry, record_proxy_cache_hit},
     proxy_indexing::{ProxyIndexing, ProxyIndexingError},
-    python::proxy::PythonProxy,
 };
-
-// Compile-time assertion that the main proxy types implement the marker trait.
-fn assert_is_proxy<T: ProxyRepository>() {}
-
-#[test]
-fn proxy_repositories_implement_marker_trait() {
-    assert_is_proxy::<GoProxy>();
-    assert_is_proxy::<MavenProxy>();
-    assert_is_proxy::<NpmProxyRegistry>();
-    assert_is_proxy::<PythonProxy>();
-    assert_is_proxy::<DockerProxy>();
-}
 
 #[derive(Clone, Default)]
 struct RecordingIndexer {

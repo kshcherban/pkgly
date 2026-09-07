@@ -1,5 +1,6 @@
+// ABOUTME: Groups database entities, configuration, and migration helpers.
+// ABOUTME: Exposes the shared database result types used across the workspace.
 pub mod entities;
-#[cfg(feature = "migrations")]
 pub mod migration;
 pub type DateTime = chrono::DateTime<chrono::FixedOffset>;
 mod config;

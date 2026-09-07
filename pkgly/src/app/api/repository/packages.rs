@@ -7,7 +7,6 @@ use std::{
     collections::BinaryHeap,
 };
 
-use futures::future::BoxFuture;
 #[cfg(test)]
 use futures::{StreamExt, stream};
 
@@ -492,33 +491,6 @@ enum CatalogDeletionMode {
     StripLastSegment,
 }
 
-#[cfg_attr(test, mockall::automock)]
-trait CatalogDeletionExecutor {
-    fn delete_paths<'a>(
-        &'a self,
-        repository_id: Uuid,
-        normalized_paths: Vec<String>,
-    ) -> BoxFuture<'a, Result<u64, sqlx::Error>>;
-}
-
-struct SqlCatalogDeletionExecutor<'a> {
-    database: &'a PgPool,
-}
-
-impl<'a> CatalogDeletionExecutor for SqlCatalogDeletionExecutor<'a> {
-    fn delete_paths<'b>(
-        &'b self,
-        repository_id: Uuid,
-        normalized_paths: Vec<String>,
-    ) -> BoxFuture<'b, Result<u64, sqlx::Error>> {
-        Box::pin(sql_delete_project_versions(
-            self.database,
-            repository_id,
-            normalized_paths,
-        ))
-    }
-}
-
 fn package_strategy(repository: &DynRepository) -> PackageStrategy {
     match repository {
         DynRepository::Maven(maven_repo) => match maven_repo {
@@ -622,27 +594,29 @@ fn normalize_catalog_path(path: &str) -> Option<String> {
     Some(trimmed.trim_end_matches('/').to_lowercase())
 }
 
-async fn delete_version_records_by_path<E: CatalogDeletionExecutor + ?Sized>(
-    executor: &E,
-    repository_id: Uuid,
-    version_paths: &HashSet<String>,
-) -> Result<u64, sqlx::Error> {
-    if version_paths.is_empty() {
-        return Ok(0);
-    }
+fn normalize_catalog_paths(version_paths: &HashSet<String>) -> Vec<String> {
     let mut normalized = Vec::with_capacity(version_paths.len());
     for path in version_paths {
         if let Some(value) = normalize_catalog_path(path) {
             normalized.push(value);
         }
     }
+    normalized.sort();
+    normalized.dedup();
+    normalized
+}
+
+async fn delete_version_records_by_path(
+    database: &PgPool,
+    repository_id: Uuid,
+    version_paths: &HashSet<String>,
+) -> Result<u64, sqlx::Error> {
+    let normalized = normalize_catalog_paths(version_paths);
     if normalized.is_empty() {
         return Ok(0);
     }
-    normalized.sort();
-    normalized.dedup();
 
-    executor.delete_paths(repository_id, normalized).await
+    sql_delete_project_versions(database, repository_id, normalized).await
 }
 
 async fn sql_delete_project_versions(
@@ -2405,10 +2379,7 @@ pub async fn delete_cached_package_paths(
     }
 
     if catalog_mode != CatalogDeletionMode::None && !catalog_targets.is_empty() {
-        let executor = SqlCatalogDeletionExecutor {
-            database: &site.database,
-        };
-        delete_version_records_by_path(&executor, repository.id(), &catalog_targets)
+        delete_version_records_by_path(&site.database, repository.id(), &catalog_targets)
             .await
             .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
     }

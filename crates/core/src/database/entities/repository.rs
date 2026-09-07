@@ -1,8 +1,8 @@
-use std::fmt::Debug;
-
+// ABOUTME: Defines repository database rows and configuration persistence APIs.
+// ABOUTME: Provides typed lookups for repositories and storage associations.
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use sqlx::{PgPool, Row, postgres::PgRow, prelude::FromRow, types::Json};
+use sqlx::{PgPool, Row, prelude::FromRow, types::Json};
 use tracing::info;
 use utoipa::ToSchema;
 use uuid::Uuid;
@@ -15,20 +15,6 @@ use crate::{
     storage::StorageName,
 };
 
-pub trait RepositoryDBType: for<'r> FromRow<'r, PgRow> + Unpin + Send + Sync {
-    fn columns() -> Vec<&'static str>;
-    fn format_columns(prefix: Option<&str>) -> String {
-        if let Some(prefix) = prefix {
-            Self::columns()
-                .iter()
-                .map(|column| format!("{}.`{}`", prefix, column))
-                .collect::<Vec<String>>()
-                .join(", ")
-        } else {
-            Self::columns().join(", ")
-        }
-    }
-}
 #[derive(Debug, Clone, Serialize, FromRow, ToSchema, Deserialize)]
 
 pub struct DBRepositoryWithStorageName {

@@ -1,3 +1,5 @@
+// ABOUTME: Reads, writes, and updates repository metadata sidecar files.
+// ABOUTME: Computes content hashes and maintains metadata during local storage changes.
 use std::{
     fs::File,
     io::{self, BufReader, Read, Write},
@@ -16,10 +18,7 @@ use tracing::{
     instrument, trace, warn,
 };
 
-use crate::{
-    fs::utils::MetadataUtils, local::error::LocalStorageError, meta::RepositoryMeta,
-    path::PathUtils,
-};
+use crate::{local::error::LocalStorageError, meta::RepositoryMeta, path::PathUtils};
 use uuid::Uuid;
 pub static HIDDEN_FILE_EXTENSIONS: &[&str] = &["nr-meta"];
 pub static PKGLY_REPO_META_EXTENSION: &str = "nr-meta";
@@ -271,8 +270,16 @@ impl LocationMeta {
         let (created, modified) = {
             let file = File::open(path_ref)?;
             let metadata = file.metadata()?;
-            let modified = metadata.modified_as_chrono_or_now()?;
-            let created = metadata.created_as_chrono_or_now()?;
+            let modified = metadata
+                .modified()
+                .ok()
+                .map(|time| DateTime::<Local>::from(time).fixed_offset())
+                .unwrap_or_else(|| Local::now().fixed_offset());
+            let created = metadata
+                .created()
+                .ok()
+                .map(|time| DateTime::<Local>::from(time).fixed_offset())
+                .unwrap_or_else(|| Local::now().fixed_offset());
             (created, modified)
         };
         let location_meta = if path_ref.is_dir() {

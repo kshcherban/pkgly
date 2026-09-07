@@ -40,10 +40,6 @@ clap.workspace = true
 pretty_assertions = "1"
 tokio.workspace = true
 [features]
-default = ["migrations"]
-migrations = []
-testing = [
-    "migrations",
-]
+testing = []
 [lints]
 workspace = true

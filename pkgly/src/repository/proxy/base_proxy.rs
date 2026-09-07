@@ -1,3 +1,5 @@
+// ABOUTME: Provides shared cache-hit and eviction helpers for proxy repositories.
+// ABOUTME: Delegates catalog updates to the common proxy indexer.
 //! Common proxy utilities and traits for proxy repositories.
 //!
 //! Concrete proxy implementations (Docker, Go, Maven, NPM, Python, etc.)
@@ -13,16 +15,6 @@
 use nr_core::repository::project::{ProxyArtifactKey, ProxyArtifactMeta};
 
 use crate::repository::proxy_indexing::{ProxyIndexing, ProxyIndexingError};
-
-/// Marker trait for proxy repositories.
-///
-/// Implemented by format-specific proxy repository types such as:
-/// - `go::proxy::GoProxy`
-/// - `maven::proxy::MavenProxy`
-/// - `npm::proxy::NpmProxyRegistry`
-/// - `python::proxy::PythonProxy`
-/// - `docker::proxy::DockerProxy`
-pub trait ProxyRepository {}
 
 /// Record a cached proxy artifact if metadata is available.
 ///
@@ -53,16 +45,6 @@ pub async fn evict_proxy_cache_entry(
     }
     Ok(())
 }
-
-// Implement the marker trait for the known proxy repository types. This keeps
-// behavior unchanged while giving the type system a way to talk about "any
-// proxy repository" when needed.
-impl ProxyRepository for crate::repository::go::proxy::GoProxy {}
-impl ProxyRepository for crate::repository::maven::proxy::MavenProxy {}
-impl ProxyRepository for crate::repository::npm::proxy::NpmProxyRegistry {}
-impl ProxyRepository for crate::repository::python::proxy::PythonProxy {}
-impl ProxyRepository for crate::repository::docker::proxy::DockerProxy {}
-impl ProxyRepository for crate::repository::php::proxy::PhpProxy {}
 
 #[cfg(test)]
 mod tests;

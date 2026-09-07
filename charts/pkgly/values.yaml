@@ -120,7 +120,6 @@ sessions:
 
 # Security configuration
 security:
-  allowBasicWithoutTokens: true
   passwordRules:
     minLength: 12
     requireUppercase: false

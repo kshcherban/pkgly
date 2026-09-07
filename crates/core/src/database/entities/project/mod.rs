@@ -1,3 +1,5 @@
+// ABOUTME: Defines project entities and reusable project/version queries.
+// ABOUTME: Exposes database models used by repository catalog operations.
 use serde::Serialize;
 use sqlx::{FromRow, PgPool, postgres::PgRow};
 use tracing::instrument;
@@ -5,7 +7,6 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use versions::{DBProjectVersion, DBProjectVersionColumn, ProjectVersionType};
 mod new;
-pub mod utils;
 pub use new::*;
 
 use crate::{database::prelude::*, repository::project::ReleaseType};
