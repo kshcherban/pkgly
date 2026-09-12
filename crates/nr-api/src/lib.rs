@@ -259,6 +259,17 @@ impl Client {
         .await
     }
 
+    /// Deletes a storage. When `cascade` is true, contained repositories and
+    /// packages are deleted as well; otherwise a populated storage is rejected
+    /// with `409 Conflict`.
+    pub async fn delete_storage(&self, storage_id: Uuid, cascade: bool) -> Result<(), Error> {
+        self.send_no_content(
+            self.delete(&format!("storage/{storage_id}"))?
+                .query(&[("cascade", cascade)]),
+        )
+        .await
+    }
+
     pub async fn list_packages(
         &self,
         repository_id: Uuid,

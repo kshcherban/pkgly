@@ -183,6 +183,8 @@ pub async fn new_repository(
     if !auth.is_admin_or_system_manager() {
         return Ok(MissingPermission::RepositoryManager.into_response());
     }
+    // Serialize with storage deletion and storage configuration updates.
+    let _management = site.management_lock.lock().await;
     let NewRepositoryRequest {
         name,
         mut configs,
@@ -696,6 +698,8 @@ pub async fn delete_repository(
     if !auth.is_admin_or_system_manager() {
         return Ok(MissingPermission::RepositoryManager.into_response());
     }
+    // Serialize with storage deletion and storage configuration updates.
+    let _management = site.management_lock.lock().await;
     let Some(db_repository) = DBRepository::get_by_id(repository, site.as_ref()).await? else {
         return Ok(RepositoryNotFound::Uuid(repository).into_response());
     };

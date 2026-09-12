@@ -81,6 +81,16 @@ export const useRepositoryStore = defineStore(
       }
       return storages.value;
     }
+    function removeStorage(id: string) {
+      storages.value = storages.value.filter((storage) => storage.id !== id);
+      const remaining: Record<string, RepositoryWithStorageName> = {};
+      for (const [repositoryId, repository] of Object.entries(repositories.value)) {
+        if (repository.storage_id !== id) {
+          remaining[repositoryId] = repository;
+        }
+      }
+      repositories.value = remaining;
+    }
     async function getRepositoryTypes(
       resetCache: boolean = true,
     ): Promise<RepositoryTypeDescription[]> {
@@ -151,12 +161,14 @@ export const useRepositoryStore = defineStore(
       configSchemas,
       configDescriptions,
       repositories,
+      storages,
       getRepositoryById,
       getRepositoryTypes,
       getConfigDescription,
       getConfigSchema,
       getDefaultConfig,
       getStorages,
+      removeStorage,
       getRepositoryFromCache,
       getRepositories,
       getRepositoryIdByNames,

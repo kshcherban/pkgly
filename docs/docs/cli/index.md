@@ -138,6 +138,12 @@ pkglyctl storage create --type local test-storage /var/lib/pkgly/storage
 
 Only `--type local` is currently supported for storage creation.
 
+Delete requires explicit confirmation and removes every repository and package in the storage:
+
+```bash
+pkglyctl storage delete 00000000-0000-0000-0000-000000000001 --yes
+```
+
 ## Packages
 
 List package names and versions, search package catalog entries, and describe a package:

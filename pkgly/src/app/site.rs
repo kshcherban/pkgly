@@ -83,6 +83,8 @@ pub struct PkglyInner {
     pub storages: RwLock<HashMap<Uuid, DynStorage>>,
     pub repositories: RwLock<HashMap<Uuid, DynRepository>>,
     pub name_lookup_table: Mutex<HashMap<RepositoryStorageName, Uuid>>,
+    /// Serializes repository creation/deletion and storage configuration changes with storage deletion.
+    pub management_lock: tokio::sync::Mutex<()>,
     pub general_security_settings: RwLock<SecuritySettings>,
     pub oauth2_service: RwLock<Option<Arc<OAuth2Service>>>,
     pub oauth2_rbac: RwLock<Option<Arc<OAuth2Rbac>>>,
@@ -382,6 +384,7 @@ impl Pkgly {
             storages: RwLock::new(HashMap::new()),
             repositories: RwLock::new(HashMap::new()),
             name_lookup_table: Mutex::new(HashMap::new()),
+            management_lock: tokio::sync::Mutex::new(()),
             general_security_settings: RwLock::new(security),
             oauth2_service: RwLock::new(oauth2_service),
             oauth2_rbac: RwLock::new(oauth2_rbac),
@@ -858,6 +861,13 @@ impl Pkgly {
             let mut lookup_table = self.inner.name_lookup_table.lock();
             lookup_table.retain(|_, value| *value != id);
         }
+    }
+
+    /// Removes a storage from the runtime registry. The database row and physical
+    /// contents must already be deleted before calling this.
+    pub fn remove_storage(&self, id: Uuid) {
+        let mut storages = self.storages.write();
+        storages.remove(&id);
     }
 
     fn set_session_cleaner(&self, cleaner: JoinHandle<()>) {

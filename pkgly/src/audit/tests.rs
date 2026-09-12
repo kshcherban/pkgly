@@ -82,6 +82,10 @@ fn classify_api_action_covers_expected_routes() {
         Some("repository.package.delete")
     );
     assert_eq!(
+        classify_api_action("DELETE", "/api/storage/{id}"),
+        Some("storage.delete")
+    );
+    assert_eq!(
         classify_api_action("GET", "/api/search/packages"),
         Some("package.search")
     );

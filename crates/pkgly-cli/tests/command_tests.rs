@@ -421,6 +421,34 @@ async fn storage_create_posts_local_storage_config() {
 }
 
 #[tokio::test]
+async fn storage_delete_requires_yes_and_cascades() {
+    let server = MockServer::start(vec![empty_response("204 No Content")])
+        .unwrap_or_else(|err| panic!("mock server failed: {err}"));
+    let temp = tempfile::tempdir().unwrap_or_else(|err| panic!("tempdir failed: {err}"));
+    let config_path = temp.path().join("config.toml");
+    config_at(&config_path, &server.base_url);
+
+    let output = run_cli(&[
+        "pkglyctl",
+        "--config",
+        config_path.to_string_lossy().as_ref(),
+        "storage",
+        "delete",
+        "00000000-0000-0000-0000-000000000001",
+        "--yes",
+    ])
+    .await;
+
+    assert_eq!(output, "storage deleted\n");
+    let requests = server.requests();
+    server.join();
+    assert_eq!(requests.len(), 1);
+    assert!(requests[0].starts_with(
+        "DELETE /api/storage/00000000-0000-0000-0000-000000000001?cascade=true HTTP/1.1"
+    ));
+}
+
+#[tokio::test]
 async fn package_list_renders_package_and_version_only() {
     let repository_id = "00000000-0000-0000-0000-000000000001";
     let body = concat!(

@@ -347,6 +347,15 @@ async fn handle_storage<W: Write>(
                 output.render_value(&serde_json::to_value(storage)?)?
             )?;
         }
+        StorageCommands::Delete { id, yes } => {
+            if !yes {
+                return Err(CliError::Message(
+                    "storage deletion requires --yes".to_string(),
+                ));
+            }
+            client.delete_storage(id, true).await?;
+            writeln!(writer, "storage deleted")?;
+        }
     }
     Ok(())
 }

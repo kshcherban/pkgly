@@ -1,15 +1,17 @@
 use axum::{
     Json,
-    extract::{Path, Query, State},
+    extract::{Extension, Path, Query, State},
     response::{IntoResponse, Response},
-    routing::{get, post, put},
+    routing::{delete, get, post, put},
 };
 use nr_core::{
     database::entities::storage::{DBStorage, DBStorageNoConfig, NewDBStorage, StorageDBType},
     storage::StorageName,
     user::permissions::HasPermissions,
 };
-use nr_storage::{StorageConfig, StorageConfigInner, StorageTypeConfig, local::LocalConfig};
+use nr_storage::{
+    Storage, StorageConfig, StorageConfigInner, StorageTypeConfig, local::LocalConfig,
+};
 use serde::{Deserialize, Serialize};
 use tracing::{error, instrument};
 use utoipa::{IntoParams, OpenApi, ToSchema};
@@ -23,11 +25,14 @@ use crate::{
         responses::{InvalidStorageConfig, InvalidStorageType, MissingPermission},
     },
     error::InternalError,
-    utils::{ResponseBuilder, conflict::ConflictResponse},
+    utils::{
+        ErrorReason, ResponseBuilder, api_error_response::APIErrorResponse,
+        conflict::ConflictResponse, request_logging::access_log::AccessLogContext,
+    },
 };
 #[derive(OpenApi)]
 #[openapi(
-    paths(list_storages, new_storage, get_storage, update_storage),
+    paths(list_storages, new_storage, get_storage, update_storage, delete_storage),
     components(schemas(DBStorage, NewStorageRequest, StorageTypeConfig, LocalConfig)),
     nest(
         (path = "/local", api = local::LocalStorageAPI, tags=["local", "storage"]),
@@ -45,6 +50,7 @@ pub fn storage_routes() -> axum::Router<crate::app::api::storage::Pkgly> {
         .route("/new/{storage_type}", post(new_storage))
         .route("/{id}", get(get_storage))
         .route("/{id}", put(update_storage))
+        .route("/{id}", delete(delete_storage))
         .nest("/local", local::local_storage_routes())
         .nest("/s3", s3::s3_storage_api())
 }
@@ -124,6 +130,9 @@ pub async fn new_storage(
     if !auth.is_admin_or_system_manager() {
         return Ok(MissingPermission::StorageManager.into_response());
     }
+    // Serialize with storage deletion and repository management operations so a
+    // concurrently deleted storage cannot be re-registered after this returns.
+    let _management = site.management_lock.lock().await;
     if !DBStorage::is_name_available(&request.name, site.as_ref()).await? {
         return Ok(ConflictResponse::from("name").into_response());
     }
@@ -189,6 +198,9 @@ pub async fn update_storage(
     if !auth.is_admin_or_system_manager() {
         return Ok(MissingPermission::StorageManager.into_response());
     }
+
+    // Serialize with storage deletion and repository management operations.
+    let _management = site.management_lock.lock().await;
 
     let Some(existing) = DBStorage::get_by_id(id, &site.database).await? else {
         return Ok(ResponseBuilder::not_found().body("Storage not found"));
@@ -261,3 +273,168 @@ pub async fn get_storage(
         None => Ok(ResponseBuilder::not_found().body("Storage not found")),
     }
 }
+
+#[derive(Debug, Default, Serialize, Deserialize, ToSchema, IntoParams)]
+#[serde(default)]
+#[into_params(parameter_in = Query)]
+pub struct DeleteStorageRequest {
+    /// Delete every repository and package contained in the storage (default: false)
+    pub cascade: bool,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StorageNotEmptyDetails {
+    /// Machine-readable error code
+    pub code: String,
+    /// Number of repositories still contained in the storage
+    pub repository_count: i64,
+}
+
+#[derive(Debug, Serialize, ToSchema)]
+pub struct StorageDeletionFailureDetails {
+    /// Machine-readable error code
+    pub code: String,
+    /// Repository whose contents could not be removed, if cleanup started
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repository_id: Option<Uuid>,
+    /// Number of repositories whose database records remain
+    pub repositories_remaining: i64,
+    /// Human-readable detail about the failure
+    pub detail: String,
+}
+
+fn storage_deletion_failure(
+    code: &str,
+    message: &'static str,
+    repository_id: Option<Uuid>,
+    repositories_remaining: i64,
+    detail: String,
+) -> Response {
+    let response: APIErrorResponse<StorageDeletionFailureDetails, ()> = APIErrorResponse {
+        message: message.into(),
+        error: None,
+        details: Some(StorageDeletionFailureDetails {
+            code: code.to_string(),
+            repository_id,
+            repositories_remaining,
+            detail,
+        }),
+    };
+    ResponseBuilder::internal_server_error()
+        .extension(ErrorReason::from("Storage deletion failed"))
+        .json(&response)
+}
+
+#[utoipa::path(
+    delete,
+    path = "/{id}",
+    params(
+        ("id" = Uuid, Path, description = "Storage ID"),
+        DeleteStorageRequest,
+    ),
+    responses(
+        (status = 204, description = "Storage Deleted"),
+        (status = 403, description = "Does not have permission to delete storages"),
+        (status = 404, description = "Storage not found"),
+        (status = 409, description = "Storage contains repositories and cascade was not requested"),
+    )
+)]
+#[instrument(skip(auth, site), fields(user = %auth.id, storage_id = %id))]
+pub async fn delete_storage(
+    auth: Authentication,
+    State(site): State<Pkgly>,
+    Path(id): Path<Uuid>,
+    Extension(access_log): Extension<AccessLogContext>,
+    Query(request): Query<DeleteStorageRequest>,
+) -> Result<Response, InternalError> {
+    if !auth.is_admin_or_system_manager() {
+        return Ok(MissingPermission::StorageManager.into_response());
+    }
+
+    // Serialize with repository creation/deletion and storage configuration updates.
+    let _management = site.management_lock.lock().await;
+
+    let mut transaction = site.database.begin().await?;
+
+    // Lock the storage row so membership cannot change while we check and delete.
+    let locked: Option<StorageName> =
+        sqlx::query_scalar("SELECT name FROM storages WHERE id = $1 FOR UPDATE")
+            .bind(id)
+            .fetch_optional(&mut *transaction)
+            .await?;
+    let Some(storage_name) = locked else {
+        transaction.rollback().await?;
+        return Ok(ResponseBuilder::not_found().body("Storage not found"));
+    };
+
+    // Attribute the destructive action to the storage for the audit stream.
+    access_log.set_resource_kind("storage");
+    access_log.set_resource_id(id.to_string());
+    access_log.set_storage_id(id);
+    access_log.set_resource_name(storage_name.as_ref().to_string());
+
+    let repository_ids: Vec<Uuid> =
+        sqlx::query_scalar("SELECT id FROM repositories WHERE storage_id = $1 ORDER BY name")
+            .bind(id)
+            .fetch_all(&mut *transaction)
+            .await?;
+
+    if !repository_ids.is_empty() && !request.cascade {
+        transaction.rollback().await?;
+        let response: APIErrorResponse<StorageNotEmptyDetails, ()> = APIErrorResponse {
+            message: "Storage contains repositories. Re-request with cascade=true to delete them."
+                .into(),
+            error: None,
+            details: Some(StorageNotEmptyDetails {
+                code: "storage_not_empty".to_string(),
+                repository_count: repository_ids.len() as i64,
+            }),
+        };
+        return Ok(ResponseBuilder::conflict()
+            .extension(ErrorReason::from("Storage not empty"))
+            .json(&response));
+    }
+
+    if !repository_ids.is_empty() {
+        let Some(storage) = site.get_storage(id) else {
+            transaction.rollback().await?;
+            return Ok(storage_deletion_failure(
+                "storage_backend_unavailable",
+                "The storage backend is not available, so nothing was deleted. Restore the backend and retry.",
+                None,
+                repository_ids.len() as i64,
+                format!("Storage backend {} is not loaded", id),
+            ));
+        };
+        for repository in &repository_ids {
+            if let Err(error) = storage.delete_repository(*repository).await {
+                transaction.rollback().await?;
+                error!(%error, %repository, "Failed to delete repository contents; aborting storage deletion");
+                return Ok(storage_deletion_failure(
+                    "storage_cleanup_failed",
+                    "Failed to remove repository contents. The storage and its repositories were kept so deletion can be retried; files already removed cannot be restored.",
+                    Some(*repository),
+                    repository_ids.len() as i64,
+                    error.to_string(),
+                ));
+            }
+        }
+    }
+
+    sqlx::query("DELETE FROM storages WHERE id = $1")
+        .bind(id)
+        .execute(&mut *transaction)
+        .await?;
+    transaction.commit().await?;
+
+    // Runtime cleanup only after the database cascades are committed.
+    for repository in &repository_ids {
+        site.remove_repository(*repository);
+    }
+    site.remove_storage(id);
+
+    Ok(ResponseBuilder::no_content().empty())
+}
+
+#[cfg(test)]
+mod tests;

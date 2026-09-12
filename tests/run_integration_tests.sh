@@ -70,6 +70,7 @@ TEST_SUITES:
     web_refresh Run web route refresh integration tests
     access_logs Run HTTP access log enrichment integration tests
     security    Run security hardening integration tests
+    storage_deletion Run storage deletion cascade and package cleanup tests
     all         Run all test suites (default)
 
 EXAMPLES:
@@ -127,12 +128,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|s3|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security)
+        maven|npm|docker|s3|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security|storage_deletion)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
+            TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion)
             shift
             ;;
         *)
@@ -145,7 +146,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security)
+    TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion)
 fi
 
 # Enable verbose mode
@@ -327,8 +328,8 @@ for suite in "${TEST_SUITES[@]}"; do
         fi
     fi
 
-    if [ "$suite" = "s3" ] && [ "$suite_passed" -eq 1 ]; then
-        print_color "$YELLOW" "Checking that the S3-backed repository left no MinIO objects..."
+    if { [ "$suite" = "s3" ] || [ "$suite" = "storage_deletion" ]; } && [ "$suite_passed" -eq 1 ]; then
+        print_color "$YELLOW" "Checking that S3-backed repositories left no MinIO objects..."
         if ! "${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint /bin/sh minio-init -c \
             'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && test -z "$(mc ls --recursive local/pkgly-test)"'; then
             suite_passed=0

@@ -107,6 +107,15 @@ pub enum StorageCommands {
         name: String,
         path: String,
     },
+    #[command(about = "Delete a storage backend and its contents")]
+    Delete {
+        id: Uuid,
+        #[arg(
+            long,
+            help = "Confirm deletion of the storage and every repository in it"
+        )]
+        yes: bool,
+    },
 }
 
 #[derive(Debug, Subcommand)]

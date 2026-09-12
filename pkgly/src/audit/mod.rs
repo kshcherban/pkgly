@@ -83,6 +83,7 @@ pub fn classify_api_action(http_method: &str, http_route: &str) -> Option<&'stat
         ("POST", "/api/storage/new/{storage_type}") => Some("storage.create"),
         ("GET", "/api/storage/{id}") => Some("storage.get"),
         ("PUT", "/api/storage/{id}") => Some("storage.update"),
+        ("DELETE", "/api/storage/{id}") => Some("storage.delete"),
         ("POST", "/api/storage/local/path-helper") => Some("storage.path_helper"),
         ("GET", "/api/storage/s3/regions") => Some("storage.s3.region.list"),
         ("GET", "/api/repository/list") => Some("repository.list"),

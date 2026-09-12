@@ -1,6 +1,6 @@
 # Maintenance Operations
 <!-- ABOUTME: Documents operational maintenance workflows for Pkgly deployments. -->
-<!-- ABOUTME: Covers migrations, restarts, audit logs, and web refresh behavior. -->
+<!-- ABOUTME: Covers migrations, restarts, audit logs, storage deletion, and web refresh behavior. -->
 
 This page describes the supported procedure for applying schema migrations and restarting Pkgly in a production environment.
 
@@ -89,6 +89,43 @@ HTTP access logs on the `pkgly::access` target include request identity and rout
 Pkgly caches each repository's storage usage in the repository row. The background scheduler checks storage usage every 30 seconds, but each repository is recalculated at most once per hour. Repositories with no cached usage are refreshed on the next scheduler tick after startup.
 
 Manual API reads can still request usage with `include_usage=true`, and admins can force recalculation with `refresh_usage=true`.
+
+## Deleting a storage
+
+Storage deletion is available to admins and system managers through `DELETE /api/storage/{id}`. By default the request is sent without cascade approval:
+
+```bash
+curl -X DELETE -H "Authorization: Bearer $PKGLY_TOKEN" \
+  "https://pkgly.example.com/api/storage/$STORAGE_ID"
+```
+
+- **Empty storage** (no repositories) is deleted immediately and the API returns `204`.
+- **Populated storage** returns `409 Conflict` without changing anything. The body uses the standard error envelope and includes a machine-readable code and the repository count:
+  ```json
+  {
+    "message": "Storage contains repositories. Re-request with cascade=true to delete them.",
+    "details": { "code": "storage_not_empty", "repository_count": 2 }
+  }
+  ```
+- Retry with `?cascade=true` to delete every contained repository and package:
+  ```bash
+  curl -X DELETE -H "Authorization: Bearer $PKGLY_TOKEN" \
+    "https://pkgly.example.com/api/storage/$STORAGE_ID?cascade=true"
+  ```
+
+Cleanup boundaries and ordering:
+
+1. Pkgly locks the storage row, reads repository membership from the database, and holds an in-process management lock so repository creation/deletion and storage configuration updates cannot interleave with the deletion.
+2. If the storage is populated, the runtime backend must be loaded. An unavailable backend fails the request before anything is deleted.
+3. Physical contents are removed per repository through the Local or S3 `delete_repository` operation. Only registered repository directories or S3 prefixes are touched; the configured parent directory, bucket, and unrelated contents are left in place.
+4. Only after every cleanup succeeds does Pkgly delete the storage row and commit the existing database cascades. Runtime repositories, name lookups, and the storage registration are then removed.
+
+Retry behavior: if a physical cleanup fails, the transaction is rolled back and the database records and runtime registrations are retained so deletion can be retried once the backend recovers. Note that physical files already removed cannot be restored by a database rollback. Draining already-running uploads is outside this workflow.
+
+Failure responses use the standard error envelope with an actionable `message` and a machine-readable `details.code`:
+
+- `storage_backend_unavailable` (`500`): the backend was not loaded, so nothing was deleted. Restore the backend and retry.
+- `storage_cleanup_failed` (`500`): at least one repository could not be removed. The storage and its repository records remain so the deletion can be retried; `details.repository_id` names the failing repository, `details.repositories_remaining` counts the retained records, and `details.detail` carries the backend error. Files already removed are not restored.
 
 ## Browser refresh routing
 
