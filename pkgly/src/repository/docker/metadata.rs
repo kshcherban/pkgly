@@ -8,8 +8,6 @@ use nr_core::storage::StoragePath;
 use nr_storage::{DynStorage, FileType, Storage, StorageError, StorageFile, s3::S3Storage};
 use uuid::Uuid;
 
-#[cfg(test)]
-use super::types::{Descriptor, ManifestDescriptor};
 use super::types::{Manifest, MediaType};
 
 /// Represents a manifest (tag or digest) stored for a Docker image.
@@ -220,74 +218,6 @@ async fn read_manifest_file(
             Ok(None)
         }
     }
-}
-
-#[cfg(test)]
-pub(crate) async fn calculate_referenced_manifest_size(
-    storage: &DynStorage,
-    repository_id: Uuid,
-    manifest_path: &StoragePath,
-) -> Result<Option<u64>, StorageError> {
-    let manifest_path_string = manifest_path.to_string();
-    let Some((repository_name, _)) = split_manifest_cache_path(&manifest_path_string) else {
-        return Ok(None);
-    };
-    let Some((bytes, manifest_size)) =
-        read_manifest_file(storage, repository_id, manifest_path).await?
-    else {
-        return Ok(None);
-    };
-    let Some(manifest) = parse_manifest(&bytes) else {
-        return Ok(None);
-    };
-
-    let mut total = manifest_size;
-    let mut seen_blobs = HashSet::default();
-    let mut seen_manifests = HashSet::default();
-    let mut pending_manifests = Vec::new();
-
-    add_manifest_payload_sizes(
-        storage,
-        repository_id,
-        &repository_name,
-        manifest,
-        &mut total,
-        &mut seen_blobs,
-        &mut pending_manifests,
-    )
-    .await?;
-
-    while let Some(descriptor) = pending_manifests.pop() {
-        if !seen_manifests.insert(descriptor.digest.clone()) {
-            continue;
-        }
-
-        let child_path = StoragePath::from(format!(
-            "v2/{}/manifests/{}",
-            repository_name, descriptor.digest
-        ));
-        let Some((child_bytes, child_size)) =
-            read_manifest_file(storage, repository_id, &child_path).await?
-        else {
-            continue;
-        };
-
-        total += child_size;
-        if let Some(child_manifest) = parse_manifest(&child_bytes) {
-            add_manifest_payload_sizes(
-                storage,
-                repository_id,
-                &repository_name,
-                child_manifest,
-                &mut total,
-                &mut seen_blobs,
-                &mut pending_manifests,
-            )
-            .await?;
-        }
-    }
-
-    Ok(Some(total))
 }
 
 fn parse_manifest(bytes: &[u8]) -> Option<Manifest> {
@@ -515,99 +445,6 @@ pub(crate) async fn backfill_manifest_objects(
             .await?
             .map(|size| size as u64),
     )
-}
-
-#[cfg(test)]
-async fn add_manifest_payload_sizes(
-    storage: &DynStorage,
-    repository_id: Uuid,
-    repository_name: &str,
-    manifest: Manifest,
-    total: &mut u64,
-    seen_blobs: &mut HashSet<String>,
-    pending_manifests: &mut Vec<ManifestDescriptor>,
-) -> Result<(), StorageError> {
-    match manifest {
-        Manifest::DockerV2(manifest) => {
-            add_blob_descriptor_size(
-                storage,
-                repository_id,
-                repository_name,
-                &manifest.config,
-                total,
-                seen_blobs,
-            )
-            .await?;
-            for layer in manifest.layers.iter() {
-                add_blob_descriptor_size(
-                    storage,
-                    repository_id,
-                    repository_name,
-                    layer,
-                    total,
-                    seen_blobs,
-                )
-                .await?;
-            }
-        }
-        Manifest::OciImage(manifest) => {
-            if let Some(config) = manifest.config.as_ref() {
-                add_blob_descriptor_size(
-                    storage,
-                    repository_id,
-                    repository_name,
-                    config,
-                    total,
-                    seen_blobs,
-                )
-                .await?;
-            }
-            for layer in manifest.layers.iter() {
-                add_blob_descriptor_size(
-                    storage,
-                    repository_id,
-                    repository_name,
-                    layer,
-                    total,
-                    seen_blobs,
-                )
-                .await?;
-            }
-        }
-        Manifest::OciIndex(index) => {
-            pending_manifests.extend(index.manifests);
-        }
-    }
-    Ok(())
-}
-
-#[cfg(test)]
-async fn add_blob_descriptor_size(
-    storage: &DynStorage,
-    repository_id: Uuid,
-    repository_name: &str,
-    descriptor: &Descriptor,
-    total: &mut u64,
-    seen_blobs: &mut HashSet<String>,
-) -> Result<(), StorageError> {
-    if !seen_blobs.insert(descriptor.digest.clone()) {
-        return Ok(());
-    }
-
-    let blob_path = StoragePath::from(format!(
-        "v2/{}/blobs/{}",
-        repository_name, descriptor.digest
-    ));
-    // Only the stored size is needed here, so retrieve metadata instead of downloading the blob
-    // body. This avoids one full-body S3 GET per layer per listing row.
-    if let Some(meta) = storage
-        .get_file_information(repository_id, &blob_path)
-        .await?
-        && let FileType::File(file_meta) = meta.file_type()
-    {
-        *total += file_meta.file_size;
-    }
-    Ok(())
 }
 
 #[cfg(test)]

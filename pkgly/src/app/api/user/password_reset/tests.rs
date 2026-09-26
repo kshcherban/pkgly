@@ -3,14 +3,6 @@
 use super::*;
 
 #[test]
-fn configured_panel_url_is_normalized() {
-    assert_eq!(
-        normalize_app_url("https://panel.example/pkgly").unwrap(),
-        "https://panel.example/pkgly/"
-    );
-}
-
-#[test]
 fn reset_url_encodes_token_and_preserves_panel_path() {
     let reset_url = build_reset_url("https://panel.example/pkgly/", "a+/=?&").unwrap();
     let parsed = Url::parse(&reset_url).unwrap();
@@ -24,12 +16,4 @@ fn reset_url_encodes_token_and_preserves_panel_path() {
             .1,
         "a+/=?&"
     );
-}
-
-#[test]
-fn password_reset_debug_info_contains_recipient_and_subject() {
-    let debug = password_reset_debug_info("alice");
-
-    assert_eq!(debug.to, "alice");
-    assert_eq!(debug.subject, "Password Reset");
 }

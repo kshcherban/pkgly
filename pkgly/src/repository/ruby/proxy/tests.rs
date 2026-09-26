@@ -1,13 +1,10 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 
 use super::*;
-use crate::repository::proxy_indexing::{ProxyIndexing, ProxyIndexingError};
 use crate::{repository::test_helpers::test_storage, utils::ResponseBuilder};
-use async_trait::async_trait;
 use axum::{Router, extract::State, http::HeaderMap, routing::get};
 use bytes::Bytes;
 use http::StatusCode;
-use nr_core::repository::project::ProxyArtifactMeta;
 use nr_core::{repository::proxy_url::ProxyURL, storage::StoragePath};
 use nr_storage::{FileContent, Storage};
 use std::sync::{
@@ -134,21 +131,6 @@ async fn cache_through_returns_hit_without_contacting_upstream() {
 }
 
 #[tokio::test]
-async fn record_ruby_proxy_cache_hit_invokes_indexer() {
-    let indexer = RecordingIndexer::default();
-    let path = StoragePath::from("gems/rack-3.0.0.gem");
-
-    record_ruby_proxy_cache_hit(&indexer, &path, 42)
-        .await
-        .expect("indexing succeeds");
-
-    let recorded = indexer.recorded().await;
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].package_key, "rack");
-    assert_eq!(recorded[0].version.as_deref(), Some("3.0.0"));
-}
-
-#[tokio::test]
 async fn cache_through_fetches_upstream_on_miss_and_persists() {
     let storage = test_storage().await;
     let repo_id = Uuid::new_v4();
@@ -212,33 +194,4 @@ async fn range_fetch_forwards_header_and_appends_when_suffix_matches_cache_size(
 
     let cached = read_cached(&storage, repo_id, &path).await;
     assert_eq!(cached, b"abcdef");
-}
-
-#[derive(Clone, Default)]
-struct RecordingIndexer {
-    recorded: Arc<Mutex<Vec<ProxyArtifactMeta>>>,
-}
-
-impl RecordingIndexer {
-    async fn recorded(&self) -> Vec<ProxyArtifactMeta> {
-        self.recorded.lock().await.clone()
-    }
-}
-
-#[async_trait]
-impl ProxyIndexing for RecordingIndexer {
-    async fn record_cached_artifact(
-        &self,
-        meta: ProxyArtifactMeta,
-    ) -> Result<(), ProxyIndexingError> {
-        self.recorded.lock().await.push(meta);
-        Ok(())
-    }
-
-    async fn evict_cached_artifact(
-        &self,
-        _key: nr_core::repository::project::ProxyArtifactKey,
-    ) -> Result<(), ProxyIndexingError> {
-        Ok(())
-    }
 }

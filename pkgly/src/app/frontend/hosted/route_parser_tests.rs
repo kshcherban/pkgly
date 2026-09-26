@@ -61,16 +61,6 @@ pub fn browse_test() {
     assert!(!route.matches_path("/not_browse/"));
 }
 
-#[test]
-fn parse_all() {
-    let file = include_str!("../../../../../site/src/router/routes.json");
-    let routes: Vec<RouteItem> = serde_json::from_str(file).unwrap();
-
-    for route in routes {
-        println!("{:?}", route);
-    }
-}
-
 fn request(method: Method, path: &str, accept: Option<&str>) -> Request<Body> {
     let mut builder = Request::builder().method(method).uri(path);
     if let Some(accept) = accept {

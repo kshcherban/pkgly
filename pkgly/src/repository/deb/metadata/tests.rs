@@ -20,32 +20,6 @@ fn parse_control_rejects_invalid_lines() {
 }
 
 #[test]
-fn packages_entry_contains_required_fields() {
-    let record = PackagesRecord {
-        package: "sample".into(),
-        version: "1.2.3".into(),
-        architecture: "amd64".into(),
-        section: Some("utils".into()),
-        priority: Some("optional".into()),
-        maintainer: Some("Pkgly <dev@pkgly>".into()),
-        installed_size: Some(2048),
-        depends: Some("libc6 (>= 2.31)".into()),
-        description: "summary\ndetails line".into(),
-        homepage: Some("https://pkgly".into()),
-        filename: "pool/main/s/sample/sample_1.2.3_amd64.deb".into(),
-        size: 42,
-        md5: "md5".into(),
-        sha1: "sha1".into(),
-        sha256: "sha256".into(),
-    };
-    let entry = format_packages_entry(&record);
-    assert!(entry.contains("Package: sample"));
-    assert!(entry.contains("Depends: libc6"));
-    assert!(entry.contains("Filename: pool/main/s/sample/sample_1.2.3_amd64.deb"));
-    assert!(entry.contains(" details line"));
-}
-
-#[test]
 fn packages_entry_format_matches_expected_output() {
     let record = PackagesRecord {
         package: "sample".into(),

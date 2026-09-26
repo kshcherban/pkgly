@@ -1,4 +1,5 @@
 // ABOUTME: Tests that the default test logger config keeps third-party debug spam out.
+// ABOUTME: Preserves Debug logging for project crates and Warn for dependencies.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 

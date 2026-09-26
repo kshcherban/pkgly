@@ -21,8 +21,7 @@ use chrono::{FixedOffset, TimeZone};
 use tempfile::tempdir;
 use tokio::{
     fs,
-    io::{AsyncReadExt, AsyncWriteExt},
-    net::TcpStream,
+    io::AsyncReadExt,
     time::{Duration, sleep},
 };
 
@@ -1630,29 +1629,6 @@ fn parse_deleted_keys(body: &RecordedBody) -> Vec<String> {
 }
 
 #[tokio::test]
-async fn delayed_responder_can_be_queued_for_timeout_tests() {
-    let server = MockS3Server::start(vec![respond_delayed(
-        Duration::from_millis(1),
-        response_with_body(StatusCode::OK, bytes::Bytes::new()),
-    )])
-    .await;
-    let mut stream = TcpStream::connect(server.address)
-        .await
-        .expect("connect delayed responder");
-    stream
-        .write_all(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
-        .await
-        .expect("write request");
-    let mut response = Vec::new();
-    stream
-        .read_to_end(&mut response)
-        .await
-        .expect("read response");
-    assert!(response.starts_with(b"HTTP/1.1 200 OK"));
-    server.shutdown().await;
-}
-
-#[tokio::test]
 async fn delete_repository_removes_all_files() {
     let repository = Uuid::new_v4();
     let key_one = format!("{repository}/packages/a.bin");
@@ -2636,7 +2612,7 @@ async fn large_move_uses_multipart_copy_ranges_and_completes() {
 }
 
 #[tokio::test]
-async fn manifest_pages_share_one_cached_traversal() {
+async fn paginated_manifest_listing_bypasses_cache() {
     let repository = Uuid::new_v4();
     let server = MockS3Server::start(vec![
         respond_list(list_response_body_with_metadata(

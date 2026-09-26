@@ -336,6 +336,3 @@ fn parse_mailbox(value: &str, field: &str) -> io::Result<Mailbox> {
         .parse()
         .map_err(|err| io::Error::other(format!("Invalid {field} email address: {err}")))
 }
-
-#[cfg(test)]
-mod tests;

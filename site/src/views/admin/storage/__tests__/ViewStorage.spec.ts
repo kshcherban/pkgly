@@ -146,10 +146,11 @@ function storageItem(): StorageItem {
 
 function seedStore(): ReturnType<typeof useRepositoryStore> {
   const store = useRepositoryStore();
-  store.storages = [storageItem()];
+  store.storages = [storageItem(), { ...storageItem(), id: "other-storage", name: "other" }];
   store.repositories = {
     "repo-1": repositoryItem("repo-1", "storage-123"),
     "repo-2": repositoryItem("repo-2", "other-storage"),
+    "repo-3": repositoryItem("repo-3", "storage-123"),
   };
   return store;
 }
@@ -185,13 +186,13 @@ describe("ViewStorage", () => {
     await wrapper.find('[data-testid="storage-delete"]').trigger("click");
     await vi.waitFor(() => {
       expect(serverState.deleteRequests).toHaveLength(1);
+      expect(mockAlerts.success).toHaveBeenCalledWith("Storage deleted", "The storage has been deleted.");
     });
 
     expect(serverState.deleteRequests).toEqual(["/api/storage/storage-123?cascade=false"]);
     expect(wrapper.find('[data-testid="storage-delete-dialog"]').exists()).toBe(false);
-    expect(store.storages.map((item) => item.id)).not.toContain("storage-123");
+    expect(store.storages.map((item) => item.id)).toEqual(["other-storage"]);
     expect(Object.keys(store.repositories)).toEqual(["repo-2"]);
-    expect(mockAlerts.success).toHaveBeenCalledWith("Storage deleted", "The storage has been deleted.");
     expect(routerMock.push).toHaveBeenCalledWith({ name: "StorageList" });
   });
 

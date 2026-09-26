@@ -4,7 +4,6 @@ use std::{env::current_dir, path::PathBuf};
 
 use nr_core::testing::logging::TestingLoggerConfig;
 use serde::{Deserialize, Serialize};
-use tracing::info;
 use uuid::Uuid;
 pub mod tests;
 use crate::{
@@ -136,13 +135,4 @@ fn testing_storage_directory() -> anyhow::Result<PathBuf> {
         anyhow::bail!("Storage Test Directory is a file");
     }
     Ok(dir)
-}
-
-#[test]
-fn test_load_config() -> anyhow::Result<()> {
-    let configs = get_storage_configs()?;
-    for config in configs {
-        info!("{:?}", config);
-    }
-    Ok(())
 }

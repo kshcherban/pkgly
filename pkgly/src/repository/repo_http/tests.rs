@@ -115,8 +115,16 @@ fn docker_v2_unauthorized_response_sets_challenge() {
     );
 }
 
-#[test]
-fn www_authenticate_response_sets_header_and_body() {
+async fn body_text(response: Response) -> String {
+    let bytes = http_body_util::BodyExt::collect(response.into_body())
+        .await
+        .expect("body")
+        .to_bytes();
+    String::from_utf8(bytes.to_vec()).expect("utf8 body")
+}
+
+#[tokio::test]
+async fn www_authenticate_response_sets_header_and_body() {
     let response = RepoResponse::www_authenticate("Basic realm=\"Pkgly\"").into_response_default();
     assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     let headers = response.headers();
@@ -126,19 +134,28 @@ fn www_authenticate_response_sets_header_and_body() {
             .and_then(|value| value.to_str().ok()),
         Some("Basic realm=\"Pkgly\"")
     );
+    assert_eq!(body_text(response).await, "Unauthorized");
 }
 
-#[test]
-fn forbidden_response_returns_expected_status_and_message() {
+#[tokio::test]
+async fn forbidden_response_returns_expected_status_and_message() {
     let response = RepoResponse::forbidden().into_response_default();
     assert_eq!(response.status(), StatusCode::FORBIDDEN);
+    assert_eq!(
+        body_text(response).await,
+        "You do not have permission to access this repository"
+    );
 }
 
-#[test]
-fn unsupported_method_response_mentions_method() {
+#[tokio::test]
+async fn unsupported_method_response_mentions_method() {
     let response =
         RepoResponse::unsupported_method_response(Method::POST, "docker").into_response_default();
     assert_eq!(response.status(), StatusCode::METHOD_NOT_ALLOWED);
+    assert_eq!(
+        body_text(response).await,
+        "Method POST is not supported for repository type docker"
+    );
 }
 
 #[test]

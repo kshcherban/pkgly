@@ -1,3 +1,5 @@
+// ABOUTME: Tests Debian refresh status persistence and advisory locking.
+// ABOUTME: Covers exclusive refreshes, completion status, and stale-state recovery.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 use super::*;
 

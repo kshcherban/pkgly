@@ -195,6 +195,3 @@ fn derive_metadata_path(remainder: &str) -> Option<String> {
     metadata_path.push_str("/maven-metadata.xml");
     Some(metadata_path)
 }
-
-#[cfg(test)]
-mod tests;

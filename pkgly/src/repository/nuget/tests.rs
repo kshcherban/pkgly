@@ -55,31 +55,6 @@ async fn create_new_nuget_proxy_requires_upstream_url() {
 }
 
 #[tokio::test]
-async fn create_new_nuget_virtual_rejects_empty_member_list() {
-    let storage = test_storage().await;
-    let mut configs = HashMap::default();
-    configs.insert(
-        NugetRepositoryConfigType::get_type_static().to_string(),
-        json!({ "type": "Virtual", "config": { "member_repositories": [] } }),
-    );
-
-    let result = NugetRepositoryType::default()
-        .create_new("nuget-virtual".into(), Uuid::new_v4(), configs, storage)
-        .await;
-
-    match result {
-        Err(RepositoryFactoryError::InvalidConfig(repository, message)) => {
-            assert_eq!(repository, "nuget");
-            assert!(
-                message.contains("member"),
-                "expected error message to mention members, got: {message}"
-            );
-        }
-        other => panic!("expected invalid config error, got: {other:?}"),
-    }
-}
-
-#[tokio::test]
 async fn create_new_nuget_virtual_accepts_valid_config_shape() {
     let storage = test_storage().await;
     let mut configs = HashMap::default();

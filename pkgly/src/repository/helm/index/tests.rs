@@ -1,3 +1,5 @@
+// ABOUTME: Tests Helm index rendering against client-visible YAML metadata.
+// ABOUTME: Covers generated chart URLs, dependencies, and chart attributes.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use crate::repository::helm::chart::ChartMaintainer;
@@ -49,12 +51,14 @@ fn render_index_contains_expected_metadata_for_v3_chart() {
         include_charts_prefix: true,
         mode: IndexUrlMode::Http,
     };
-    let urls = vec![config.chart_download_url(&metadata.name, &metadata.version.to_string())];
+    let expected_url =
+        "https://pkgly.example.com/repositories/default/helm-project/charts/webapp-1.2.3.tgz"
+            .to_string();
     let entry = IndexEntry::new(
         metadata.clone(),
         digest.clone(),
         1024,
-        urls.clone(),
+        Vec::new(),
         ChartProvenanceState::Missing,
     );
 
@@ -71,7 +75,7 @@ fn render_index_contains_expected_metadata_for_v3_chart() {
     assert_eq!(entry["kubeVersion"].as_str(), Some(">=1.24.0"));
     assert_eq!(
         entry["urls"].as_sequence().unwrap()[0].as_str().unwrap(),
-        urls[0].as_str()
+        expected_url
     );
     assert_eq!(entry["digest"].as_str(), Some(digest.as_str()));
     assert_eq!(entry["annotations"]["category"].as_str(), Some("test"));

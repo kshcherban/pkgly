@@ -12,7 +12,6 @@ pub mod chart;
 pub mod configs;
 pub mod hosted;
 pub mod index;
-pub mod oci;
 pub mod types;
 
 pub use configs::*;
@@ -129,12 +128,6 @@ impl From<crate::repository::docker::DockerError> for HelmRepositoryError {
 impl From<crate::app::authentication::AuthenticationError> for HelmRepositoryError {
     fn from(value: crate::app::authentication::AuthenticationError) -> Self {
         HelmRepositoryError::Other(Box::new(value))
-    }
-}
-
-impl From<oci::HelmOciError> for HelmRepositoryError {
-    fn from(value: oci::HelmOciError) -> Self {
-        HelmRepositoryError::InvalidRequest(value.to_string())
     }
 }
 

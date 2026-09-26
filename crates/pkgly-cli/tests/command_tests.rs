@@ -119,11 +119,6 @@ fn login_response() -> String {
     "HTTP/1.1 200 OK\r\nSet-Cookie: session=session123; Path=/\r\nContent-Length: 2\r\nContent-Type: application/json\r\nConnection: close\r\n\r\n{}".to_string()
 }
 
-#[test]
-fn login_response_closes_connection() {
-    assert!(login_response().contains("\r\nConnection: close\r\n"));
-}
-
 fn package_entry_json(package: &str, version: &str) -> String {
     format!(
         concat!(

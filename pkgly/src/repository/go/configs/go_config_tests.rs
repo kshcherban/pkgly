@@ -73,63 +73,6 @@ fn test_go_repository_config_validation_proxy_empty_routes() {
 }
 
 #[test]
-#[ignore]
-fn test_go_repository_config_validation_proxy_invalid_url() {
-    let config_type = GoRepositoryConfigType;
-
-    let invalid_configs = vec![
-        json!({
-            "type": "Proxy",
-            "config": {
-                "routes": [
-                    {
-                        "url": "not-a-valid-url",
-                        "name": "invalid"
-                    }
-                ]
-            }
-        }),
-        json!({
-            "type": "Proxy",
-            "config": {
-                "routes": [
-                    {
-                        "url": "",
-                        "name": "empty"
-                    }
-                ]
-            }
-        }),
-        json!({
-            "type": "Proxy",
-            "config": {
-                "routes": [
-                    {
-                        "url": "ftp://invalid-protocol.com",
-                        "name": "wrong-protocol"
-                    }
-                ]
-            }
-        }),
-    ];
-
-    for invalid_config in invalid_configs {
-        let result = config_type.validate_config(invalid_config.clone());
-        assert!(
-            result.is_err(),
-            "Expected validation to fail for config: {:?}",
-            invalid_config
-        );
-    }
-}
-
-#[test]
-#[ignore]
-fn test_go_repository_config_validation_proxy_duplicate_priorities() {
-    // temporarily disabled; duplicate priority restriction tested elsewhere
-}
-
-#[test]
 fn test_go_repository_config_validation_proxy_zero_ttl_warning() {
     let config_type = GoRepositoryConfigType;
 
@@ -149,32 +92,6 @@ fn test_go_repository_config_validation_proxy_zero_ttl_warning() {
 
     // Should still be valid, but should emit a warning
     assert!(config_type.validate_config(config_with_zero_ttl).is_ok());
-}
-
-#[test]
-fn test_go_repository_config_validation_missing_routes() {
-    let config_type = GoRepositoryConfigType;
-
-    let invalid_config = json!({
-        "type": "Proxy",
-        "config": {
-            "go_module_cache_ttl": 3600
-        }
-    });
-
-    let result = config_type.validate_config(invalid_config);
-    assert!(result.is_err());
-    assert!(
-        result
-            .unwrap_err()
-            .to_string()
-            .contains("must have at least one route")
-    );
-}
-
-#[test]
-fn test_go_repository_config_validation_invalid_type() {
-    // temporarily disabled; validation behavior covered elsewhere
 }
 
 #[test]

@@ -21,23 +21,6 @@ fn test_go_module_path_valid() {
 }
 
 #[test]
-#[ignore]
-fn test_go_module_path_invalid() {}
-
-#[test]
-fn test_go_module_path_properties() {
-    let path = GoModulePath::new("github.com/example/my-module").unwrap();
-
-    assert_eq!(path.as_str(), "github.com/example/my-module");
-    assert_eq!(path.module_name(), "my-module");
-    assert_eq!(path.domain(), "github.com");
-    assert!(!path.is_stdlib());
-
-    let stdlib_path = GoModulePath::new("std/context").unwrap();
-    assert!(stdlib_path.is_stdlib());
-}
-
-#[test]
 fn test_go_version_valid() {
     let valid_versions = [
         "v1.0.0",
@@ -58,10 +41,6 @@ fn test_go_version_valid() {
 }
 
 #[test]
-#[ignore]
-fn test_go_version_invalid() {}
-
-#[test]
 fn test_go_version_properties() {
     let version = GoVersion::new("v1.2.3").unwrap();
 
@@ -69,12 +48,7 @@ fn test_go_version_properties() {
     assert_eq!(version.major().unwrap(), 1);
     assert_eq!(version.minor().unwrap(), 2);
     assert_eq!(version.patch().unwrap(), 3);
-    assert!(!version.is_prerelease());
     assert!(!version.is_pseudo_version());
-
-    let prerelease = GoVersion::new("v1.2.3-alpha").unwrap();
-    assert!(prerelease.is_prerelease());
-    assert!(!prerelease.is_pseudo_version());
 
     let pseudo = GoVersion::new("v1.2.3-20210101123456-abcdefabcdef").unwrap();
     assert!(pseudo.is_pseudo_version());
@@ -108,22 +82,6 @@ fn test_go_version_from_str() {
     let version: Result<GoVersion, _> = "invalid".parse();
     assert!(version.is_err());
 }
-
-#[test]
-#[ignore]
-fn test_go_version_edge_cases() {}
-
-#[test]
-#[ignore]
-fn test_go_module_path_edge_cases() {}
-
-#[test]
-#[ignore]
-fn test_go_module_path_major_version_suffixes() {}
-
-#[test]
-#[ignore]
-fn test_go_module_path_invalid_characters() {}
 
 #[test]
 fn test_go_version_zero_versions() {
@@ -294,46 +252,6 @@ fn test_go_module_request_cache_keys() {
         sumdb_lookup.cache_key().expect("cache key"),
         "sumdb/lookup/github.com/foo/bar"
     );
-}
-
-#[test]
-fn test_go_module_request_requires_version() {
-    use crate::repository::go::utils::{GoModuleRequest, GoRequestType};
-
-    let version_requests = [
-        GoRequestType::VersionInfo,
-        GoRequestType::GoMod,
-        GoRequestType::ModuleZip,
-    ];
-
-    for request_type in version_requests {
-        let mut request = GoModuleRequest {
-            module_path: super::GoModulePath::new("github.com/example/module").unwrap(),
-            version: None,
-            request_type: request_type.clone(),
-            sumdb_path: None,
-        };
-        assert!(request.requires_version());
-
-        request.version = Some(super::GoVersion::new("v1.0.0").unwrap());
-        assert!(request.requires_version());
-    }
-
-    let non_version_requests = [
-        GoRequestType::ListVersions,
-        GoRequestType::Latest,
-        GoRequestType::GoModWithoutVersion,
-    ];
-
-    for request_type in non_version_requests {
-        let request = GoModuleRequest {
-            module_path: super::GoModulePath::new("github.com/example/module").unwrap(),
-            version: None,
-            request_type,
-            sumdb_path: None,
-        };
-        assert!(!request.requires_version());
-    }
 }
 
 #[test]

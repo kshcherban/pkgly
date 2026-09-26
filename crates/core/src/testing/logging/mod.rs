@@ -1,3 +1,5 @@
+// ABOUTME: Configures the shared test logger and its per-crate filters.
+// ABOUTME: Keeps dependency logs quiet while preserving project diagnostics.
 use std::sync::Once;
 
 use ahash::{HashMap, HashMapExt};

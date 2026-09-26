@@ -190,14 +190,6 @@ impl GoModuleRequest {
             .ok_or(RepositoryHandlerError::NotFound)
     }
 
-    /// Check if this request requires a version
-    pub fn requires_version(&self) -> bool {
-        matches!(
-            self.request_type,
-            GoRequestType::VersionInfo | GoRequestType::GoMod | GoRequestType::ModuleZip
-        )
-    }
-
     /// Parse a sumdb request path
     fn parse_sumdb_request(path: &str) -> Result<Self, GoModuleError> {
         tracing::debug!("Parsing sumdb request path: {}", path);

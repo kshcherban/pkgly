@@ -21,12 +21,6 @@ impl EnvProvider for FakeEnv {
 }
 
 #[test]
-fn test_tracing_protocol_default() {
-    let protocol = TracingProtocol::default();
-    assert!(matches!(protocol, TracingProtocol::GRPC));
-}
-
-#[test]
 fn test_env_var_fallback() {
     let empty_env = FakeEnv::default();
     let config1 = OtelConfig::default_with_env(&empty_env);

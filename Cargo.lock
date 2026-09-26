@@ -3158,7 +3158,6 @@ dependencies = [
 name = "nr-macros"
 version = "1.0.0-BETA"
 dependencies = [
- "prettyplease",
  "proc-macro2",
  "quote",
  "syn 2.0.119",

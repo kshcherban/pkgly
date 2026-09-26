@@ -124,13 +124,3 @@ fn php_hosted_dist_url_falls_back_when_app_url_missing() {
         "https://localhost:6742/repositories/test-storage/php-hosted/dist/pkgly-test/sample-lib/1.0.0.zip"
     );
 }
-
-#[test]
-fn php_hosted_composer_shasum_is_sha1_hex() {
-    use super::hosted::PhpHosted;
-
-    assert_eq!(
-        PhpHosted::composer_shasum_for_bytes(b"abc"),
-        "a9993e364706816aba3e25717850c26c9cd0d89d"
-    );
-}

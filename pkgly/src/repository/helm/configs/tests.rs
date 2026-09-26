@@ -1,3 +1,5 @@
+// ABOUTME: Tests Helm repository configuration defaults and validation.
+// ABOUTME: Covers URL formats, independent resource limits, and supported modes.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::*;
 use serde_json::json;
@@ -32,13 +34,18 @@ fn validates_public_base_url_format() {
 }
 
 #[test]
-fn rejects_negative_chart_limits() {
+fn rejects_zero_chart_limits() {
     let config_type = HelmRepositoryConfigType;
-    let invalid = json!({
-        "max_chart_size": -1,
-        "max_file_count": -10
-    });
-    assert!(config_type.validate_config(invalid).is_err());
+    for field in ["max_chart_size", "max_file_count"] {
+        let err = config_type
+            .validate_config(json!({ (field): 0 }))
+            .expect_err("zero limits should be rejected");
+        assert!(
+            err.to_string()
+                .contains(&format!("{field} must be greater than zero")),
+            "unexpected error: {err}"
+        );
+    }
 }
 
 #[test]

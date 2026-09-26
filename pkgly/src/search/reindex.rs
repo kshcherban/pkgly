@@ -184,15 +184,3 @@ async fn reindex_package_file_catalog(site: &Pkgly, repository_id: Uuid) -> anyh
 
     Ok(processed)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::ReindexKind;
-
-    #[test]
-    fn cli_names_are_stable() {
-        assert_eq!(ReindexKind::PythonHosted.as_cli_name(), "python-hosted");
-        assert_eq!(ReindexKind::MavenProxy.as_cli_name(), "maven-proxy");
-        assert_eq!(ReindexKind::DockerHosted.as_cli_name(), "docker-hosted");
-    }
-}

@@ -1,6 +1,5 @@
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::password;
-use chrono::{Duration, Utc};
 
 #[test]
 fn encrypt_password_produces_verifiable_hash() {
@@ -12,23 +11,6 @@ fn encrypt_password_produces_verifiable_hash() {
     };
     assert!(password::verify_password("super-secret", Some(hash.as_str())).is_ok());
     assert!(password::verify_password("invalid", Some(hash.as_str())).is_err());
-}
-
-#[test]
-fn expired_token_time_check_logic() {
-    let now = Utc::now().fixed_offset();
-    let future = now + Duration::hours(1);
-    let past = now - Duration::hours(1);
-
-    // Expired tokens (past) should always be considered expired
-    assert!(past <= now, "past timestamp must be <= now");
-
-    // Future tokens (future) should not be considered expired
-    assert!(future > now, "future timestamp must be > now");
-
-    // Null expiry (non-expiring token) should pass the check
-    let has_expired: Option<chrono::DateTime<chrono::FixedOffset>> = None;
-    assert!(has_expired.is_none(), "null expiry should pass");
 }
 
 #[test]

@@ -16,16 +16,11 @@ use tokio::sync::Mutex;
 #[derive(Clone, Default)]
 struct RecordingIndexer {
     recorded: Arc<Mutex<Vec<ProxyArtifactMeta>>>,
-    evicted: Arc<Mutex<Vec<ProxyArtifactKey>>>,
 }
 
 impl RecordingIndexer {
     async fn recorded(&self) -> Vec<ProxyArtifactMeta> {
         self.recorded.lock().await.clone()
-    }
-
-    async fn evicted(&self) -> Vec<ProxyArtifactKey> {
-        self.evicted.lock().await.clone()
     }
 }
 
@@ -39,8 +34,10 @@ impl ProxyIndexing for RecordingIndexer {
         Ok(())
     }
 
-    async fn evict_cached_artifact(&self, key: ProxyArtifactKey) -> Result<(), ProxyIndexingError> {
-        self.evicted.lock().await.push(key);
+    async fn evict_cached_artifact(
+        &self,
+        _key: ProxyArtifactKey,
+    ) -> Result<(), ProxyIndexingError> {
         Ok(())
     }
 }
@@ -56,28 +53,13 @@ fn maven_proxy_meta_parses_coordinates() {
     assert_eq!(meta.size, Some(2048));
 }
 
-#[tokio::test]
-async fn record_maven_proxy_cache_hit_invokes_indexer() {
+#[test]
+fn maven_proxy_key_from_cache_path_parses_coordinates() {
     let path = StoragePath::from("com/example/app/1.2.3/app-1.2.3.pom");
-    let indexer = Arc::new(RecordingIndexer::default());
-    record_maven_proxy_cache_hit(Some(indexer.clone().as_ref()), &path, 1024)
-        .await
-        .expect("recording succeeds");
-    let recorded = indexer.recorded().await;
-    assert_eq!(recorded.len(), 1);
-    assert_eq!(recorded[0].version.as_deref(), Some("1.2.3"));
-}
-
-#[tokio::test]
-async fn evict_maven_proxy_cache_entry_invokes_indexer() {
-    let path = StoragePath::from("com/example/app/1.2.3/app-1.2.3.pom");
-    let indexer = Arc::new(RecordingIndexer::default());
-    evict_maven_proxy_cache_entry(Some(indexer.clone().as_ref()), &path)
-        .await
-        .expect("eviction succeeds");
-    let evicted = indexer.evicted().await;
-    assert_eq!(evicted.len(), 1);
-    assert_eq!(evicted[0].version.as_deref(), Some("1.2.3"));
+    let key = maven_proxy_key_from_cache_path(&path).expect("key");
+    assert_eq!(key.package_key, "com.example:app");
+    assert_eq!(key.version.as_deref(), Some("1.2.3"));
+    assert_eq!(key.cache_path, Some(path.to_string()));
 }
 
 #[test]

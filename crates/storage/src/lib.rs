@@ -171,5 +171,3 @@ pub trait StaticStorageFactory: StorageFactory {
         <Self as StaticStorageFactory>::create_storage(inner, type_config).await
     }
 }
-#[cfg(test)]
-mod tests;

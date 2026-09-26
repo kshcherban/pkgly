@@ -101,7 +101,7 @@ fn build_compact_index_artifacts_generates_info_and_versions() {
         info,
         "---\n1.0.0 rack:>= 1.0|checksum:aa\n1.1.0 |checksum:bb\n"
     );
-    let expected_md5 = md5_hex(info.as_bytes());
+    let expected_md5 = "c96cc7d9bcd2061ad93f90b3bd18e215";
     assert_eq!(
         artifacts.versions,
         format!("created_at: 2024-04-01T00:00:05Z\n---\ndemo 1.0.0,1.1.0 {expected_md5}\n")

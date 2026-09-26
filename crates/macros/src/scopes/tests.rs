@@ -4,26 +4,6 @@ use super::*;
 use syn::{Attribute, DeriveInput};
 
 #[test]
-fn test() {
-    let input = r#"
-        pub enum NRScope {
-            /// Can read all repositories the user has access to
-            #[scope(title = "Read Repository", parent = "Repository")]
-            ReadRepository,
-        }
-        "#;
-
-    let derive_input = syn::parse_str::<syn::DeriveInput>(input).unwrap();
-
-    let result = expand(derive_input).unwrap();
-
-    let value = result.to_string();
-    let syn_file = syn::parse_file(&value).unwrap();
-    let prettyplease = prettyplease::unparse(&syn_file);
-    println!("{}", prettyplease);
-}
-
-#[test]
 fn test_attribute() {
     let attribute = create_attribute(
         r#"

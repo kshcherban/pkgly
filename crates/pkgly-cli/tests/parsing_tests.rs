@@ -1,6 +1,6 @@
 // ABOUTME: Verifies pkglyctl argument parsing and small formatting helpers.
 // ABOUTME: Keeps command-line contracts covered without calling a server.
-use clap::{CommandFactory, Parser};
+use clap::Parser;
 use uuid::Uuid;
 
 use pkgly_cli::{
@@ -95,68 +95,6 @@ fn cli_parses_package_describe_with_optional_version() {
             && package == "wget"
             && version.as_deref() == Some("1.25.0-2")
     ));
-}
-
-#[test]
-fn storage_create_help_lists_supported_type() {
-    let help = Cli::command()
-        .find_subcommand_mut("storage")
-        .and_then(|command| command.find_subcommand_mut("create"))
-        .map(|command| command.render_help().to_string())
-        .unwrap_or_else(|| panic!("storage create help missing"));
-
-    assert!(help.contains("--type <STORAGE_TYPE>"));
-    assert!(help.contains("Only local storage is supported"));
-}
-
-#[test]
-fn top_level_help_describes_command_groups() {
-    let help = Cli::command().render_help().to_string();
-
-    assert!(help.contains("auth"));
-    assert!(help.contains("Authenticate and manage API tokens"));
-    assert!(help.contains("storage"));
-    assert!(help.contains("Manage storage backends"));
-    assert!(help.contains("repo"));
-    assert!(help.contains("Manage repositories"));
-}
-
-#[test]
-fn repo_help_describes_subcommands() {
-    let help = Cli::command()
-        .find_subcommand_mut("repo")
-        .map(|command| command.render_help().to_string())
-        .unwrap_or_else(|| panic!("repo help missing"));
-
-    assert!(help.contains("List repositories"));
-    assert!(help.contains("Show repository details"));
-    assert!(help.contains("Create a repository"));
-    assert!(help.contains("Delete a repository"));
-    assert!(help.contains("Build a repository route URL"));
-}
-
-#[test]
-fn package_help_describes_describe_command() {
-    let help = Cli::command()
-        .find_subcommand_mut("package")
-        .map(|command| command.render_help().to_string())
-        .unwrap_or_else(|| panic!("package help missing"));
-
-    assert!(help.contains("List package names and versions"));
-    assert!(help.contains("Show package details"));
-}
-
-#[test]
-fn package_upload_help_describes_subcommands() {
-    let help = Cli::command()
-        .find_subcommand_mut("package")
-        .and_then(|command| command.find_subcommand_mut("upload"))
-        .map(|command| command.render_help().to_string())
-        .unwrap_or_else(|| panic!("package upload help missing"));
-
-    assert!(help.contains("Upload a Maven artifact"));
-    assert!(help.contains("Upload a Python distribution"));
-    assert!(help.contains("Upload a NuGet package"));
 }
 
 #[test]

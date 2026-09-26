@@ -6,15 +6,11 @@ use http_body_util::BodyExt;
 use nr_core::storage::StoragePath;
 use nr_storage::{FileContent, Storage, StorageFile, StorageFileMeta, StorageFileReader};
 use serde_json::json;
-use std::sync::{
-    Arc,
-    atomic::{AtomicUsize, Ordering},
-};
+use std::sync::Arc;
 use tempfile::tempdir;
 use tokio::{
     fs::{self, OpenOptions},
     io::{AsyncReadExt, BufWriter},
-    time::{Duration, sleep},
 };
 use uuid::Uuid;
 
@@ -89,37 +85,6 @@ async fn stream_writer_persists_full_payload() -> anyhow::Result<()> {
     assert_eq!(observed, payload);
     assert_eq!(saved, payload);
 
-    Ok(())
-}
-
-#[tokio::test]
-async fn stream_writer_handles_async_chunk_hooks() -> anyhow::Result<()> {
-    let payload = vec![13u8; 128 * 1024];
-    let dir = tempdir()?;
-    let file_path = dir.path().join("async.bin");
-    let file = OpenOptions::new()
-        .create(true)
-        .write(true)
-        .open(&file_path)
-        .await?;
-    let mut writer = BufWriter::with_capacity(8 * 1024, file);
-
-    let processed_bytes = Arc::new(AtomicUsize::new(0));
-
-    stream_to_writer(test_stream_from_bytes(&payload, 2048), &mut writer, {
-        let processed = Arc::clone(&processed_bytes);
-        move |chunk| {
-            let processed = Arc::clone(&processed);
-            async move {
-                sleep(Duration::from_millis(1)).await;
-                processed.fetch_add(chunk.len(), Ordering::SeqCst);
-                Ok(())
-            }
-        }
-    })
-    .await?;
-
-    assert_eq!(processed_bytes.load(Ordering::SeqCst), payload.len());
     Ok(())
 }
 

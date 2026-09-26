@@ -60,13 +60,6 @@ pub struct PhpRepositoryInner {
 pub struct PhpHosted(pub Arc<PhpRepositoryInner>);
 
 impl PhpHosted {
-    #[cfg(test)]
-    pub(super) fn composer_shasum_for_bytes(bytes: &[u8]) -> String {
-        let mut hasher = Sha1::new();
-        hasher.update(bytes);
-        format!("{:x}", hasher.finalize())
-    }
-
     pub async fn load(
         site: Pkgly,
         storage: DynStorage,

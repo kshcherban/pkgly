@@ -25,21 +25,6 @@ impl GoModulePath {
         self.0.as_bytes()
     }
 
-    /// Get the module name (last component of the path)
-    pub fn module_name(&self) -> &str {
-        self.0.split('/').last().unwrap_or(&self.0)
-    }
-
-    /// Get the domain prefix (first component of the path)
-    pub fn domain(&self) -> &str {
-        self.0.split('/').next().unwrap_or(&self.0)
-    }
-
-    /// Check if this is a standard library module
-    pub fn is_stdlib(&self) -> bool {
-        self.0.starts_with("std") || self.0.starts_with("cmd")
-    }
-
     /// Validate a Go module path according to Go naming conventions
     fn validate(path: &str) -> Result<(), GoModuleError> {
         if path.is_empty() {
@@ -146,11 +131,6 @@ impl GoVersion {
     /// Get the version as a string
     pub fn as_str(&self) -> &str {
         &self.0
-    }
-
-    /// Check if this is a pre-release version
-    pub fn is_prerelease(&self) -> bool {
-        self.0.contains('-')
     }
 
     /// Check if this is a pseudo-version (like v1.0.0-20210101123456-abcdefabcdef)
