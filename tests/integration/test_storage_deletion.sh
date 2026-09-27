@@ -1,6 +1,6 @@
 #!/bin/bash
 # ABOUTME: End-to-end storage deletion covering cascade confirmation and package cleanup.
-# ABOUTME: Publishes Helm charts to Local and MinIO storages, then verifies deletion.
+# ABOUTME: Publishes Helm charts to Local and RustFS storages, then verifies deletion.
 
 set -euo pipefail
 
@@ -177,8 +177,8 @@ else
     fail "Empty storage deletion failed (create=${EMPTY_STATUS}, delete=${EMPTY_DELETE}, gone=${EMPTY_GONE})"
 fi
 
-print_test "Create MinIO-backed storage and publish a chart"
-S3_CONFIG="{\"type\":\"S3\",\"settings\":{\"bucket_name\":\"pkgly-test\",\"region\":\"us-east-1\",\"custom_region\":\"minio\",\"endpoint\":\"http://minio:9000\",\"credentials\":{\"access_key\":\"minioadmin\",\"secret_key\":\"minioadmin\"},\"path_style\":true}}"
+print_test "Create RustFS-backed storage and publish a chart"
+S3_CONFIG="{\"type\":\"S3\",\"settings\":{\"bucket_name\":\"pkgly-test\",\"region\":\"us-east-1\",\"custom_region\":\"rustfs\",\"endpoint\":\"http://rustfs:9000\",\"credentials\":{\"access_key\":\"rustfsadmin\",\"secret_key\":\"rustfsadmin\"},\"path_style\":true}}"
 S3_STATUS=$(create_storage s3 "$S3_STORAGE" "$S3_CONFIG")
 S3_REPO_STATUS=$(create_helm_repo "$S3_STORAGE")
 S3_REPO_ID=$(jq -r '.id' "${WORKSPACE}/${S3_STORAGE}-repo.json")

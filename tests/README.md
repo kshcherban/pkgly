@@ -111,16 +111,15 @@ cd tests
 ### Storage deletion failure coverage
 
 Run the Rust storage deletion tests with `cargo test -q -p pkgly app::api::storage::tests`.
-They require Docker and start isolated PostgreSQL and MinIO containers, using the
-same pinned MinIO server image as the integration stack. The image includes `mc`;
-no host installation or filesystem capabilities are required.
+They require Docker and start isolated PostgreSQL and RustFS containers using a
+pinned RustFS server image; no host installation or filesystem capabilities are
+required.
 
 The partial-cleanup test denies `s3:DeleteObject` for one repository through a
-MinIO user policy. It checks that another repository's objects are removed, the
-failed deletion retains database and runtime records, and removing the denial
-allows a successful retry. A separate regression test verifies that the container
-and its policies are removed during unwinding. MinIO command output is captured,
-and command failures or unexpected stderr fail the test.
+RustFS bucket policy. It checks that another repository's objects are removed, the
+failed deletion retains database and runtime records, and removing the policy
+allows a successful retry. The RustFS container is owned by the fixture, so it and
+its bucket policy are removed when the test finishes.
 
 Run the publish/delete end-to-end workflow with
 `./tests/run_integration_tests.sh storage_deletion`.

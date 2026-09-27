@@ -1,5 +1,5 @@
 -- ABOUTME: Seeds deterministic integration users, storages, and repositories.
--- ABOUTME: Includes a MinIO-backed S3 Docker repository for end-to-end coverage.
+-- ABOUTME: Includes a RustFS-backed S3 Docker repository for end-to-end coverage.
 -- Test data seed script - matches production database format exactly
 -- This is executed after migrations have run to populate test data
 
@@ -31,7 +31,7 @@ VALUES (
 )
 ON CONFLICT (id) DO NOTHING;
 
--- S3 storage backed by the pinned MinIO service. The cache directory lives on the shared volume so
+-- S3 storage backed by the pinned RustFS service. The cache directory lives on the shared volume so
 -- the S3 suite can verify cache recovery after restarting Pkgly.
 INSERT INTO storages (id, name, storage_type, active, config)
 VALUES (
@@ -39,7 +39,7 @@ VALUES (
     'test-s3-storage',
     's3',
     true,
-    '{"type":"S3","settings":{"bucket_name":"pkgly-test","region":"us-east-1","custom_region":"minio","endpoint":"http://minio:9000","credentials":{"access_key":"minioadmin","secret_key":"minioadmin"},"path_style":true,"cache":{"enabled":true,"path":"/storage/s3-cache","max_bytes":67108864,"max_entries":256},"adaptive_buffer":{"min_buffer_bytes":1048576,"max_buffer_bytes":8388608,"memory_pressure_threshold":0.75}}}'::jsonb
+    '{"type":"S3","settings":{"bucket_name":"pkgly-test","region":"us-east-1","custom_region":"rustfs","endpoint":"http://rustfs:9000","credentials":{"access_key":"rustfsadmin","secret_key":"rustfsadmin"},"path_style":true,"cache":{"enabled":true,"path":"/storage/s3-cache","max_bytes":67108864,"max_entries":256},"adaptive_buffer":{"min_buffer_bytes":1048576,"max_buffer_bytes":8388608,"memory_pressure_threshold":0.75}}}'::jsonb
 )
 ON CONFLICT (id) DO NOTHING;
 
@@ -171,7 +171,7 @@ INSERT INTO repository_configs (repository_id, key, value) VALUES
     ('33333333-0000-0000-0000-000000000002'::uuid, 'auth', '{"enabled": false}'::jsonb)
 ON CONFLICT (repository_id, key) DO NOTHING;
 
--- Docker Hosted Repository on MinIO
+-- Docker Hosted Repository on RustFS
 INSERT INTO repositories (id, storage_id, name, repository_type, visibility, active)
 VALUES (
     '33333333-0000-0000-0000-000000000003'::uuid,

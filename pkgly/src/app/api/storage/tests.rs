@@ -1,10 +1,10 @@
 // ABOUTME: Tests storage deletion permissions, cascading cleanup, and retry behavior.
-// ABOUTME: Exercises real PostgreSQL, filesystem, and MinIO storage backends.
+// ABOUTME: Exercises real PostgreSQL, filesystem, and RustFS storage backends.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 use super::*;
 
-mod minio;
-use minio::TestMinio;
+mod rustfs;
+use rustfs::TestRustfs;
 
 use crate::repository::NewRepository;
 use crate::test_support::DB_TEST_LOCK;
@@ -540,12 +540,12 @@ async fn delete_storage_cascade_reports_partial_failure_and_can_retry() {
     let _guard = DB_TEST_LOCK.lock().await;
     let db = fresh_db().await;
     let docker = Cli::default();
-    let minio = TestMinio::start(&docker).await;
+    let rustfs = TestRustfs::start(&docker).await;
     let storage_root = tempfile::tempdir().expect("tempdir");
     let storage_id = NewDBStorage::new(
         "s3".into(),
         StorageName::new("primary".into()).expect("storage name"),
-        minio.config(),
+        rustfs.config(),
     )
     .insert(db.pool())
     .await
@@ -568,7 +568,7 @@ async fn delete_storage_cascade_reports_partial_failure_and_can_retry() {
             .await
             .expect("upload artifact");
     }
-    minio.deny_deletion(repo_b);
+    rustfs.deny_deletion(repo_b).await;
 
     let response = call_delete(&site, admin_auth(), storage_id, true)
         .await
@@ -597,7 +597,10 @@ async fn delete_storage_cascade_reports_partial_failure_and_can_retry() {
     );
 
     // Cleanup ran for the first repository before the failure.
-    assert_eq!(minio.objects(), vec![format!("{repo_b}/artifact.jar")]);
+    assert_eq!(
+        rustfs.objects().await,
+        vec![format!("{repo_b}/artifact.jar")]
+    );
 
     // Database records and runtime registrations are retained for retry.
     assert!(
@@ -623,12 +626,12 @@ async fn delete_storage_cascade_reports_partial_failure_and_can_retry() {
     assert!(site.get_repository(repo_b).is_some());
 
     // Fix the backend and retry.
-    minio.allow_deletion();
+    rustfs.allow_deletion().await;
     let retry = call_delete(&site, admin_auth(), storage_id, true)
         .await
         .expect("handler ok");
     assert_eq!(retry.status(), StatusCode::NO_CONTENT);
-    assert!(minio.objects().is_empty());
+    assert!(rustfs.objects().await.is_empty());
     storage.unload().await.expect("unload S3 storage");
     site.close().await;
 }

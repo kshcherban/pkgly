@@ -174,7 +174,7 @@ s3Storage:
   enabled: false
   bucket: ""
   region: "us-east-1"
-  endpoint: ""  # For S3-compatible storage (MinIO, etc.)
+  endpoint: ""  # For S3-compatible storage (RustFS, etc.)
   # Authentication options:
   # Option 1: Static credentials (less secure)
   accessKeyId: ""

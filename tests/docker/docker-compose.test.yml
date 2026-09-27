@@ -1,5 +1,5 @@
 # ABOUTME: Defines the reproducible integration stack used by repository E2E suites.
-# ABOUTME: Includes a pinned MinIO service for end-to-end S3 storage coverage.
+# ABOUTME: Includes a pinned RustFS service for end-to-end S3 storage coverage.
 services:
   postgres:
     image: postgres:17
@@ -27,7 +27,7 @@ services:
         condition: service_healthy
       mailpit:
         condition: service_healthy
-      minio-init:
+      rustfs-init:
         condition: service_completed_successfully
     environment:
       - RUST_LOG=debug
@@ -40,30 +40,39 @@ services:
     networks:
       - integration
 
-  minio:
-    image: minio/minio:RELEASE.2025-03-12T18-04-18Z
-    command: ["server", "/data", "--console-address", ":9001"]
+  rustfs:
+    image: rustfs/rustfs:1.0.0
     environment:
-      MINIO_ROOT_USER: minioadmin
-      MINIO_ROOT_PASSWORD: minioadmin
+      RUSTFS_ACCESS_KEY: rustfsadmin
+      RUSTFS_SECRET_KEY: rustfsadmin
+      RUSTFS_ADDRESS: 0.0.0.0:9000
+      RUSTFS_CONSOLE_ADDRESS: 0.0.0.0:9001
+      RUSTFS_CONSOLE_ENABLE: "true"
+      RUSTFS_VOLUMES: /data
     healthcheck:
-      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/minio/health/live"]
+      test: ["CMD-SHELL", "curl -fsS http://localhost:9000/health"]
       interval: 5s
       timeout: 5s
       retries: 12
     volumes:
-      - minio-data:/data
+      - rustfs-data:/data
     networks:
       - integration
 
-  minio-init:
-    image: minio/mc:RELEASE.2025-03-12T17-29-24Z
+  rustfs-init:
+    image: amazon/aws-cli:2.37.4
     depends_on:
-      minio:
+      rustfs:
         condition: service_healthy
+    environment:
+      AWS_ACCESS_KEY_ID: rustfsadmin
+      AWS_SECRET_ACCESS_KEY: rustfsadmin
+      AWS_DEFAULT_REGION: us-east-1
+      AWS_EC2_METADATA_DISABLED: "true"
+      AWS_PAGER: ""
     entrypoint: ["/bin/sh", "-c"]
     command:
-      - mc alias set local http://minio:9000 minioadmin minioadmin && mc mb --ignore-existing local/pkgly-test
+      - aws --endpoint-url http://rustfs:9000 s3api head-bucket --bucket pkgly-test 2>/dev/null || aws --endpoint-url http://rustfs:9000 s3 mb s3://pkgly-test
     networks:
       - integration
 
@@ -117,7 +126,7 @@ services:
         condition: service_completed_successfully
       docker:
         condition: service_healthy
-      minio:
+      rustfs:
         condition: service_healthy
     environment:
       - PKGLY_URL=http://pkgly:8888
@@ -139,7 +148,7 @@ volumes:
   test-storage:
   test-results:
   docker-graph:
-  minio-data:
+  rustfs-data:
 
 networks:
   integration: {}

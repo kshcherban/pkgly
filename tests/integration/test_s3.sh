@@ -1,5 +1,5 @@
 #!/bin/bash
-# ABOUTME: Exercises a real Docker registry backed by the pinned MinIO S3 service.
+# ABOUTME: Exercises a real Docker registry backed by the pinned RustFS S3 service.
 # ABOUTME: Verifies guarded uploads, manifest reads, cache warming, restart recovery, and cleanup.
 
 set -euo pipefail
@@ -22,12 +22,12 @@ S3_PROXY_REPOSITORY_ID=""
 S3_PROXY_REPOSITORY_PATH="${S3_STORAGE_NAME}/${S3_PROXY_REPOSITORY_NAME}"
 WORKSPACE=""
 
-print_section "S3 / MinIO Integration Tests"
+print_section "S3 / RustFS Integration Tests"
 wait_for_server 60
 
 if [ "${PKGLY_S3_PHASE:-initial}" = "post_restart" ]; then
     IMAGE_TAG=$(cat "$TAG_FILE")
-    print_test "Pull image after Pkgly restart while MinIO is unavailable"
+    print_test "Pull image after Pkgly restart while RustFS is unavailable"
     docker rmi "${IMAGE_NAME}:${IMAGE_TAG}" >/dev/null 2>&1 || true
     if run_cmd docker pull "${REMOTE_IMAGE}:${IMAGE_TAG}"; then
         pass
@@ -35,7 +35,7 @@ if [ "${PKGLY_S3_PHASE:-initial}" = "post_restart" ]; then
         fail "Failed to pull the image after restarting Pkgly"
     fi
 
-    print_test "Read persisted package size while MinIO is unavailable"
+    print_test "Read persisted package size while RustFS is unavailable"
     expected_size=$(cat /results/s3-image-size)
     actual_size=$(curl -fsS -H "$(get_auth_header)" \
         "${PKGLY_URL}/api/repository/${S3_REPOSITORY_ID}/packages" | \
@@ -51,7 +51,7 @@ if [ "${PKGLY_S3_PHASE:-initial}" = "post_restart" ]; then
 fi
 
 if [ "${PKGLY_S3_PHASE:-initial}" = "cleanup" ]; then
-    print_test "Delete S3-backed repository and its MinIO objects"
+    print_test "Delete S3-backed repository and its RustFS objects"
     status=$(curl -sS -o /dev/null -w "%{http_code}" -X DELETE \
         "${PKGLY_URL}/api/repository/${S3_REPOSITORY_ID}" \
         -H "$(get_auth_header)")
@@ -81,7 +81,7 @@ WORKSPACE=$(create_workspace "s3")
 trap 'if [ -n "${WORKSPACE}" ]; then cleanup_workspace "${WORKSPACE}"; fi' EXIT
 cp "${FIXTURE_DIR}/Dockerfile.testimg" "${WORKSPACE}/Dockerfile"
 
-print_test "Build test image for MinIO-backed repository"
+print_test "Build test image for RustFS-backed repository"
 if run_cmd docker build -t "${IMAGE_NAME}:${IMAGE_TAG}" "${WORKSPACE}"; then
     pass
 else
@@ -135,7 +135,7 @@ else
     fail "Failed to HEAD a manifest through the auth-enabled S3 proxy"
 fi
 
-print_test "Push image through Pkgly into MinIO"
+print_test "Push image through Pkgly into RustFS"
 run_cmd docker tag "${IMAGE_NAME}:${IMAGE_TAG}" "${REMOTE_IMAGE}:${IMAGE_TAG}"
 if run_cmd docker push "${REMOTE_IMAGE}:${IMAGE_TAG}"; then
     pass
@@ -174,7 +174,7 @@ else
     fail "Expected at least one cache metadata sidecar"
 fi
 
-print_test "Pull image from MinIO-backed repository"
+print_test "Pull image from RustFS-backed repository"
 docker rmi "${IMAGE_NAME}:${IMAGE_TAG}" >/dev/null 2>&1 || true
 if run_cmd docker pull "${REMOTE_IMAGE}:${IMAGE_TAG}"; then
     pass

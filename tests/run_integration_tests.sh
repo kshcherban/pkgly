@@ -56,7 +56,7 @@ TEST_SUITES:
     maven       Run Maven integration tests
     npm         Run NPM integration tests
     docker      Run Docker hosted registry integration tests
-    s3          Run MinIO-backed S3 storage and Docker repository tests
+    s3          Run RustFS-backed S3 storage and Docker repository tests
     docker_proxy Run Docker proxy cache integration tests
     python      Run Python/PyPI integration tests
     python_virtual Run Python virtual repository integration tests
@@ -172,7 +172,7 @@ if [ $BUILD -eq 1 ]; then
     echo ""
 fi
 
-REQUIRED_SERVICES=(postgres pkgly test-runner docker mailpit minio)
+REQUIRED_SERVICES=(postgres pkgly test-runner docker mailpit rustfs)
 RUNNING_SERVICES=$("${COMPOSE_CMD[@]}" ps --status running --services 2>/dev/null || true)
 ALL_REQUIRED_RUNNING=1
 for svc in "${REQUIRED_SERVICES[@]}"; do
@@ -279,7 +279,7 @@ for suite in "${TEST_SUITES[@]}"; do
     fi
 
     # Restart Pkgly between the two S3 phases so the second phase verifies that the persisted
-    # MinIO-backed cache and repository configuration survive a process restart.
+    # RustFS-backed cache and repository configuration survive a process restart.
     if [ "$suite" = "s3" ] && [ "$suite_passed" -eq 1 ]; then
         print_color "$YELLOW" "Restarting Pkgly for S3 cache-recovery checks..."
         if ! "${COMPOSE_CMD[@]}" restart pkgly; then
@@ -295,7 +295,7 @@ for suite in "${TEST_SUITES[@]}"; do
             done
             if [ "$restarted" -ne 1 ]; then
                 suite_passed=0
-            elif ! "${COMPOSE_CMD[@]}" stop minio; then
+            elif ! "${COMPOSE_CMD[@]}" stop rustfs; then
                 suite_passed=0
             else
                 if ! "${COMPOSE_CMD[@]}" exec -T -e PKGLY_S3_PHASE=post_restart test-runner \
@@ -303,19 +303,19 @@ for suite in "${TEST_SUITES[@]}"; do
                     suite_passed=0
                 fi
 
-                if ! "${COMPOSE_CMD[@]}" start minio; then
+                if ! "${COMPOSE_CMD[@]}" start rustfs; then
                     suite_passed=0
                 else
-                    minio_ready=0
+                    rustfs_ready=0
                     for _ in {1..60}; do
-                        MINIO_STATUS=$("${COMPOSE_CMD[@]}" ps minio 2>/dev/null || true)
-                        if grep -q "healthy" <<<"$MINIO_STATUS"; then
-                            minio_ready=1
+                        RUSTFS_STATUS=$("${COMPOSE_CMD[@]}" ps rustfs 2>/dev/null || true)
+                        if grep -q "healthy" <<<"$RUSTFS_STATUS"; then
+                            rustfs_ready=1
                             break
                         fi
                         sleep 1
                     done
-                    if [ "$minio_ready" -ne 1 ]; then
+                    if [ "$rustfs_ready" -ne 1 ]; then
                         suite_passed=0
                     fi
                 fi
@@ -329,9 +329,9 @@ for suite in "${TEST_SUITES[@]}"; do
     fi
 
     if { [ "$suite" = "s3" ] || [ "$suite" = "storage_deletion" ]; } && [ "$suite_passed" -eq 1 ]; then
-        print_color "$YELLOW" "Checking that S3-backed repositories left no MinIO objects..."
-        if ! "${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint /bin/sh minio-init -c \
-            'mc alias set local http://minio:9000 minioadmin minioadmin >/dev/null && test -z "$(mc ls --recursive local/pkgly-test)"'; then
+        print_color "$YELLOW" "Checking that S3-backed repositories left no RustFS objects..."
+        if ! "${COMPOSE_CMD[@]}" run --rm --no-deps --entrypoint /bin/sh rustfs-init -c \
+            'aws --endpoint-url http://rustfs:9000 s3 ls --recursive s3://pkgly-test >/tmp/objects && test ! -s /tmp/objects'; then
             suite_passed=0
         fi
     fi

@@ -40,7 +40,7 @@
       v-model="useCustomEndpoint">
       Use custom endpoint
       <template #comment>
-        Enable this for MinIO, Ceph, DigitalOcean Spaces, or any S3-compatible gateway with a custom
+        Enable this for RustFS, Ceph, DigitalOcean Spaces, or any S3-compatible gateway with a custom
         URL.
       </template>
     </SwitchInput>
@@ -50,7 +50,7 @@
         id="s3-endpoint"
         v-model="model.endpoint"
         :required="useCustomEndpoint"
-        placeholder="https://minio.internal.example.com"
+        placeholder="https://rustfs.internal.example.com"
         autocomplete="off"
         spellcheck="false">
         Endpoint URL
@@ -125,7 +125,7 @@
       v-model="model.path_style">
       Force path-style requests
       <template #comment>
-        Keep enabled for MinIO and most custom gateways. Disable if AWS requires virtual-hosted
+        Keep enabled for RustFS and most custom gateways. Disable if AWS requires virtual-hosted
         style (bucket.s3.amazonaws.com).
       </template>
     </SwitchInput>
