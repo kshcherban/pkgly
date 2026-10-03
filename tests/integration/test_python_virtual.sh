@@ -25,6 +25,212 @@ VERSION_1="1.0.0.post${RUN_ID}"
 VERSION_2="1.0.1.post${RUN_ID}"
 VERSION_3="1.0.2.post${RUN_ID}"
 
+report_virtual_http_failure() {
+    local route_label="$1"
+    local member_label="$2"
+    local requested_url="$3"
+    local status="$4"
+    local headers_file="$5"
+    local body_file="$6"
+    local failure_reason="$7"
+    local body_size
+    local headers
+
+    body_size=$(stat -c %s "$body_file" 2>/dev/null || printf '0')
+    headers=$(cat "$headers_file" 2>/dev/null || printf '<headers unavailable>')
+    record_output "$(printf 'route=%s member=%s failure=%s\nrequested_url=%s\nstatus=%s\nbody_size=%s\nheaders:\n%s\n' \
+        "$route_label" "$member_label" "$failure_reason" "$requested_url" "$status" "$body_size" "$headers")"
+    return 1
+}
+
+assert_artifact_2xx() {
+    local route_label="$1"
+    local member_label="$2"
+    local artifact_url="$3"
+    local artifact_id="$4"
+    local artifact_dir="${WORKSPACE}/artifact-validation"
+    local head_headers_file
+    local get_headers_file
+    local get_body_file
+    local head_status
+    local get_status
+    local body_size
+
+    mkdir -p "$artifact_dir"
+    head_headers_file=$(mktemp "${artifact_dir}/${artifact_id}.head.XXXXXX")
+    get_headers_file=$(mktemp "${artifact_dir}/${artifact_id}.get.XXXXXX")
+    get_body_file=$(mktemp "${artifact_dir}/${artifact_id}.body.XXXXXX")
+
+    if ! head_status=$(curl -sS -L -I -D "$head_headers_file" -o /dev/null -w '%{http_code}' "$artifact_url"); then
+        report_virtual_http_failure "$route_label" "$member_label" "$artifact_url" "000" \
+            "$head_headers_file" "$get_body_file" "artifact HEAD connectivity"
+        return 1
+    fi
+    if [[ ! "$head_status" =~ ^2[0-9]{2}$ ]]; then
+        report_virtual_http_failure "$route_label" "$member_label" "$artifact_url" "$head_status" \
+            "$head_headers_file" "$get_body_file" "artifact HEAD status"
+        return 1
+    fi
+
+    if ! get_status=$(curl -sS -L -D "$get_headers_file" -o "$get_body_file" -w '%{http_code}' "$artifact_url"); then
+        report_virtual_http_failure "$route_label" "$member_label" "$artifact_url" "000" \
+            "$get_headers_file" "$get_body_file" "artifact GET connectivity"
+        return 1
+    fi
+    body_size=$(stat -c %s "$get_body_file" 2>/dev/null || printf '0')
+    if [[ ! "$get_status" =~ ^2[0-9]{2}$ ]]; then
+        report_virtual_http_failure "$route_label" "$member_label" "$artifact_url" "$get_status" \
+            "$get_headers_file" "$get_body_file" "artifact GET status"
+        return 1
+    fi
+    if [[ ! "$body_size" =~ ^[1-9][0-9]*$ ]]; then
+        report_virtual_http_failure "$route_label" "$member_label" "$artifact_url" "$get_status" \
+            "$get_headers_file" "$get_body_file" "artifact GET empty body"
+        return 1
+    fi
+}
+
+fetch_virtual_index() {
+    local route_label="$1"
+    local member_label="$2"
+    local index_url="$3"
+    local index_body="$4"
+    local index_headers="$5"
+    local status
+    local body_size
+
+    if ! status=$(curl -sS -L -D "$index_headers" -o "$index_body" -w '%{http_code}' "$index_url"); then
+        status="000"
+    fi
+    body_size=$(stat -c %s "$index_body" 2>/dev/null || printf '0')
+    if [[ ! "$status" =~ ^2[0-9]{2}$ ]]; then
+        report_virtual_http_failure "$route_label" "$member_label" "$index_url" "$status" \
+            "$index_headers" "$index_body" "virtual index status"
+        return 1
+    fi
+    if [[ "$body_size" -le 0 ]]; then
+        report_virtual_http_failure "$route_label" "$member_label" "$index_url" "$status" "$index_headers" "$index_body" "empty virtual index"
+        return 1
+    fi
+}
+
+assert_virtual_trailing_slash_redirect() {
+    local route_label="$1"
+    local route_prefix="$2"
+    local package_name="$3"
+    local redirect_id="$4"
+    local requested_url="${PKGLY_URL}${route_prefix}/simple/${package_name}"
+    local expected_location="/repositories/${PYTHON_VIRTUAL_REPO}/simple/${package_name}/"
+    local headers_file="${WORKSPACE}/${redirect_id}.headers"
+    local status
+    local location
+
+    print_test "Virtual: ${route_label} route redirects a package index without a trailing slash to the canonical URL"
+    # Check the redirect response itself, so curl must not follow it with -L.
+    if ! status=$(curl -sS -D "$headers_file" -o /dev/null -w '%{http_code}' "$requested_url"); then
+        status="000"
+    fi
+    location=$(sed -n -E 's/^[Ll]ocation:[[:space:]]*([^\r]*)\r?$/\1/p' "$headers_file" | tail -n 1)
+
+    if [[ "$status" == "301" && "$location" == "$expected_location" ]]; then
+        clear_last_log
+        pass
+        return 0
+    fi
+
+    record_output "$(printf 'route=%s\nrequested_url=%s\nstatus=%s\nlocation=%s\nexpected_location=%s\n' \
+        "$route_label" "$requested_url" "$status" "$location" "$expected_location")"
+    fail "Virtual ${route_label} route did not return a 301 redirect to ${expected_location}"
+}
+
+extract_selected_wheel_href() {
+    local route_label="$1"
+    local member_label="$2"
+    local index_body="$3"
+    local canonical_prefix="/repositories/${PYTHON_VIRTUAL_REPO}/"
+    local href
+    local wheel_hrefs=()
+
+    mapfile -t wheel_hrefs < <(
+        grep -Eo 'href="[^"]+\.whl[^"]*"' "$index_body" |
+            sed -E 's/^href="([^"]+)".*$/\1/' |
+            sort -u || true
+    )
+    if [ "${#wheel_hrefs[@]}" -eq 0 ]; then
+        record_output "route=${route_label} member=${member_label}\nindex_body_size=$(stat -c %s "$index_body" 2>/dev/null || printf '0')\nNo wheel href found in ${index_body}"
+        return 1
+    fi
+
+    for href in "${wheel_hrefs[@]}"; do
+        if [[ "$href" != "$canonical_prefix"* ]]; then
+            record_output "route=${route_label} member=${member_label}\nNon-canonical wheel href: ${href}\nRequired prefix: ${canonical_prefix}"
+            return 1
+        fi
+    done
+    SELECTED_WHEEL_HREF="${wheel_hrefs[0]}"
+}
+
+check_virtual_index_and_artifact() {
+    local route_label="$1"
+    local member_label="$2"
+    local route_prefix="$3"
+    local package_name="$4"
+    local check_id="$5"
+    local index_body="${WORKSPACE}/${check_id}.index.html"
+    local index_headers="${WORKSPACE}/${check_id}.index.headers"
+    local index_url="${PKGLY_URL}${route_prefix}/simple/${package_name}/"
+
+    print_test "Virtual: ${member_label} member via ${route_label} route validates index and artifact"
+    if fetch_virtual_index "$route_label" "$member_label" "$index_url" "$index_body" "$index_headers" &&
+        extract_selected_wheel_href "$route_label" "$member_label" "$index_body" &&
+        assert_artifact_2xx "$route_label" "$member_label" "${PKGLY_URL}${SELECTED_WHEEL_HREF}" "$check_id"; then
+        clear_last_log
+        pass
+    else
+        fail "Virtual ${member_label}/${route_label} index or artifact validation failed"
+    fi
+}
+
+install_from_virtual_index() {
+    local route_label="$1"
+    local route_prefix="$2"
+    local package_spec="$3"
+    local expected_version="$4"
+    local venv_name="$5"
+    local venv_dir="${WORKSPACE}/${venv_name}"
+    local index_url="${PKGLY_URL}${route_prefix}/simple"
+    local installed_version
+
+    print_test "Virtual: pip installs ${package_spec} through ${route_label} route"
+    if ! python3 -m venv "$venv_dir"; then
+        fail "Failed to create virtualenv ${venv_name}"
+        return
+    fi
+    source "${venv_dir}/bin/activate"
+    if run_cmd pip install --no-cache-dir --force-reinstall --index-url="$index_url" \
+        --trusted-host=pkgly "$package_spec"; then
+        if [ -n "$expected_version" ]; then
+            cd "$WORKSPACE"
+            if installed_version=$(python3 -c "import importlib.metadata as m; print(m.version('${PACKAGE_NAME}'))"); then
+                record_output "$installed_version"
+                if [ "$installed_version" = "$expected_version" ]; then
+                    clear_last_log
+                    pass
+                else
+                    fail "Wrong version installed through ${route_label}: ${installed_version}"
+                fi
+            else
+                fail "Could not read installed version through ${route_label}"
+            fi
+        else
+            pass
+        fi
+    else
+        fail "Failed to install ${package_spec} through ${route_label}"
+    fi
+    deactivate
+}
+
 ensure_python_repo() {
     local repo_name="$1"
     local existing_id="$2"
@@ -203,76 +409,53 @@ fi
 
 print_test "Virtual: merged /simple/<pkg>/ includes ${VERSION_1} and ${VERSION_2}"
 SIMPLE_VIRTUAL_PATH="/repositories/${PYTHON_VIRTUAL_REPO}/simple/${PACKAGE_NAME}/"
-VIRTUAL_INDEX=$(curl -sf "${PKGLY_URL}${SIMPLE_VIRTUAL_PATH}" || echo "")
-record_output "$VIRTUAL_INDEX"
+MERGED_INDEX_BODY="${WORKSPACE}/merged.index.html"
+MERGED_INDEX_HEADERS="${WORKSPACE}/merged.index.headers"
+if fetch_virtual_index "canonical" "hosted" "${PKGLY_URL}${SIMPLE_VIRTUAL_PATH}" \
+    "$MERGED_INDEX_BODY" "$MERGED_INDEX_HEADERS"; then
+    VIRTUAL_INDEX=$(cat "$MERGED_INDEX_BODY")
+    record_output "$VIRTUAL_INDEX"
+fi
 
-if echo "$VIRTUAL_INDEX" | grep -q "${VERSION_1}" && echo "$VIRTUAL_INDEX" | grep -q "${VERSION_2}"; then
+if [ -s "$MERGED_INDEX_BODY" ] &&
+    grep -q "${VERSION_1}" "$MERGED_INDEX_BODY" &&
+    grep -q "${VERSION_2}" "$MERGED_INDEX_BODY"; then
     clear_last_log
     pass
 else
     fail "Virtual index did not contain both member versions"
 fi
 
-print_test "Virtual: install ${VERSION_1} via pip"
-VENV_DIR_V1="$WORKSPACE/venv-v1"
-python3 -m venv "$VENV_DIR_V1"
-source "$VENV_DIR_V1/bin/activate"
+assert_virtual_trailing_slash_redirect "canonical" \
+    "/repositories/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "redirect-canonical"
+assert_virtual_trailing_slash_redirect "storages" \
+    "/storages/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "redirect-storages"
+assert_virtual_trailing_slash_redirect "direct" \
+    "/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "redirect-direct"
 
-if run_cmd pip install --index-url="${PKGLY_URL}/repositories/${PYTHON_VIRTUAL_REPO}/simple" \
-   --trusted-host=pkgly \
-   "${PACKAGE_NAME}==${VERSION_1}"; then
-    cd "$WORKSPACE"
-    INSTALLED_VERSION=$(python3 -c "import importlib.metadata as m; print(m.version('${PACKAGE_NAME}'))")
-    record_output "$INSTALLED_VERSION"
-    if [ "$INSTALLED_VERSION" = "$VERSION_1" ]; then
-        clear_last_log
-        pass
-    else
-        fail "Wrong version installed: $INSTALLED_VERSION"
-    fi
-else
-    fail "Failed to install ${VERSION_1} via virtual"
-fi
+check_virtual_index_and_artifact "canonical" "hosted" \
+    "/repositories/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "hosted-canonical"
+check_virtual_index_and_artifact "storages" "hosted" \
+    "/storages/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "hosted-storages"
+check_virtual_index_and_artifact "direct" "hosted" \
+    "/${PYTHON_VIRTUAL_REPO}" "$PACKAGE_NAME" "hosted-direct"
+check_virtual_index_and_artifact "canonical" "live-pypi" \
+    "/repositories/${PYTHON_VIRTUAL_REPO}" "requests" "proxy-canonical"
+check_virtual_index_and_artifact "storages" "live-pypi" \
+    "/storages/${PYTHON_VIRTUAL_REPO}" "requests" "proxy-storages"
+check_virtual_index_and_artifact "direct" "live-pypi" \
+    "/${PYTHON_VIRTUAL_REPO}" "requests" "proxy-direct"
 
-deactivate
-
-print_test "Virtual: install ${VERSION_2} via pip"
-VENV_DIR_V2="$WORKSPACE/venv-v2"
-python3 -m venv "$VENV_DIR_V2"
-source "$VENV_DIR_V2/bin/activate"
-
-if run_cmd pip install --index-url="${PKGLY_URL}/repositories/${PYTHON_VIRTUAL_REPO}/simple" \
-   --trusted-host=pkgly \
-   "${PACKAGE_NAME}==${VERSION_2}"; then
-    cd "$WORKSPACE"
-    INSTALLED_VERSION=$(python3 -c "import importlib.metadata as m; print(m.version('${PACKAGE_NAME}'))")
-    record_output "$INSTALLED_VERSION"
-    if [ "$INSTALLED_VERSION" = "$VERSION_2" ]; then
-        clear_last_log
-        pass
-    else
-        fail "Wrong version installed: $INSTALLED_VERSION"
-    fi
-else
-    fail "Failed to install ${VERSION_2} via virtual"
-fi
-
-deactivate
-
-print_test "Virtual: proxy member works (requests==2.31.0 install via virtual)"
-VENV_DIR_PROXY="$WORKSPACE/venv-proxy"
-python3 -m venv "$VENV_DIR_PROXY"
-source "$VENV_DIR_PROXY/bin/activate"
-
-if run_cmd pip install --index-url="${PKGLY_URL}/repositories/${PYTHON_VIRTUAL_REPO}/simple" \
-   --trusted-host=pkgly \
-   "requests==2.31.0"; then
-    pass
-else
-    fail "Failed to install requests via virtual (proxy member)"
-fi
-
-deactivate
+install_from_virtual_index "canonical" \
+    "/repositories/${PYTHON_VIRTUAL_REPO}" "${PACKAGE_NAME}==${VERSION_1}" \
+    "$VERSION_1" "venv-v1"
+install_from_virtual_index "direct" \
+    "/${PYTHON_VIRTUAL_REPO}" "${PACKAGE_NAME}==${VERSION_2}" \
+    "$VERSION_2" "venv-v2"
+install_from_virtual_index "canonical" \
+    "/repositories/${PYTHON_VIRTUAL_REPO}" "requests==2.31.0" "" "venv-proxy"
+install_from_virtual_index "direct" \
+    "/${PYTHON_VIRTUAL_REPO}" "requests==2.31.0" "" "venv-proxy-direct"
 
 print_test "Virtual: publish forwards to hosted publish target"
 cd "$WORKSPACE/test-pkg"
@@ -292,10 +475,15 @@ fi
 
 print_test "Hosted: /simple/<pkg>/ contains forwarded ${VERSION_3}"
 SIMPLE_HOSTED_PATH="/repositories/${PYTHON_HOSTED_REPO}/simple/${PACKAGE_NAME}/"
-HOSTED_INDEX=$(curl -sf "${PKGLY_URL}${SIMPLE_HOSTED_PATH}" || echo "")
-record_output "$HOSTED_INDEX"
+FORWARDED_INDEX_BODY="${WORKSPACE}/forwarded.index.html"
+FORWARDED_INDEX_HEADERS="${WORKSPACE}/forwarded.index.headers"
+if fetch_virtual_index "canonical" "hosted" "${PKGLY_URL}${SIMPLE_HOSTED_PATH}" \
+    "$FORWARDED_INDEX_BODY" "$FORWARDED_INDEX_HEADERS"; then
+    HOSTED_INDEX=$(cat "$FORWARDED_INDEX_BODY")
+    record_output "$HOSTED_INDEX"
+fi
 
-if echo "$HOSTED_INDEX" | grep -q "${VERSION_3}"; then
+if [ -s "$FORWARDED_INDEX_BODY" ] && grep -q "${VERSION_3}" "$FORWARDED_INDEX_BODY"; then
     clear_last_log
     pass
 else

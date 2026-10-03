@@ -772,19 +772,28 @@ fn normalize_base_path(base_path: &str) -> String {
     }
 }
 
-fn derive_request_base_path(uri_path: &str, path: &StoragePath) -> Option<String> {
+fn derive_request_base_path(
+    uri_path: &str,
+    repository_relative_path: &StoragePath,
+) -> Option<String> {
     let uri_trimmed = uri_path.trim_end_matches('/');
-    let storage = path.to_string();
-    let storage_trimmed = storage.trim_end_matches('/');
-    if storage_trimmed.is_empty() {
-        return Some(uri_trimmed.to_string());
+    let relative_path = repository_relative_path.to_string();
+    let trimmed_relative_path = relative_path.trim_end_matches('/');
+    if trimmed_relative_path.is_empty() {
+        return Some(canonicalize_repository_base(uri_trimmed));
     }
-    let suffix = format!("/{}", storage_trimmed);
-    let base = uri_trimmed.strip_suffix(&suffix)?;
-    if base.is_empty() {
-        return Some("/".to_string());
+    let suffix = format!("/{trimmed_relative_path}");
+    let repository_base = uri_trimmed.strip_suffix(&suffix)?;
+    Some(canonicalize_repository_base(repository_base))
+}
+
+fn canonicalize_repository_base(repository_base: &str) -> String {
+    let repository_base = repository_base.trim_end_matches('/');
+    if repository_base == "/repositories" || repository_base.starts_with("/repositories/") {
+        repository_base.to_string()
+    } else {
+        format!("/repositories{repository_base}")
     }
-    Some(base.to_string())
 }
 
 fn resolve_upstream_link(original: &str, upstream_base: &Url) -> Option<Url> {
