@@ -26,8 +26,9 @@ assert_hosted_trailing_slash_redirect() {
     local repository_path="$3"
     local index_path="$4"
     local test_id="$5"
+    local canonical_index_path="${6:-$index_path}"
     local requested_url="${PKGLY_URL}${route_prefix}/${index_path}"
-    local expected_location="/repositories/${repository_path}/${index_path}/"
+    local expected_location="/repositories/${repository_path}/${canonical_index_path}/"
     local headers_file="${WORKSPACE}/${test_id}.headers"
     local body_file="${WORKSPACE}/${test_id}.body"
     local status
@@ -292,6 +293,33 @@ pass
 for method in GET HEAD; do
     assert_hosted_trailing_slash_redirect "$method" "/repositories/api/python-redirect-test" \
         "api/python-redirect-test" "simple" "hosted-api-${method}"
+done
+
+# Test 16: Combine mixed-case repository names and an encoded package path in GET/HEAD redirects
+for method in GET HEAD; do
+    for route in repositories storages direct; do
+        case "$route" in
+            direct) route_prefix="/${TEST_STORAGE^^}/Python-Hosted" ;;
+            *) route_prefix="/${route}/${TEST_STORAGE^^}/Python-Hosted" ;;
+        esac
+        assert_hosted_trailing_slash_redirect "$method" "$route_prefix" \
+            "$PYTHON_HOSTED_REPO" "simple/p%6Bgly-test-pkg" "hosted-combined-${route}-${method}" \
+            "simple/${PACKAGE_NAME}"
+
+        # The same mixed-case, encoded request must work when its trailing slash is already present.
+        print_test "Hosted: ${method} ${route} mixed-case encoded index with trailing slash returns 200"
+        curl_method=()
+        if [[ "$method" == "HEAD" ]]; then
+            curl_method=(-I)
+        fi
+        STATUS=$(curl -sS "${curl_method[@]}" -o /dev/null -w '%{http_code}' \
+            "${PKGLY_URL}${route_prefix}/simple/p%6Bgly-test-pkg/")
+        if assert_http_status "200" "$STATUS"; then
+            pass
+        else
+            fail "Hosted mixed-case encoded index with trailing slash returned ${STATUS}"
+        fi
+    done
 done
 
 # Cleanup

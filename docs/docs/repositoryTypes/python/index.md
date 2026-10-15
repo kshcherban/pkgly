@@ -20,6 +20,7 @@ client with read access can fetch the artifacts directly.
   `/simple` suffix in the upstream.
 - Pkgly will fetch packages on demand. Binary artifacts are cached locally on first request;
   directory-style HTML responses are streamed directly from upstream.
+- Package links in upstream indexes point back to the proxy repository.
 - If the repository is private, readers still need permission—Pkgly only reaches out to the
   upstream after the local permission check succeeds.
 

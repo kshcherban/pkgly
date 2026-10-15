@@ -1,8 +1,9 @@
+use http::StatusCode;
 use nr_core::{repository::project::ReleaseType, storage::StoragePath};
 use serde::{Deserialize, Serialize};
 
 use super::PythonRepositoryError;
-use crate::repository::RepositoryHandlerError;
+use crate::{repository::RepositoryHandlerError, utils::ResponseBuilder};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PythonPackagePathInfo {
@@ -83,6 +84,25 @@ pub(crate) fn html_escape(input: &str) -> String {
             _ => ch.to_string(),
         })
         .collect()
+}
+
+/// Build a canonical trailing-slash redirect for a Python repository.
+pub(super) fn redirect_to_trailing_slash(
+    canonical_repository_base: &str,
+    repository_relative_path: &StoragePath,
+) -> axum::response::Response {
+    let relative_path = repository_relative_path.to_string();
+    let trimmed_relative_path = relative_path.trim_end_matches('/');
+    let location = if trimmed_relative_path.is_empty() {
+        format!("{canonical_repository_base}/")
+    } else {
+        format!("{canonical_repository_base}/{trimmed_relative_path}/")
+    };
+
+    ResponseBuilder::default()
+        .status(StatusCode::MOVED_PERMANENTLY)
+        .header(http::header::LOCATION, location)
+        .empty()
 }
 
 #[cfg(test)]

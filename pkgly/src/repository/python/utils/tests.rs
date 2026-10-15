@@ -27,3 +27,28 @@ fn rejects_short_path() {
     let result = PythonPackagePathInfo::try_from(&path);
     assert!(result.is_err());
 }
+
+#[test]
+fn redirect_uses_canonical_base_for_root_and_simple_index_paths() {
+    for (path, expected_location) in [
+        ("", "/repositories/api/python-hosted/"),
+        ("simple", "/repositories/api/python-hosted/simple/"),
+        (
+            "simple/demo",
+            "/repositories/api/python-hosted/simple/demo/",
+        ),
+        (
+            "simple/demo/",
+            "/repositories/api/python-hosted/simple/demo/",
+        ),
+    ] {
+        let response =
+            redirect_to_trailing_slash("/repositories/api/python-hosted", &StoragePath::from(path));
+
+        assert_eq!(response.status(), http::StatusCode::MOVED_PERMANENTLY);
+        assert_eq!(
+            response.headers()[http::header::LOCATION],
+            expected_location
+        );
+    }
+}

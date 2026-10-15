@@ -508,6 +508,23 @@ check_virtual_proxy_request_and_cached_index "case-insensitive-repository-names"
 # Verify an encoded package path produces valid virtual links before and after caching.
 check_virtual_proxy_request_and_cached_index "percent-encoded" \
     "/repositories/${PYTHON_VIRTUAL_REPO}/simple/i%64na/" "idna"
+# Combine casing, encoding, and a missing trailing slash before this package enters the cache.
+check_virtual_proxy_request_and_cached_index "canonical-case-and-percent-encoded" \
+    "/repositories/${TEST_STORAGE^^}/Python-Virtual/simple/charset%2Dnormalizer" "charset-normalizer"
+# Check encoding and a missing trailing slash through the lowercase storages alias.
+check_virtual_proxy_request_and_cached_index "storages-percent-encoded" \
+    "/storages/${PYTHON_VIRTUAL_REPO}/simple/u%72llib3" "urllib3"
+# Check encoding and a missing trailing slash through the lowercase direct alias.
+check_virtual_proxy_request_and_cached_index "direct-percent-encoded" \
+    "/${PYTHON_VIRTUAL_REPO}/simple/s%69x" "six"
+
+# Combine mixed-case repository lookup and encoded package paths through the storages alias.
+# Use a new package so this request builds the index before its canonical cache check.
+check_virtual_proxy_request_and_cached_index "storages-case-and-percent-encoded" \
+    "/storages/${TEST_STORAGE^^}/Python-Virtual/simple/c%65rtifi/" "certifi"
+# Check the same combination through the direct alias with another uncached package.
+check_virtual_proxy_request_and_cached_index "direct-case-and-percent-encoded" \
+    "/${TEST_STORAGE^^}/Python-Virtual/simple/p%61ckaging/" "packaging"
 
 # Verify the URL fix does not accept paths that the repository path validator rejects.
 print_test "Virtual: repeated slashes remain invalid repository paths"

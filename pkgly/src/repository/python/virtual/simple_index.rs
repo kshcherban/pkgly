@@ -65,6 +65,8 @@ fn html_unescape_basic(input: &str) -> String {
     out
 }
 
+/// Merge member package links into a simple index with relative links resolved
+/// under the canonical repository base.
 pub fn build_simple_index_html(
     display_name: &str,
     canonical_repository_base: &str,
@@ -138,16 +140,8 @@ fn canonicalize_member_link(
     canonical_repository_base: &str,
     normalized_package: &str,
 ) -> String {
-    if is_absolute_link(href) {
+    if href.starts_with('/') || is_absolute_link(href) {
         return href.to_string();
-    }
-
-    let canonical_prefix = format!("{canonical_repository_base}/");
-    if href.starts_with('/') {
-        if href.starts_with(&canonical_prefix) {
-            return href.to_string();
-        }
-        return format!("{canonical_repository_base}/{}", &href[1..]);
     }
 
     // Resolve relative links with a placeholder origin. Return only the path, query, and fragment.

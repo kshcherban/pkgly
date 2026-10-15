@@ -3,10 +3,7 @@ use std::sync::Arc;
 use axum::body::Body;
 use bytes::Bytes;
 use futures::stream;
-use http::{
-    StatusCode,
-    header::{CONTENT_TYPE, LOCATION},
-};
+use http::{StatusCode, header::CONTENT_TYPE};
 use nr_core::repository::config::RepositoryConfigType;
 use nr_core::storage::StoragePath;
 use nr_core::{
@@ -28,7 +25,9 @@ use uuid::Uuid;
 use super::{
     PythonRepositoryError,
     configs::PythonRepositoryConfigType,
-    utils::{PythonPackagePathInfo, html_escape, normalize_package_name},
+    utils::{
+        PythonPackagePathInfo, html_escape, normalize_package_name, redirect_to_trailing_slash,
+    },
 };
 use crate::{
     app::{
@@ -67,6 +66,14 @@ pub struct PythonRepositoryInner {
 pub struct PythonHosted(pub Arc<PythonRepositoryInner>);
 
 impl PythonHosted {
+    fn canonical_repository_base(&self) -> String {
+        format!(
+            "/repositories/{}/{}",
+            self.0.storage.storage_config().storage_config.storage_name,
+            self.0.name
+        )
+    }
+
     pub async fn load(
         site: Pkgly,
         storage: DynStorage,
@@ -386,7 +393,10 @@ impl Repository for PythonHosted {
 
             if ctx.is_directory {
                 if ctx.redirect_needed {
-                    return Ok(RepoResponse::Other(redirect_to_trailing_slash(&uri_path)));
+                    return Ok(RepoResponse::Other(redirect_to_trailing_slash(
+                        &this.canonical_repository_base(),
+                        &request.path,
+                    )));
                 }
                 if let Some(response) = storage_request_directory(&this, &ctx).await? {
                     return Ok(RepoResponse::Other(response));
@@ -441,7 +451,10 @@ impl Repository for PythonHosted {
 
             if ctx.is_directory {
                 if ctx.redirect_needed {
-                    return Ok(RepoResponse::Other(redirect_to_trailing_slash(&uri_path)));
+                    return Ok(RepoResponse::Other(redirect_to_trailing_slash(
+                        &this.canonical_repository_base(),
+                        &request.path,
+                    )));
                 }
                 if let Some(response) = storage_request_directory(&this, &ctx).await? {
                     let response = response.map(|_| Body::empty());
@@ -669,25 +682,6 @@ impl PythonHosted {
 
         Ok(ResponseBuilder::ok().html(body))
     }
-}
-
-fn redirect_to_trailing_slash(uri_path: &str) -> axum::response::Response {
-    let mut location = if uri_path.is_empty() {
-        String::from("/")
-    } else if uri_path.ends_with('/') {
-        uri_path.to_string()
-    } else {
-        format!("{}/", uri_path)
-    };
-
-    if location.is_empty() {
-        location = String::from("/");
-    }
-
-    ResponseBuilder::default()
-        .status(StatusCode::MOVED_PERMANENTLY)
-        .header(LOCATION, location)
-        .empty()
 }
 
 fn should_ignore(name: &str) -> bool {

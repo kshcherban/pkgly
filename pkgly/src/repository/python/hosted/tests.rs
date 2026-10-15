@@ -31,7 +31,8 @@ fn context_prefix_for_simple_package() {
 
 #[test]
 fn redirect_adds_trailing_slash() {
-    let response = redirect_to_trailing_slash("/repositories/test/py-hosted");
+    let response =
+        redirect_to_trailing_slash("/repositories/test/py-hosted", &StoragePath::default());
     assert_eq!(response.status(), StatusCode::MOVED_PERMANENTLY);
     let location = response.headers().get(LOCATION).unwrap();
     assert_eq!(location, "/repositories/test/py-hosted/");

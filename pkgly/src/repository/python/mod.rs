@@ -23,6 +23,10 @@ use super::{
     RepositoryTypeDescription,
 };
 
+/// Canonical URL base supplied to Python members by a virtual repository.
+#[derive(Debug, Clone)]
+struct VirtualRepositoryBasePath(String);
+
 #[derive(Debug, Clone, DynRepositoryHandler)]
 #[repository_handler(error = PythonRepositoryError)]
 pub enum PythonRepository {

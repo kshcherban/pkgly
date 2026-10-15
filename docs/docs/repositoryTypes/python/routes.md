@@ -34,6 +34,8 @@ curl -u "<username>:<password>" \
 
 ## Simple Package Index
 
+Hosted and virtual index requests without a trailing slash return a `301` redirect to the corresponding `/repositories/<storage>/<repository>/.../` URL.
+
 ### Simple Index Root
 Get the simple package index root:
 ```bash

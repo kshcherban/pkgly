@@ -1,7 +1,7 @@
 use std::sync::{Arc, LazyLock};
 
 use chrono::Utc;
-use http::StatusCode;
+use http::{StatusCode, request::Parts};
 use nr_core::{
     database::entities::repository::{DBRepository, DBRepositoryConfig},
     repository::{
@@ -21,7 +21,7 @@ use url::Url;
 use uuid::Uuid;
 
 use super::{
-    PythonRepositoryError,
+    PythonRepositoryError, VirtualRepositoryBasePath,
     configs::{PythonProxyConfig, PythonProxyRoute, PythonRepositoryConfigType},
     utils::normalize_package_name,
 };
@@ -416,10 +416,8 @@ impl Repository for PythonProxy {
                 return Ok(RepoResponse::unauthorized());
             }
 
-            let uri_path = request.parts.uri.path().to_string();
+            let base_path = request_repository_base(&request.parts, this.base_repository_path());
             let path = request.path;
-            let base_path = derive_request_base_path(&uri_path, &path)
-                .unwrap_or_else(|| this.base_repository_path());
 
             if path.is_directory() {
                 if let Some(response) = this
@@ -494,10 +492,8 @@ impl Repository for PythonProxy {
                 return Ok(RepoResponse::unauthorized());
             }
 
-            let uri_path = request.parts.uri.path().to_string();
+            let base_path = request_repository_base(&request.parts, this.base_repository_path());
             let path = request.path;
-            let base_path = derive_request_base_path(&uri_path, &path)
-                .unwrap_or_else(|| this.base_repository_path());
 
             if path.is_directory() {
                 if let Some(response) = this
@@ -772,28 +768,11 @@ fn normalize_base_path(base_path: &str) -> String {
     }
 }
 
-fn derive_request_base_path(
-    uri_path: &str,
-    repository_relative_path: &StoragePath,
-) -> Option<String> {
-    let uri_trimmed = uri_path.trim_end_matches('/');
-    let relative_path = repository_relative_path.to_string();
-    let trimmed_relative_path = relative_path.trim_end_matches('/');
-    if trimmed_relative_path.is_empty() {
-        return Some(canonicalize_repository_base(uri_trimmed));
-    }
-    let suffix = format!("/{trimmed_relative_path}");
-    let repository_base = uri_trimmed.strip_suffix(&suffix)?;
-    Some(canonicalize_repository_base(repository_base))
-}
-
-fn canonicalize_repository_base(repository_base: &str) -> String {
-    let repository_base = repository_base.trim_end_matches('/');
-    if repository_base == "/repositories" || repository_base.starts_with("/repositories/") {
-        repository_base.to_string()
-    } else {
-        format!("/repositories{repository_base}")
-    }
+fn request_repository_base(parts: &Parts, proxy_repository_base: String) -> String {
+    parts
+        .extensions
+        .get::<VirtualRepositoryBasePath>()
+        .map_or(proxy_repository_base, |base| base.0.clone())
 }
 
 fn resolve_upstream_link(original: &str, upstream_base: &Url) -> Option<Url> {

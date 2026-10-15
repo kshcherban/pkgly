@@ -172,3 +172,56 @@ fn build_simple_index_html_preserves_other_repository_href() {
 
     assert_eq!(parse_simple_index_links(&html)[0].href, href);
 }
+
+#[test]
+fn build_simple_index_html_preserves_encoded_and_plain_root_relative_and_absolute_links() {
+    for artifact in [
+        "demo.whl?download=1#sha256=abc",
+        "d%65mo.whl?download=a%2Fb#sha256=abc",
+    ] {
+        for prefix in [
+            "/repositories/test-storage/python-virtual/packages/",
+            "/repositories/Test-Storage/Python-Virtual/packages/",
+            "/repositories/Test-Storage/Python-Proxy/packages/",
+            "https://files.pythonhosted.org/packages/",
+            "//files.pythonhosted.org/packages/",
+        ] {
+            let href = format!("{prefix}{artifact}");
+            let member_html = format!("<a href=\"{href}\">demo</a>");
+            let links = parse_simple_index_links(&member_html);
+            let html = build_simple_index_html(
+                "demo",
+                "/repositories/test-storage/python-virtual",
+                vec![(0, "python-proxy".to_string(), links)],
+            );
+
+            assert_eq!(
+                parse_simple_index_links(&html)[0].href,
+                href,
+                "member link {href}"
+            );
+        }
+    }
+}
+
+#[test]
+fn build_simple_index_html_resolves_encoded_and_plain_relative_links() {
+    for artifact in [
+        "demo.whl?download=1#sha256=abc",
+        "d%65mo.whl?download=a%2Fb#sha256=abc",
+    ] {
+        let member_html = format!("<a href=\"../../packages/{artifact}\">demo</a>");
+        let links = parse_simple_index_links(&member_html);
+        let html = build_simple_index_html(
+            "demo",
+            "/repositories/test-storage/python-virtual",
+            vec![(0, "python-hosted".to_string(), links)],
+        );
+
+        assert_eq!(
+            parse_simple_index_links(&html)[0].href,
+            format!("/repositories/test-storage/python-virtual/packages/{artifact}"),
+            "relative link for {artifact}"
+        );
+    }
+}

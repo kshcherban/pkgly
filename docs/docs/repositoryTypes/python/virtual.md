@@ -18,6 +18,7 @@ Virtual Python repositories let you present several hosted or proxy Python repos
 ## Simple index behavior
 - `GET /simple/`: lists packages from **hosted members only** (union).
 - `GET /simple/<package>/`: unions the link sets from all enabled members; duplicates are removed deterministically (higher priority wins).
+- Relative member links resolve under the virtual repository URL. Root-relative and absolute links retain their targets.
 
 ## Configuration fields
 - **member_repositories**: array of members with:

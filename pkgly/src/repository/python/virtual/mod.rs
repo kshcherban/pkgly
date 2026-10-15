@@ -50,7 +50,8 @@ use crate::{
 
 use super::{
     PythonRepository, PythonRepositoryConfig, PythonRepositoryConfigType, PythonRepositoryError,
-    utils::{html_escape, normalize_package_name},
+    VirtualRepositoryBasePath,
+    utils::{html_escape, normalize_package_name, redirect_to_trailing_slash},
 };
 
 mod simple_index;
@@ -444,8 +445,12 @@ impl PythonVirtualRepository {
                 self.site().repository_metrics.clone(),
             );
 
+            let mut member_parts = clone_parts(&request.parts);
+            member_parts
+                .extensions
+                .insert(VirtualRepositoryBasePath(self.canonical_repository_base()));
             let member_request = RepositoryRequest {
-                parts: clone_parts(&request.parts),
+                parts: member_parts,
                 body: RepositoryRequestBody::empty(),
                 path: request.path.clone(),
                 authentication: request
@@ -806,24 +811,6 @@ async fn list_projects_for_repository(
         .fetch_all(database)
         .await?;
     Ok(projects)
-}
-
-fn redirect_to_trailing_slash(
-    canonical_repository_base: &str,
-    repository_relative_path: &StoragePath,
-) -> axum::response::Response {
-    let relative_path = repository_relative_path.to_string();
-    let trimmed_relative_path = relative_path.trim_end_matches('/');
-    let location = if trimmed_relative_path.is_empty() {
-        format!("{canonical_repository_base}/")
-    } else {
-        format!("{canonical_repository_base}/{trimmed_relative_path}/")
-    };
-
-    ResponseBuilder::default()
-        .status(StatusCode::MOVED_PERMANENTLY)
-        .header(http::header::LOCATION, location)
-        .empty()
 }
 
 #[derive(Debug, Clone)]
