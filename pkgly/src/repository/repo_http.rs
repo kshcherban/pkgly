@@ -1,3 +1,5 @@
+// ABOUTME: Routes repository requests and applies authentication policies.
+// ABOUTME: Adapts Docker Registry V2 requests to repository operations and responses.
 use std::error::Error;
 
 use axum::{
@@ -114,7 +116,7 @@ pub fn repository_router() -> axum::Router<Pkgly> {
 
 /// Handle Docker V2 base endpoint: /v2/ or /v2
 /// This endpoint is used by Docker clients to check if the registry is available
-/// and supports the V2 API. It should return 200 OK without requiring authentication.
+/// and supports the V2 API. Anonymous clients can obtain a public-read bearer token.
 pub async fn handle_docker_v2_base_public(
     State(site): State<Pkgly>,
     authentication: RepositoryAuthentication,
@@ -127,6 +129,7 @@ pub async fn handle_docker_v2_base_public(
         RepositoryAuthentication::AuthToken(..)
             | RepositoryAuthentication::Session(..)
             | RepositoryAuthentication::Basic(..)
+            | RepositoryAuthentication::AnonymousDocker { .. }
     );
 
     if is_authenticated {
@@ -193,13 +196,12 @@ async fn handle_docker_v2_catchall(
         method,
         Method::POST | Method::PUT | Method::PATCH | Method::DELETE
     );
-    let is_blob_probe = method == Method::HEAD && rest.contains("/blobs/");
-    let should_challenge_early = is_write_operation || is_blob_probe;
-
-    if should_challenge_early
+    if is_write_operation
         && matches!(
             authentication,
-            RepositoryAuthentication::NoIdentification | RepositoryAuthentication::Other(_, _)
+            RepositoryAuthentication::NoIdentification
+                | RepositoryAuthentication::AnonymousDocker { .. }
+                | RepositoryAuthentication::Other(_, _)
         )
     {
         info!(
@@ -671,7 +673,9 @@ async fn handle_repo_request_core(
         let Some(repository) = site.get_repository_from_names(&names).await? else {
             if matches!(
                 authentication,
-                RepositoryAuthentication::NoIdentification | RepositoryAuthentication::Other(_, _)
+                RepositoryAuthentication::NoIdentification
+                    | RepositoryAuthentication::AnonymousDocker { .. }
+                    | RepositoryAuthentication::Other(_, _)
             ) {
                 if is_docker_request {
                     let actions: &[&str] = match method {
@@ -757,12 +761,18 @@ async fn handle_repo_request_core(
                 | DynRepository::NPM(crate::repository::npm::NPMRegistry::Virtual(_))
         );
 
-        let requires_auth = should_require_auth(
-            &auth_config,
-            is_read_operation,
-            is_npm_login,
-            is_npm_proxy_like,
+        let anonymous_scope_denied = matches!(
+            &request.authentication,
+            RepositoryAuthentication::AnonymousDocker { repositories, .. }
+                if !repositories.contains(&repository.id())
         );
+        let requires_auth = anonymous_scope_denied
+            || should_require_auth(
+                &auth_config,
+                is_read_operation,
+                is_npm_login,
+                is_npm_proxy_like,
+            );
 
         if requires_auth && !is_authenticated {
             if let Some(ctx) = &audit_ctx {

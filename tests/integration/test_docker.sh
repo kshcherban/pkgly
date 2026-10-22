@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Exercises real Docker hosted pushes, pulls, and access controls.
+# ABOUTME: Verifies public pulls work without saved registry credentials.
 # Docker integration tests
 # Verifies hosted registry push/pull flows and basic auth enforcement
 
@@ -10,7 +12,7 @@ source "${SCRIPT_DIR}/common.sh"
 # Docker-specific configuration
 DOCKER_REPOSITORY_NAME="${DOCKER_HOSTED_REPOSITORY:-docker-hosted}"
 DOCKER_REPO_PATH="${TEST_STORAGE}/${DOCKER_REPOSITORY_NAME}"
-FIXTURE_DIR="/fixtures/docker"
+FIXTURE_DIR="${DOCKER_FIXTURE_DIR:-/fixtures/docker}"
 IMAGE_NAME="pkgly-test/testimg"
 IMAGE_TAG="1.0.0-$(random_string 6)"
 
@@ -55,6 +57,16 @@ if run_cmd docker pull "${REMOTE_IMAGE}:${IMAGE_TAG}"; then
     pass
 else
     fail "Failed to pull Docker image"
+fi
+
+print_test "Pull hosted image anonymously without saved registry credentials"
+ANONYMOUS_CONFIG="$WORKSPACE/anonymous-docker"
+mkdir -p "$ANONYMOUS_CONFIG"
+printf '{"auths":{}}\n' > "$ANONYMOUS_CONFIG/config.json"
+if run_cmd docker --config "$ANONYMOUS_CONFIG" pull "${REMOTE_IMAGE}:${IMAGE_TAG}"; then
+    pass
+else
+    fail "Anonymous pull from public hosted repository failed"
 fi
 
 # Test 5: Verify blob endpoint returns 404 for unknown digest

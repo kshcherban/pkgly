@@ -3,8 +3,10 @@
 import { config, flushPromises, mount } from "@vue/test-utils";
 import { defineComponent, h, nextTick } from "vue";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { createVuetify } from "vuetify";
 import { VIcon } from "vuetify/components/VIcon";
 
+config.global.plugins = [...(config.global.plugins ?? []), createVuetify()];
 config.global.components = { ...config.global.components, VIcon };
 
 const routerPush = vi.fn();
@@ -389,7 +391,7 @@ describe("RepositoryPackagesPublic.vue", () => {
     expect(wrapper.get('[data-testid="package-row"] td.packages__column--size').text()).toContain("KB");
   });
 
-  it("opens docker package browse from the existing package column", async () => {
+  it("renders Docker pull actions and opens package browse from the repository column", async () => {
     (http.get as vi.Mock).mockResolvedValue(
       createPackages([
         {
@@ -416,6 +418,10 @@ describe("RepositoryPackagesPublic.vue", () => {
 
     expect(wrapper.find('th[data-column="repository"]').exists()).toBe(false);
     expect(wrapper.get('th[data-column="package"]').text()).toContain("Repository");
+    const copyButton = wrapper.get('button[aria-label^="Copy pull command"]');
+    expect(copyButton.attributes("title")).toBe(
+      "docker pull localhost:3000/local/dockerhub/postgres@sha256:1090bc3a8ccfb0b55f78a494d76f8d603434f7e4553543d6e807bc7bd6bbd17f",
+    );
 
     await wrapper.get('[data-testid="package-cell"]').trigger("click");
 

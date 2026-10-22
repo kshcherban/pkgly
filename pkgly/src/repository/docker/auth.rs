@@ -1,3 +1,5 @@
+// ABOUTME: Issues Docker bearer tokens and builds repository-scoped challenges.
+// ABOUTME: Validates public reads and authenticated repository actions.
 use ahash::{HashMap, HashMapExt};
 use std::fmt;
 
@@ -26,7 +28,7 @@ use crate::{
     utils::ResponseBuilder,
 };
 
-const DEFAULT_TOKEN_LIFETIME: i64 = 15 * 60;
+pub(crate) const DEFAULT_TOKEN_LIFETIME: i64 = 15 * 60;
 
 #[derive(Debug, Default)]
 pub struct DockerTokenQuery {
@@ -218,14 +220,13 @@ pub async fn handle_docker_token(
             DockerTokenError::Authentication
         })?;
 
-    let Some(user) = authentication.get_user().cloned() else {
-        return Err(DockerTokenError::Authentication);
-    };
-
-    if matches!(
+    let user = authentication.get_user().cloned();
+    let anonymous = matches!(
         authentication,
-        RepositoryAuthentication::NoIdentification | RepositoryAuthentication::Other(_, _)
-    ) {
+        RepositoryAuthentication::NoIdentification
+            | RepositoryAuthentication::AnonymousDocker { .. }
+    );
+    if user.is_none() && !anonymous {
         return Err(DockerTokenError::Authentication);
     }
 
@@ -264,24 +265,46 @@ pub async fn handle_docker_token(
         };
 
         for action in scope.actions.iter() {
-            let allowed = authentication
-                .can_access_repository(*action, repository_id, &site.database)
-                .await
-                .map_err(|err| {
-                    error!(
-                        ?err,
-                        repository_id = %repository_id,
-                        "Failed to verify repository access for docker token"
-                    );
-                    DockerTokenError::Internal
-                })?;
+            let allowed = if anonymous {
+                let auth_config = site
+                    .get_repository_auth_config(repository_id)
+                    .await
+                    .map_err(|_| DockerTokenError::Internal)?;
+                *action == RepositoryActions::Read
+                    && repository.is_active()
+                    && crate::repository::utils::can_read_repository_with_auth(
+                        &authentication,
+                        repository.visibility(),
+                        repository_id,
+                        &site.database,
+                        &auth_config,
+                    )
+                    .await
+                    .map_err(|_| DockerTokenError::Internal)?
+            } else {
+                authentication
+                    .can_access_repository(*action, repository_id, &site.database)
+                    .await
+                    .map_err(|err| {
+                        error!(
+                            ?err,
+                            repository_id = %repository_id,
+                            "Failed to verify repository access for docker token"
+                        );
+                        DockerTokenError::Internal
+                    })?
+            };
             if !allowed {
                 debug!(
                     ?scope,
                     repository_id = %repository_id,
                     "Repository action not permitted for docker token"
                 );
-                return Err(DockerTokenError::Forbidden);
+                return Err(if anonymous {
+                    DockerTokenError::Authentication
+                } else {
+                    DockerTokenError::Forbidden
+                });
             }
             let entry = repository_requests.entry(repository_id).or_default();
             if !entry.contains(action) {
@@ -305,24 +328,29 @@ pub async fn handle_docker_token(
         .clone()
         .unwrap_or_else(|| "docker_bearer".to_string());
 
-    let repo_token = NewRepositoryToken {
-        user_id: user.id,
-        source,
-        repositories,
-        expires_at: Some(expires_at_fixed),
+    let token = if let Some(user) = user {
+        let repo_token = NewRepositoryToken {
+            user_id: user.id,
+            source,
+            repositories,
+            expires_at: Some(expires_at_fixed),
+        };
+        let (token_id, token) = repo_token.insert(&site.database).await.map_err(|err| {
+            error!("Failed to create docker bearer token: {}", err);
+            DockerTokenError::Internal
+        })?;
+        debug!(token_id, user_id = user.id, scopes = ?scopes, "Issued docker bearer token");
+        token
+    } else {
+        let token = Uuid::new_v4().simple().to_string();
+        site.anonymous_docker_tokens
+            .insert(
+                token.clone(),
+                repositories.into_iter().map(|(id, _)| id).collect(),
+            )
+            .await;
+        token
     };
-
-    let (token_id, token) = repo_token.insert(&site.database).await.map_err(|err| {
-        error!("Failed to create docker bearer token: {}", err);
-        DockerTokenError::Internal
-    })?;
-
-    debug!(
-        token_id,
-        user_id = user.id,
-        scopes = ?scopes,
-        "Issued docker bearer token"
-    );
 
     let response = DockerTokenResponse {
         token: token.clone(),
