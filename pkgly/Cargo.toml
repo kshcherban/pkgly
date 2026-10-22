@@ -99,7 +99,7 @@ semver = { version = "1", features = ["std", "serde"] }
 # Staging
 tempfile = "3"
 # Maven Stuff
-maven-rs = { git = "https://github.com/kshcherban/maven-rs.git" }
+maven-rs = { git = "https://github.com/kshcherban/maven-rs.git", rev = "5caf1688dd1739df178703f1b15391fcbc2977d8", default-features = false }
 zip = { version = "5", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 current_semver = "0.1"
 nr-core.workspace = true

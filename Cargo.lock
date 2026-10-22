@@ -1568,19 +1568,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "edit-xml"
-version = "0.1.0"
-source = "git+https://github.com/wyatt-herkamp/edit-xml.git#69497d712eb7ed6ffb39e74c905f9505c214bdf2"
-dependencies = [
- "ahash",
- "encoding_rs",
- "memchr",
- "quick-xml",
- "thiserror 2.0.17",
- "tracing",
-]
-
-[[package]]
 name = "either"
 version = "1.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2763,12 +2750,11 @@ checksum = "47e1ffaa40ddd1f3ed91f717a33c8c0ee23fff369e3aa8772b9605cc1d22f4c3"
 [[package]]
 name = "maven-rs"
 version = "0.1.0"
-source = "git+https://github.com/kshcherban/maven-rs.git#455ecfaa89cc46b2df83d75b2e4461c9e80a2cda"
+source = "git+https://github.com/kshcherban/maven-rs.git?rev=5caf1688dd1739df178703f1b15391fcbc2977d8#5caf1688dd1739df178703f1b15391fcbc2977d8"
 dependencies = [
  "ahash",
  "chrono",
  "derive_builder",
- "edit-xml",
  "quick-xml",
  "serde",
  "strum",
