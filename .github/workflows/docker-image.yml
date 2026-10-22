@@ -53,6 +53,7 @@ jobs:
           context: .
           file: ./Dockerfile
           platforms: ${{ matrix.platform }}
+          pull: true
           push: true
           tags: ${{ env.IMAGE_NAME }}:latest-${{ github.sha }}-${{ matrix.arch }}
           labels: |
