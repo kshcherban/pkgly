@@ -81,5 +81,6 @@ Operational and query details live in `docs/docs/knowledge/search.md`.
 
 ## Build/Test Notes
 - Rust workspace managed via Cargo; `cargo build` requires system `pkg-config` + OpenSSL headers (`libssl-dev`/`openssl-devel`).
+- Maven models and XML parsing come from the pinned `maven-rs` fork with default features disabled. Pkgly does not enable its optional `editor` feature, so `edit-xml` is absent from Pkgly's dependency graph and lockfile.
 - Front end built separately with Vite (not covered in this summary).
 - Project helpers: `./dev.sh` for full rebuild/start, `./dev.sh -b` for backend rebuild, `npm --prefix site run build` for frontend build.
