@@ -46,6 +46,7 @@ jobs:
           file: ./Dockerfile
           tags: pkgly:test
           load: true
+          pull: true
           cache-from: type=gha,scope=pkgly
           cache-to: type=gha,scope=pkgly,mode=max
       - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
@@ -54,6 +55,7 @@ jobs:
           file: ./tests/docker/Dockerfile.test-runner
           tags: pkgly-test-runner:ci
           load: true
+          pull: true
           cache-from: type=gha,scope=test-runner
           cache-to: type=gha,scope=test-runner,mode=max
       - run: ./tests/run_integration_tests.sh
