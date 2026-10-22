@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Exercises real Docker proxy pulls, authentication, and cached packages.
+# ABOUTME: Verifies anonymous reads while private repositories and writes stay protected.
 # Docker proxy integration tests
 # Validates pull-through caching, package listings, and cache deletion/re-download
 
@@ -23,6 +25,12 @@ PROXY_IMAGE=""
 cleanup() {
     if [[ -n "$PROXY_IMAGE" ]]; then
         docker rmi "${PROXY_IMAGE}" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "${NEW_PROXY_IMAGE:-}" ]]; then
+        docker rmi "$NEW_PROXY_IMAGE" >/dev/null 2>&1 || true
+    fi
+    if [[ -n "${NEW_REPO_ID:-}" ]]; then
+        api_delete "/api/repository/${NEW_REPO_ID}" >/dev/null
     fi
     cleanup_workspace "$WORKSPACE"
 }
@@ -51,7 +59,7 @@ else
 fi
 
 print_test "Create dedicated auth-enabled Docker proxy repository via API"
-NEW_REPO_NAME="docker-proxy-auth"
+NEW_REPO_NAME="docker-proxy-auth-$(random_string 6)"
 NEW_REPO_ID=""
 NEW_REPO_PATH=""
 NEW_PROXY_IMAGE=""
@@ -95,6 +103,119 @@ else
     fail "Failed to create auth-enabled docker proxy repository (status=$CREATE_STATUS). This may indicate an incompatible or older Pkgly image; see recorded output for details."
 fi
 
+# An isolated config guarantees the daemon receives no saved registry credentials.
+ANONYMOUS_CONFIG="$WORKSPACE/anonymous-docker"
+mkdir -p "$ANONYMOUS_CONFIG"
+printf '{"auths":{}}\n' > "$ANONYMOUS_CONFIG/config.json"
+
+print_test "Registry discovery advertises the Docker bearer handshake"
+for endpoint in /v2 /v2/; do
+    STATUS=$(get_http_status "${PKGLY_URL}${endpoint}")
+    if [[ "$STATUS" != "401" ]]; then
+        fail "Registry $endpoint expected a 401 challenge, got $STATUS"
+        exit 1
+    fi
+done
+pass
+
+print_test "Issue a scoped anonymous pull token for the public proxy"
+TOKEN_STATUS=$(curl -s -o "$WORKSPACE/anonymous-token.json" -w "%{http_code}" -G \
+    --data-urlencode "scope=repository:${REPO_PATH}/${UPSTREAM_IMAGE}:pull" \
+    "${PKGLY_URL}/v2/token")
+if [[ "$TOKEN_STATUS" == "200" ]] && \
+    jq -e '.token != "" and .token == .access_token and .expires_in == 900' "$WORKSPACE/anonymous-token.json" >/dev/null; then
+    ANONYMOUS_TOKEN=$(jq -r '.token' "$WORKSPACE/anonymous-token.json")
+    pass
+else
+    fail "Public anonymous token request failed (status=$TOKEN_STATUS)"
+    exit 1
+fi
+
+print_test "Anonymous token requests cannot grant private reads or public writes"
+for scope in "repository:${NEW_REPO_PATH}/${UPSTREAM_IMAGE}:pull" "repository:${REPO_PATH}/${UPSTREAM_IMAGE}:pull,push"; do
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -G \
+        --data-urlencode "scope=$scope" "${PKGLY_URL}/v2/token")
+    if [[ "$STATUS" != "401" ]]; then
+        fail "Anonymous token scope $scope expected 401, got $STATUS"
+        exit 1
+    fi
+done
+pass
+
+print_test "Anonymous Docker pull through public proxy"
+if run_cmd docker --config "$ANONYMOUS_CONFIG" pull "$PROXY_IMAGE"; then
+    pass
+else
+    fail "Anonymous pull through public proxy failed"
+    exit 1
+fi
+
+print_test "Anonymous blob HEAD returns metadata from the public proxy"
+DIGEST=$(docker --config "$ANONYMOUS_CONFIG" image inspect "$PROXY_IMAGE" --format '{{.Id}}')
+STATUS=$(curl -s -I -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $ANONYMOUS_TOKEN" \
+    "${PKGLY_URL}/v2/${REPO_PATH}/${UPSTREAM_IMAGE}/blobs/${DIGEST}")
+if [[ "$STATUS" == "200" ]]; then
+    pass
+else
+    fail "Anonymous blob HEAD expected 200, got $STATUS"
+fi
+
+print_test "Unscoped anonymous token cannot read repository contents"
+UNSCOPED_TOKEN=$(curl -fsS "${PKGLY_URL}/v2/token" | jq -er '.token | select(type == "string" and length > 0)')
+STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $UNSCOPED_TOKEN" \
+    "${PKGLY_URL}/v2/${REPO_PATH}/${UPSTREAM_IMAGE}/manifests/latest")
+if [[ "$STATUS" == "401" ]]; then
+    pass
+else
+    fail "Unscoped token expected 401, got $STATUS"
+fi
+
+print_test "Enabling repository auth revokes anonymous token access"
+api_put "/api/repository/${REPO_ID}/config/auth" \
+    -H "Content-Type: application/json" -d '{"enabled":true}' >/dev/null
+STATUS=$(curl -s -I -o /dev/null -w "%{http_code}" \
+    -H "Authorization: Bearer $ANONYMOUS_TOKEN" \
+    "${PKGLY_URL}/v2/${REPO_PATH}/${UPSTREAM_IMAGE}/blobs/${DIGEST}")
+api_put "/api/repository/${REPO_ID}/config/auth" \
+    -H "Content-Type: application/json" -d '{"enabled":false}' >/dev/null
+if [[ "$STATUS" == "401" ]]; then
+    pass
+else
+    fail "Anonymous token must respect auth changes, got $STATUS"
+fi
+
+print_test "Private proxy rejects anonymous manifest and blob reads"
+for resource in "manifests/latest" "blobs/${DIGEST}"; do
+    for method in GET HEAD; do
+        CURL_METHOD=(-X "$method")
+        if [[ "$method" == "HEAD" ]]; then
+            CURL_METHOD=(-I)
+        fi
+        STATUS=$(curl -s -o /dev/null -w "%{http_code}" "${CURL_METHOD[@]}" \
+            -H "Authorization: Bearer $ANONYMOUS_TOKEN" \
+            "${PKGLY_URL}/v2/${NEW_REPO_PATH}/${UPSTREAM_IMAGE}/${resource}")
+        if [[ "$STATUS" != "401" ]]; then
+            fail "Anonymous private $method $resource expected 401, got $STATUS"
+            exit 1
+        fi
+    done
+done
+pass
+
+print_test "Public proxy rejects anonymous write operations"
+for method in POST PUT PATCH DELETE; do
+    STATUS=$(curl -s -o /dev/null -w "%{http_code}" -X "$method" \
+        -H "Authorization: Bearer $ANONYMOUS_TOKEN" \
+        "${PKGLY_URL}/v2/${REPO_PATH}/${UPSTREAM_IMAGE}/blobs/uploads/")
+    if [[ "$STATUS" != "401" ]]; then
+        fail "Anonymous $method expected 401, got $STATUS"
+        exit 1
+    fi
+done
+pass
+
 print_test "Docker login to Pkgly"
 if run_cmd bash -lc "printf '%s' \"${TEST_PASSWORD}\" | docker login \"${DOCKER_REGISTRY_HOST}\" --username \"${TEST_USER}\" --password-stdin"; then
     pass
@@ -130,7 +251,7 @@ else
 fi
 
 print_test "Pull upstream image via proxy"
-if run_cmd docker pull "${PROXY_IMAGE}"; then
+if run_cmd docker --config "$ANONYMOUS_CONFIG" pull "${PROXY_IMAGE}"; then
     pass
 else
     fail "Failed to pull image through proxy"
@@ -178,9 +299,9 @@ else
     fi
 fi
 
-print_test "Re-pull re-downloads manifest after deletion"
+print_test "Anonymous re-pull re-downloads manifest after deletion"
 docker rmi "${PROXY_IMAGE}" >/dev/null 2>&1 || true
-if run_cmd docker pull "${PROXY_IMAGE}"; then
+if run_cmd docker --config "$ANONYMOUS_CONFIG" pull "${PROXY_IMAGE}"; then
     pass
 else
     fail "Failed to re-download image via proxy"

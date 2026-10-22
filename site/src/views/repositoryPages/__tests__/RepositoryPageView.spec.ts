@@ -1,7 +1,7 @@
 // ABOUTME: Verifies public repository metadata, setup disclosure, and package rendering.
 // ABOUTME: Covers repository data loaded through the public route contracts.
 import { flushPromises, mount } from "@vue/test-utils";
-import { describe, expect, it, vi } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import { defineComponent, ref } from "vue";
 import RepositoryPageView from "@/views/repositoryPages/RepositoryPageView.vue";
 
@@ -60,6 +60,9 @@ const vBreadcrumbsStub = defineComponent({
 });
 
 describe("RepositoryPageView.vue", () => {
+  beforeEach(() => {
+    mockRepository.repository_type = "npm";
+  });
   it("renders packages without requiring a custom page", async () => {
     const wrapper = mount(RepositoryPageView, {
       global: {
@@ -124,7 +127,11 @@ describe("RepositoryPageView.vue", () => {
     expect(meta.indexOf("repository-icon")).toBeLessThan(meta.indexOf("copy-url"));
   });
 
-  it("shows operational metadata while setup is collapsed and passes the exact URL to copy", async () => {
+  it.each([
+    ["npm", "http://localhost:3000/repositories/primary/example"],
+    ["docker", "localhost:3000/primary/example"],
+  ])("shows metadata and the copyable setup address for %s", async (repositoryType, expectedAddress) => {
+    mockRepository.repository_type = repositoryType;
     const copyStub = defineComponent({
       props: {
         code: {
@@ -154,15 +161,13 @@ describe("RepositoryPageView.vue", () => {
     await flushPromises();
 
     const metadata = wrapper.get('[data-testid="repository-metadata"]').text();
-    expect(metadata).toContain("NPM");
+    expect(metadata).toContain(repositoryType.toUpperCase());
     expect(metadata).toContain("Hosted");
     expect(metadata).toContain("Public");
     expect(metadata).toContain("Active");
     expect(wrapper.find('[data-testid="copy-url"]').exists()).toBe(false);
 
     await wrapper.get('[data-testid="repository-header-toggle"]').trigger("click");
-    expect(wrapper.getComponent(copyStub).props("code")).toBe(
-      "http://localhost:3000/repositories/primary/example",
-    );
+    expect(wrapper.getComponent(copyStub).props("code")).toBe(expectedAddress);
   });
 });

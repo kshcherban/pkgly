@@ -1,8 +1,12 @@
+<!-- ABOUTME: Shows Docker CLI setup guidance for hosted and proxy repositories. -->
+<!-- ABOUTME: Reflects whether pulls require authentication in the proxy instructions. -->
 <template>
   <section class="docker-helper">
     <h2>Docker Registry</h2>
     <p v-if="isProxy">
-      Pull public images through this proxy cache. Authenticate once, then pull as usual.
+      Pull images through this proxy cache.
+      <template v-if="repository.auth_enabled">Authenticate once, then pull as usual.</template>
+      <template v-else>Pull anonymously using the command below.</template>
     </p>
     <p v-else>
       Push images to this hosted registry. Authenticate once, tag your image, then push.

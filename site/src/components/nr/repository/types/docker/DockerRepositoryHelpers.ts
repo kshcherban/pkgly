@@ -2,15 +2,25 @@
 // ABOUTME: Keeps CLI guidance next to the repository URL in the setup panel.
 import type { CodeSnippet } from "@/components/core/code/code";
 import type { RepositoryWithStorageName } from "@/types/repository";
-import { createRepositoryRoute } from "@/types/repositoryRoute";
+import { apiURL } from "@/config";
+import type { RepositoryRouteTarget } from "@/types/repositoryRoute";
+
+export function createDockerRepositoryName(repository: RepositoryRouteTarget): string {
+  return `${new URL(apiURL).host}/${repository.storage_name}/${repository.name}`;
+}
+
+export function createDockerPullCommand(name: string, reference: string): string {
+  const separator = reference.includes(":") ? "@" : ":";
+  return `docker pull ${new URL(apiURL).host}/${name}${separator}${reference}`;
+}
 
 export function createDockerSetupSnippets(
   repository: RepositoryWithStorageName,
 ): Array<CodeSnippet> {
-  const url = createRepositoryRoute(repository);
-  const host = url.replace(/^https?:\/\//, "").replace(/\/$/, "");
+  const host = new URL(apiURL).host;
+  const name = createDockerRepositoryName(repository);
   const kind = repository.repository_kind?.toLowerCase();
-  const image = `${host}/<image>:<tag>`;
+  const image = `${name}/<image>:<tag>`;
 
   if (kind === "proxy") {
     return [
@@ -18,7 +28,7 @@ export function createDockerSetupSnippets(
         name: "Docker",
         language: "bash",
         key: "docker-proxy",
-        code: `docker login ${host}\ndocker pull ${image}`,
+        code: `${repository.auth_enabled ? `docker login ${host}\n` : ""}docker pull ${image}`,
       },
     ];
   }

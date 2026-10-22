@@ -427,9 +427,7 @@ async fn default_repository_actions_grants_basic_auth_read() {
     );
 }
 
-#[tokio::test]
-async fn docker_v2_catchall_401_uses_request_host_for_realm() {
-    let _guard = DB_LOCK.lock().await;
+async fn docker_test_site(auth_enabled: bool) -> (TestDb, tempfile::TempDir, Pkgly, Uuid) {
     let db = fresh_db().await;
     let root = tempfile::tempdir().expect("tempdir");
 
@@ -450,7 +448,7 @@ async fn docker_v2_catchall_401_uses_request_host_for_realm() {
     .expect("insert storage")
     .expect("storage row");
 
-    // Create a Docker repository with auth enabled (default) and hosted config
+    // Create a Docker repository with hosted configuration and the requested auth policy
     use crate::repository::NewRepository;
     use crate::repository::docker::configs::{DockerRegistryConfig, DockerRegistryConfigType};
     use ahash::HashMap;
@@ -459,13 +457,17 @@ async fn docker_v2_catchall_401_uses_request_host_for_realm() {
         DockerRegistryConfigType::get_type_static().to_string(),
         serde_json::to_value(DockerRegistryConfig::Hosted).expect("serialize docker config"),
     );
+    configs.insert(
+        "auth".to_string(),
+        serde_json::json!({"enabled": auth_enabled}),
+    );
     let repo = NewRepository {
         name: "test".into(),
         uuid: Uuid::new_v4(),
         repository_type: "docker".into(),
         configs,
     };
-    let _repo_id = repo
+    let repo_id = repo
         .insert(storage.id, &db.pool)
         .await
         .expect("insert docker repository");
@@ -498,6 +500,14 @@ async fn docker_v2_catchall_401_uses_request_host_for_realm() {
     )
     .await
     .expect("create Pkgly instance");
+
+    (db, root, site, repo_id.id)
+}
+
+#[tokio::test]
+async fn docker_v2_catchall_401_uses_request_host_for_realm() {
+    let _guard = DB_LOCK.lock().await;
+    let (_db, _root, site, _) = docker_test_site(true).await;
 
     // Build a request with a non-default Host header
     let request = http::Request::builder()
@@ -534,4 +544,44 @@ async fn docker_v2_catchall_401_uses_request_host_for_realm() {
         www_auth.contains("service=\"test.example.com:8080\""),
         "expected service to use Host header, got: {www_auth}"
     );
+}
+
+#[tokio::test]
+async fn anonymous_docker_tokens_preserve_anonymous_identity_and_revoke_access() {
+    use crate::app::authentication::AuthenticationRaw;
+    use crate::repository::docker::auth::{DockerTokenQuery, handle_docker_token};
+    use axum::extract::Query;
+
+    let _guard = DB_LOCK.lock().await;
+    let (_db, _root, site, repo_id) = docker_test_site(false).await;
+    let query: DockerTokenQuery =
+        serde_urlencoded::from_str("scope=repository:default/test/image:pull")
+            .expect("token query");
+    let response = handle_docker_token(State(site.clone()), Query(query), None)
+        .await
+        .expect("anonymous token response");
+    let body: serde_json::Value =
+        serde_json::from_str(&body_text(response).await).expect("token JSON");
+    let token = body["token"].as_str().expect("bearer token").to_string();
+    let auth =
+        RepositoryAuthentication::from_raw(AuthenticationRaw::AuthToken(token.clone()), &site)
+            .await
+            .expect("valid anonymous token");
+    assert!(
+        matches!(&auth, RepositoryAuthentication::AnonymousDocker { repositories, .. } if repositories == &vec![repo_id])
+    );
+    assert!(auth.get_user().is_none());
+    assert!(!auth.has_auth_token());
+    assert!(
+        !auth
+            .has_action(RepositoryActions::Write, repo_id, &site.database)
+            .await
+            .expect("write permission")
+    );
+    assert!(matches!(auth.as_raw(), AuthenticationRaw::AuthToken(value) if value == token));
+
+    site.anonymous_docker_tokens.invalidate(&token).await;
+    let result =
+        RepositoryAuthentication::from_raw(AuthenticationRaw::AuthToken(token), &site).await;
+    assert!(result.is_err(), "revoked anonymous tokens must be rejected");
 }

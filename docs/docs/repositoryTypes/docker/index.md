@@ -98,11 +98,12 @@ docker pull your-registry.com/storage/repository/my-app:latest
 ### Proxy Quick Start
 
 1. Create a Docker repository and choose **Proxy** as the type. Set the upstream URL (for example, `https://registry-1.docker.io`). Caching is enabled by default.
-2. Pull images using the same Docker Registry v2 path scheme as hosted repositories:
+2. Disable repository authentication to allow anonymous pulls. When authentication is enabled, first run `docker login your-registry.com`. Docker handles the bearer challenge at `/v2/` automatically. Anonymous clients receive a token scoped to reads of active, public repositories with authentication disabled. These tokens expire after 15 minutes and are held in server memory; private reads and all writes still require user credentials. Deployments with multiple server instances need session affinity for anonymous bearer tokens.
+3. Pull images using the same Docker Registry v2 path scheme as hosted repositories:
    ```bash
    docker pull your-registry.com/storage/repository/library/nginx:latest
    ```
-3. On first pull, Pkgly retrieves the manifest and layers from the upstream registry and stores them under `v2/<storage>/<repository>/...`. Subsequent pulls are served from the local cache.
+4. On first pull, Pkgly retrieves the manifest and layers from the upstream registry and stores them under `v2/<storage>/<repository>/...`. Subsequent pulls are served from the local cache.
 
 Limitations:
 - Proxy repositories are read-only (push, delete, and upload requests return 405).
@@ -110,6 +111,10 @@ Limitations:
 - Cached content has no TTL; remove cached manifests/blobs through repository package management if you need to reclaim space.
 
 ## Browsing and Management
+
+The setup panel shows the Docker repository address as `your-registry.com/storage/repository`, without a URL scheme or `/repositories` prefix. Login commands use only `your-registry.com`. Public proxy setup instructions include a pull command without a login step.
+
+Each Docker row in the public **Packages** table has a **Copy pull command** button beside the repository name. It copies the exact tag or digest shown in that row, using `:tag` for tags and `@sha256:...` for digests.
 
 - The repository browser flattens the internal `v2/.../manifests` layout so you can navigate storages, repositories, and image names without seeing implementation folders. Selecting an image shows all uploaded tags as individual entries.
 - The **Admin → Packages** tab lists Docker image manifests with the same paginated view used for other repository types. Its **Referenced Size** column is per tag/reference row: Pkgly counts the stored manifest bytes plus referenced config, layer, and child-manifest files that are present in repository storage, deduped by digest for that row. Referenced objects that have not been pulled or cached yet are skipped. This differs from repository **Storage Usage**, which scans all regular files stored for the repository, including unreferenced blobs and leftover uploads.
