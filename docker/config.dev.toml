@@ -29,7 +29,7 @@ endpoint = "http://otel-collector:4317"
 
 [log.metrics.config]
 "service.name" = "pkgly"
-"service.version" = "3.0.0-BETA"
+"service.version" = "0.1.0"
 "service.environment" = "development"
 
 [log.levels]

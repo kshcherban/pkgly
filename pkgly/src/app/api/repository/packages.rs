@@ -34,7 +34,7 @@ use crate::{
             metadata::{backfill_manifest_objects, docker_package_key, split_manifest_cache_path},
             types::{Manifest as DockerManifest, MediaType},
         },
-        go::GoRepository,
+        go::{GoModulePath, GoRepository, ext::GoRepositoryExt},
         helm::hosted::HelmHosted,
         helm::{DeletePackageEntry, HelmRepository, HelmRepositoryError},
         npm::NPMRegistry,
@@ -251,6 +251,10 @@ fn catalog_deletion_mode(repository: &DynRepository) -> CatalogDeletionMode {
         DynRepository::Deb(_) => CatalogDeletionMode::ExactPath,
         DynRepository::Ruby(_) => CatalogDeletionMode::ExactPath,
         DynRepository::Maven(_) => CatalogDeletionMode::StripLastSegment,
+        DynRepository::Nuget(nuget_repo) => match nuget_repo {
+            crate::repository::nuget::NugetRepository::Virtual(_) => CatalogDeletionMode::None,
+            _ => CatalogDeletionMode::StripLastSegment,
+        },
         // Helm uses repository-specific delete handlers that already update the catalog.
         DynRepository::Helm(_) => CatalogDeletionMode::None,
         _ => CatalogDeletionMode::None,
@@ -310,37 +314,53 @@ async fn delete_version_records_by_path(
     database: &PgPool,
     repository_id: Uuid,
     version_paths: &HashSet<String>,
+    include_descendants: bool,
 ) -> Result<u64, sqlx::Error> {
     let normalized = normalize_catalog_paths(version_paths);
     if normalized.is_empty() {
         return Ok(0);
     }
 
-    sql_delete_project_versions(database, repository_id, normalized).await
+    sql_delete_project_versions(database, repository_id, normalized, include_descendants).await
 }
 
 async fn sql_delete_project_versions(
     database: &PgPool,
     repository_id: Uuid,
     normalized_paths: Vec<String>,
+    include_descendants: bool,
 ) -> Result<u64, sqlx::Error> {
+    let mut transaction = database.begin().await?;
     let mut total_deleted = 0u64;
     for path in normalized_paths {
         let rows = sqlx::query(
             r#"
             DELETE FROM project_versions
             WHERE repository_id = $1
-              AND LOWER(path) = $2
+              AND (LOWER(RTRIM(path, '/')) = $2
+                   OR ($3 AND starts_with(LOWER(RTRIM(path, '/')), $2 || '/')))
             RETURNING id
             "#,
         )
         .bind(repository_id)
         .bind(&path)
-        .fetch_all(database)
+        .bind(include_descendants)
+        .fetch_all(&mut *transaction)
         .await?;
         total_deleted += rows.len() as u64;
+        sqlx::query(
+            "UPDATE package_files SET deleted_at = NOW(), updated_at = NOW()
+             WHERE repository_id = $1 AND deleted_at IS NULL
+             AND (LOWER(RTRIM(path, '/')) = $2
+                  OR ($3 AND starts_with(LOWER(RTRIM(path, '/')), $2 || '/')))",
+        )
+        .bind(repository_id)
+        .bind(&path)
+        .bind(include_descendants)
+        .execute(&mut *transaction)
+        .await?;
     }
-
+    transaction.commit().await?;
     Ok(total_deleted)
 }
 
@@ -506,9 +526,14 @@ async fn calculate_stored_path_size(
 struct GoDeletionResult {
     removed: usize,
     missing: Vec<String>,
+    paths: Vec<String>,
 }
 
 fn go_related_paths(path: &str) -> Option<Vec<String>> {
+    let (_, file_name) = path.rsplit_once("/@v/")?;
+    if file_name.contains('/') {
+        return None;
+    }
     for suffix in GO_FILE_SUFFIXES.iter() {
         if let Some(base) = path.strip_suffix(suffix) {
             let mut paths = Vec::with_capacity(GO_FILE_SUFFIXES.len());
@@ -522,13 +547,12 @@ fn go_related_paths(path: &str) -> Option<Vec<String>> {
 }
 
 async fn delete_go_package(
-    storage: &nr_storage::DynStorage,
-    repository_id: Uuid,
+    repository: &DynRepository,
     path: &str,
-) -> Result<Option<GoDeletionResult>, nr_storage::StorageError> {
-    let Some(paths) = go_related_paths(path) else {
-        return Ok(None);
-    };
+) -> Result<GoDeletionResult, InternalError> {
+    let storage = repository.get_storage();
+    let repository_id = repository.id();
+    let paths = go_related_paths(path).unwrap_or_else(|| vec![path.to_string()]);
 
     let mut removed = 0usize;
     let mut missing = Vec::new();
@@ -540,12 +564,72 @@ async fn delete_go_package(
             Ok(false) => missing.push(related_path.clone()),
             Err(err) => {
                 missing.push(related_path.clone());
-                return Err(err);
+                return Err(err.into());
             }
         }
     }
 
-    Ok(Some(GoDeletionResult { removed, missing }))
+    update_go_version_list(&storage, repository_id, path).await?;
+    let module = path
+        .rsplit_once("/@v/")
+        .map(|(module, _)| module)
+        .or_else(|| path.trim_end_matches('/').strip_suffix("/@v"));
+    if let Some(module) = module {
+        let module = GoModulePath::new(module).map_err(OtherInternalError::new)?;
+        repository
+            .refresh_latest_aliases(&module)
+            .await
+            .map_err(OtherInternalError::new)?;
+    }
+    Ok(GoDeletionResult {
+        removed,
+        missing,
+        paths,
+    })
+}
+
+async fn update_go_version_list(
+    storage: &DynStorage,
+    repository_id: Uuid,
+    path: &str,
+) -> Result<(), InternalError> {
+    if go_related_paths(path).is_none() {
+        return Ok(());
+    }
+    let Some((module, file_name)) = path.rsplit_once("/@v/") else {
+        return Ok(());
+    };
+    let Some(version) = GO_FILE_SUFFIXES
+        .iter()
+        .find_map(|suffix| file_name.strip_suffix(suffix))
+    else {
+        return Ok(());
+    };
+    let list_path = StoragePath::from(format!("{module}/@v/list"));
+    let Some(StorageFile::File { content, .. }) =
+        storage.open_file(repository_id, &list_path).await?
+    else {
+        return Ok(());
+    };
+    let bytes = content.read_to_vec(0).await?;
+    let body = String::from_utf8(bytes).map_err(OtherInternalError::new)?;
+    let versions: Vec<&str> = body
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty() && *line != version)
+        .collect();
+    if versions.is_empty() {
+        storage.delete_file(repository_id, &list_path).await?;
+    } else {
+        storage
+            .save_file(
+                repository_id,
+                nr_storage::FileContent::Content(format!("{}\n", versions.join("\n")).into_bytes()),
+                &list_path,
+            )
+            .await?;
+    }
+    Ok(())
 }
 
 fn is_valid_cache_path(path: &str, strategy: PackageStrategy) -> bool {
@@ -941,10 +1025,10 @@ async fn delete_helm_package(
         name: chart_name,
         version,
     };
-    let removed = hosted
+    hosted
         .delete_chart_versions(std::slice::from_ref(&entry), None)
         .await?;
-    Ok(!removed.is_empty())
+    Ok(true)
 }
 
 fn collect_blob_path(
@@ -1119,6 +1203,7 @@ pub async fn delete_cached_package_paths(
     let mut deleted_paths: HashSet<String> = HashSet::new();
     let catalog_mode = catalog_deletion_mode(&repository);
     let mut catalog_targets: HashSet<String> = HashSet::new();
+    let mut catalog_trees: HashSet<String> = HashSet::new();
     let mut delete_webhook_snapshots: std::collections::HashMap<String, PackageWebhookSnapshot> =
         std::collections::HashMap::new();
     for path in paths {
@@ -1215,31 +1300,55 @@ pub async fn delete_cached_package_paths(
                 strategy,
                 PackageStrategy::GoHosted | PackageStrategy::GoProxy
             ) {
-                match delete_go_package(&storage, repository.id(), path).await {
-                    Ok(Some(result)) => {
+                match delete_go_package(&repository, path).await {
+                    Ok(result) => {
+                        if let Some(proxy) = go_proxy.as_ref() {
+                            for path in &result.paths {
+                                proxy
+                                    .handle_external_eviction(&StoragePath::from(path.as_str()))
+                                    .await
+                                    .map_err(OtherInternalError::new)?;
+                            }
+                        }
+                        let targets = result.paths.iter().cloned().collect();
+                        delete_version_records_by_path(
+                            &site.database,
+                            repository.id(),
+                            &targets,
+                            true,
+                        )
+                        .await?;
                         deleted += result.removed;
                         if result.removed > 0 {
-                            deleted_paths.insert(path.clone());
+                            deleted_paths.extend(result.paths);
                         }
                         missing.extend(result.missing);
-                        continue;
                     }
-                    Ok(None) => {}
                     Err(err) => {
                         warn!(?err, path, "Failed to delete Go package files");
                         missing.push(path.clone());
-                        continue;
                     }
                 }
+                continue;
             }
 
             let storage_path = nr_core::storage::StoragePath::from(path.as_str());
+            let is_directory = catalog_mode != CatalogDeletionMode::None
+                && storage
+                    .get_file_information(repository.id(), &storage_path)
+                    .await?
+                    .is_some_and(|meta| matches!(meta.file_type, FileType::Directory(_)));
             match storage.delete_file(repository.id(), &storage_path).await {
                 Ok(true) => {
                     deleted += 1;
                     deleted_paths.insert(path.clone());
-                    if let Some(version_path) = derive_version_path(path, catalog_mode) {
-                        catalog_targets.insert(version_path);
+                    if is_directory {
+                        catalog_trees.insert(path.clone());
+                    } else if catalog_mode != CatalogDeletionMode::None {
+                        catalog_targets.insert(path.clone());
+                        if let Some(version_path) = derive_version_path(path, catalog_mode) {
+                            catalog_targets.insert(version_path);
+                        }
                     }
                     if let Some(proxy) = python_proxy.as_ref() {
                         proxy
@@ -1259,12 +1368,6 @@ pub async fn delete_cached_package_paths(
                             .await
                             .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
                     }
-                    if let Some(proxy) = go_proxy.as_ref() {
-                        proxy
-                            .handle_external_eviction(&storage_path)
-                            .await
-                            .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
-                    }
                     if let Some(proxy) = maven_proxy.as_ref() {
                         proxy
                             .handle_external_eviction(&storage_path)
@@ -1272,7 +1375,10 @@ pub async fn delete_cached_package_paths(
                             .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
                     }
                 }
-                Ok(false) => missing.push(path.clone()),
+                Ok(false) => {
+                    missing.push(path.clone());
+                    catalog_trees.insert(path.clone());
+                }
                 Err(err) => {
                     warn!(?err, path, "Failed to delete cached package");
                     missing.push(path.clone());
@@ -1281,10 +1387,11 @@ pub async fn delete_cached_package_paths(
         }
     }
 
-    if catalog_mode != CatalogDeletionMode::None && !catalog_targets.is_empty() {
-        delete_version_records_by_path(&site.database, repository.id(), &catalog_targets)
-            .await
-            .map_err(|err| InternalError::from(OtherInternalError::new(err)))?;
+    if catalog_mode != CatalogDeletionMode::None {
+        delete_version_records_by_path(&site.database, repository.id(), &catalog_targets, false)
+            .await?;
+        delete_version_records_by_path(&site.database, repository.id(), &catalog_trees, true)
+            .await?;
     }
     if !deleted_paths.is_empty() {
         let mut paths: Vec<String> = deleted_paths.into_iter().collect();

@@ -1,3 +1,5 @@
+// ABOUTME: Configures OpenTelemetry resources, exporters, and environment overrides.
+// ABOUTME: Supplies tracing and metrics defaults for the Pkgly service.
 use ahash::{HashMap, HashMapExt};
 use opentelemetry::{KeyValue, StringValue};
 use serde::{Deserialize, Serialize};
@@ -19,7 +21,7 @@ impl EnvProvider for RealEnv {
 ///
 /// ```toml
 /// "service.name" = "pkgly"
-/// "service.version" = "3.0.0-BETA"
+/// "service.version" = "0.1.0"
 /// "service.environment" = "development"
 /// ```
 #[derive(Debug, Clone, Serialize, Deserialize)]

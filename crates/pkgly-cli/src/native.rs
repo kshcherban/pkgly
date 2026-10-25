@@ -1,3 +1,5 @@
+// ABOUTME: Generates native package manager commands for Pkgly repositories.
+// ABOUTME: Targets registry, sparse index, and Docker endpoints from CLI configuration.
 use thiserror::Error;
 
 use crate::{cli::NativeCommands, config::ResolvedConfig, repo_ref::RepositoryRef};
@@ -21,7 +23,7 @@ pub fn render(command: NativeCommands, config: &ResolvedConfig) -> Result<String
             let (storage, repo) = names(&repository)?;
             let base = config.base_url.trim_end_matches('/');
             Ok(format!(
-                "cargo publish --registry pkgly --index {base}/repositories/{storage}/{repo}/api/v1/crates"
+                "cargo publish --registry pkgly --index sparse+{base}/repositories/{storage}/{repo}/index/"
             ))
         }
         NativeCommands::Docker { repository, image } => {
@@ -33,7 +35,7 @@ pub fn render(command: NativeCommands, config: &ResolvedConfig) -> Result<String
                 .trim_end_matches('/');
             let image = image.unwrap_or_else(|| "IMAGE[:TAG]".to_string());
             Ok(format!(
-                "docker login {base} && docker tag {image} {base}/repositories/{storage}/{repo}/{image} && docker push {base}/repositories/{storage}/{repo}/{image}"
+                "docker login {base} && docker tag {image} {base}/{storage}/{repo}/{image} && docker push {base}/{storage}/{repo}/{image}"
             ))
         }
     }

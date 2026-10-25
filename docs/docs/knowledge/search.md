@@ -99,8 +99,8 @@ General checklist:
 
 ### Deletions
 When deleting packages:
-1. Pkgly deletes DB rows first (`delete_version_records_by_path` or `ProxyIndexing::evict_cached_artifact`).
-2. Storage objects are removed next; failures queue retries (proxy caches) or surface as API errors (hosted).
+1. The shared package deletion API removes the requested storage objects, then cleans up matching version catalog and package-file inventory rows. Repository-specific handlers also update their native indexes or aliases.
+2. Version-directory deletion removes descendant catalog rows within the selected repository. File deletion matches its version's catalog path, including paths stored with a trailing slash, while preserving sibling versions. Repeating deletion of a missing directory also repairs stale catalog entries so that versions can be uploaded again.
 3. A background reconciliation task (planned) will watch for orphaned rows.
 
 ### Retention

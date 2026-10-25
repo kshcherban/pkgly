@@ -18,7 +18,7 @@ pub struct Cli {
     pub command: Commands,
 }
 
-#[derive(Debug, Args, Default)]
+#[derive(Debug, Clone, Args, Default)]
 pub struct GlobalArgs {
     #[arg(long, global = true)]
     pub profile: Option<String>,
@@ -41,6 +41,11 @@ pub enum OutputMode {
 
 #[derive(Debug, Subcommand)]
 pub enum Commands {
+    #[command(
+        subcommand,
+        about = "Expose CLI actions through the Model Context Protocol"
+    )]
+    Mcp(McpCommands),
     #[command(subcommand, about = "Authenticate and manage API tokens")]
     Auth(AuthCommands),
     #[command(subcommand, about = "Manage CLI profiles")]
@@ -53,6 +58,13 @@ pub enum Commands {
     Package(PackageCommands),
     #[command(subcommand, about = "Print native package manager commands")]
     Native(NativeCommands),
+}
+
+#[derive(Debug, Subcommand)]
+/// Commands controlling the MCP server transport.
+pub enum McpCommands {
+    #[command(about = "Serve MCP tools over stdin and stdout")]
+    Serve,
 }
 
 #[derive(Debug, Subcommand)]

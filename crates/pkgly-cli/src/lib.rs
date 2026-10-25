@@ -2,6 +2,7 @@
 // ABOUTME: Resolves CLI configuration, authentication, and repository operations.
 pub mod cli;
 pub mod config;
+mod mcp;
 pub mod native;
 pub mod output;
 pub mod repo_ref;
@@ -51,6 +52,9 @@ pub enum CliError {
 pub async fn run_from_args() -> Result<i32, CliError> {
     let cli = Cli::parse();
     let env = EnvConfig::from_process();
+    if matches!(cli.command, Commands::Mcp(_)) {
+        return mcp::serve(cli.global, env).await;
+    }
     let stdout = std::io::stdout();
     let mut handle = stdout.lock();
     run(cli, env, &mut handle).await
@@ -76,6 +80,11 @@ where
     let output = OutputFormat::from(cli.global.output.unwrap_or_default());
 
     match cli.command {
+        Commands::Mcp(_) => {
+            return Err(CliError::Message(
+                "mcp serve requires stdio transport".to_string(),
+            ));
+        }
         Commands::Auth(command) => {
             handle_auth(
                 command,
@@ -295,7 +304,7 @@ async fn handle_remote<W: Write>(
         Commands::Storage(command) => handle_storage(command, client, output, writer).await,
         Commands::Repo(command) => handle_repo(command, client, resolved, output, writer).await,
         Commands::Package(command) => handle_package(command, client, output, writer).await,
-        Commands::Auth(_) | Commands::Profile(_) | Commands::Native(_) => Ok(()),
+        Commands::Auth(_) | Commands::Profile(_) | Commands::Native(_) | Commands::Mcp(_) => Ok(()),
     }
 }
 
@@ -334,7 +343,7 @@ async fn handle_storage<W: Write>(
             }
             let storage = client
                 .create_storage(
-                    &storage_type,
+                    "Local",
                     &CreateStorageRequest {
                         name,
                         config: json!({"type": "Local", "settings": {"path": path}}),
@@ -737,11 +746,6 @@ async fn handle_upload(command: PackageUploadCommands, client: &Client) -> Resul
             dist_path,
             file,
         }
-        | PackageUploadCommands::Deb {
-            repository,
-            path: dist_path,
-            file,
-        }
         | PackageUploadCommands::Helm {
             repository,
             path: dist_path,
@@ -750,6 +754,21 @@ async fn handle_upload(command: PackageUploadCommands, client: &Client) -> Resul
             let (storage, repo) = repository_names(client, &repository).await?;
             client
                 .put_repository_bytes(&storage, &repo, &dist_path, read_file_bytes(file).await?)
+                .await?;
+        }
+        PackageUploadCommands::Deb {
+            repository,
+            path,
+            file,
+        } => {
+            let (storage, repo) = repository_names(client, &repository).await?;
+            let name = file_name(&file)?;
+            let form = reqwest::multipart::Form::new().part(
+                "package",
+                reqwest::multipart::Part::bytes(read_file_vec(file).await?).file_name(name),
+            );
+            client
+                .put_repository_multipart(&storage, &repo, &path, form)
                 .await?;
         }
         PackageUploadCommands::Ruby { repository, file } => {

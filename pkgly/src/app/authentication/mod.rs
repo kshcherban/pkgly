@@ -1,3 +1,5 @@
+// ABOUTME: Resolves API authentication from sessions and scoped bearer tokens.
+// ABOUTME: Enforces the intersection of user permissions and repository token scopes.
 use std::{
     borrow::Cow,
     fmt::{Debug, Display},
@@ -18,7 +20,10 @@ use nr_core::{
         DBError,
         entities::user::{User, UserSafeData, UserType, auth_token::AuthToken},
     },
-    user::permissions::{HasPermissions, UserPermissions},
+    user::permissions::{
+        HasPermissions, RepositoryActions, UserPermissions,
+        does_user_and_token_have_repository_action,
+    },
 };
 use serde::Serialize;
 use session::{Session, SessionError};
@@ -208,6 +213,21 @@ impl HasPermissions for Authentication {
             Authentication::AuthToken(_, user) | Authentication::Session(_, user) => {
                 user.get_permissions()
             }
+        }
+    }
+
+    async fn has_action(
+        &self,
+        action: RepositoryActions,
+        repository: uuid::Uuid,
+        db: &PgPool,
+    ) -> Result<bool, sqlx::Error> {
+        match self {
+            Authentication::AuthToken(token, user) => {
+                does_user_and_token_have_repository_action(user, token, action, repository, db)
+                    .await
+            }
+            Authentication::Session(_, user) => user.has_action(action, repository, db).await,
         }
     }
 }

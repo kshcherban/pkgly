@@ -486,6 +486,7 @@ SELECT 1, scope FROM (
     VALUES
         ('ReadRepository'),
         ('WriteRepository'),
+        ('EditRepository'),
         ('DeleteRepository'),
         ('ManageRepository'),
         ('ReadStorage'),

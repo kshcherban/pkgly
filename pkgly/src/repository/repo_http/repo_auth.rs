@@ -1,5 +1,5 @@
-// ABOUTME: Extracts repository identities and checks user and token permissions.
-// ABOUTME: Keeps anonymous Docker bearer tokens separate from authenticated users.
+// ABOUTME: Resolves repository authentication and checks user permissions with token scopes.
+// ABOUTME: Applies virtual repository identities consistently to scoped read operations.
 use axum::extract::{FromRef, FromRequestParts};
 use chrono::Utc;
 use http::request::Parts;
@@ -145,14 +145,29 @@ impl HasPermissions for RepositoryAuthentication {
         db: &PgPool,
     ) -> Result<bool, sqlx::Error> {
         let (auth, effective_repository_id) = unwrap_virtual_for_action(self, action, repository);
-        check_user_repository_action(
-            auth.get_permissions().as_ref(),
-            auth.user_id(),
-            action,
-            effective_repository_id,
-            db,
-        )
-        .await
+        match auth {
+            RepositoryAuthentication::AuthToken(token, user)
+            | RepositoryAuthentication::Basic(Some(token), user) => {
+                does_user_and_token_have_repository_action(
+                    user,
+                    token,
+                    action,
+                    effective_repository_id,
+                    db,
+                )
+                .await
+            }
+            _ => {
+                check_user_repository_action(
+                    auth.get_permissions().as_ref(),
+                    auth.user_id(),
+                    action,
+                    effective_repository_id,
+                    db,
+                )
+                .await
+            }
+        }
     }
 }
 impl RepositoryAuthentication {

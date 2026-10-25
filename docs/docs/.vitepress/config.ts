@@ -68,7 +68,10 @@ function cliBar() {
   return [
     {
       text: "Pkgly CLI",
-      items: [{ text: "Overview", link: "/cli/" }],
+      items: [
+        { text: "Overview", link: "/cli/" },
+        { text: "MCP Server", link: "/cli/mcp" },
+      ],
     },
   ];
 }

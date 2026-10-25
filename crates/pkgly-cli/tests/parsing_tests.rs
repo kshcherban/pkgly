@@ -10,6 +10,25 @@ use pkgly_cli::{
 };
 
 #[test]
+fn cli_accepts_mcp_serve_with_global_configuration() -> Result<(), clap::Error> {
+    let cli = Cli::try_parse_from([
+        "pkglyctl",
+        "--profile",
+        "local",
+        "mcp",
+        "serve",
+        "--base-url",
+        "http://localhost:8888",
+    ])?;
+    assert_eq!(cli.global.profile.as_deref(), Some("local"));
+    assert_eq!(
+        cli.global.base_url.as_deref(),
+        Some("http://localhost:8888")
+    );
+    Ok(())
+}
+
+#[test]
 fn repository_ref_accepts_uuid_or_storage_repository_name() {
     let id = Uuid::nil();
     assert_eq!(
