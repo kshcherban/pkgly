@@ -1,5 +1,12 @@
 # NPM Registry Quick Reference
 
+## Package metadata
+
+Hosted package metadata returns the complete package name in both `_id` and
+`name`. For a scoped package such as `@team/library`, both fields include the
+scope; unscoped package names are returned as published. Metadata requests must
+include credentials when repository authentication is enabled.
+
 ## Configuration Templates
 
 ### Hosted Repository

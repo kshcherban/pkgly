@@ -1,3 +1,5 @@
+// ABOUTME: Serves hosted NPM package metadata and package publish/download requests.
+// ABOUTME: Persists package versions and returns registry-compatible package identities.
 use std::sync::Arc;
 
 use ahash::{HashMap, HashMapExt};
@@ -230,7 +232,7 @@ impl Repository for NPMHostedRegistry {
                 }
                 let project_response = NpmRegistryPackageResponse {
                     id: project.key.clone(),
-                    name: project.name.clone(),
+                    name: project.key.clone(),
                     description: project.description.clone(),
                     dist_tags,
                     versions: versions_map,

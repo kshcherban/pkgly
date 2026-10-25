@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Publishes a Debian package and verifies repository metadata and downloads.
+# ABOUTME: Builds a package fixture with the permissions required by dpkg-deb.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -18,6 +20,7 @@ DEB_PATH="${WORKSPACE}/${DEB_FILE}"
 build_deb_package() {
     rm -rf "${PKG_BUILD_DIR}"
     mkdir -p "${PKG_BUILD_DIR}/DEBIAN" "${PKG_BUILD_DIR}/usr/local/bin"
+    chmod 0755 "${PKG_BUILD_DIR}/DEBIAN"
     cat >"${PKG_BUILD_DIR}/DEBIAN/control" <<CONTROL
 Package: ${PKG_NAME}
 Version: ${VERSION}

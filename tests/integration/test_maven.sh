@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Exercises hosted and proxy Maven repositories with real Java artifacts.
+# ABOUTME: Verifies deployment, dependency resolution, caching, and authentication.
 # Maven integration tests
 # Tests hosted and proxy Maven repositories end-to-end
 
@@ -239,7 +241,7 @@ UPLOAD_PATH_AUTH="/repositories/${MAVEN_HOSTED_REPO}/${GROUP_PATH}/${ARTIFACT_ID
 STATUS=$(curl -s -o /dev/null -w "%{http_code}" \
     -X PUT \
     "${PKGLY_URL}${UPLOAD_PATH_AUTH}" \
-    --data-binary "@${JAR_FILE}")
+    --data-binary "@${JAR_FILE_V2}")
 
 if assert_http_status "401" "$STATUS"; then
     pass
