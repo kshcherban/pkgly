@@ -49,6 +49,18 @@ impl<HS: HasPermissions> HasPermissions for Option<HS> {
     fn user_id(&self) -> Option<i32> {
         self.as_ref().and_then(HasPermissions::user_id)
     }
+
+    async fn has_action(
+        &self,
+        action: RepositoryActions,
+        repository: Uuid,
+        db: &PgPool,
+    ) -> Result<bool, sqlx::Error> {
+        match self {
+            Some(auth) => auth.has_action(action, repository, db).await,
+            None => Ok(false),
+        }
+    }
 }
 pub trait HasPermissions {
     fn user_id(&self) -> Option<i32>;

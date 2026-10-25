@@ -1,3 +1,5 @@
+// ABOUTME: Provides Maven repository access checks and POM metadata utilities.
+// ABOUTME: Applies configured authentication and scoped permissions to Maven reads.
 use std::fmt::Debug;
 
 use maven_rs::pom::Pom;
@@ -26,7 +28,8 @@ pub trait MavenRepositoryExt: Repository + Debug {
         &self,
         authentication: &RepositoryAuthentication,
     ) -> Result<Option<RepoResponse>, RepositoryHandlerError> {
-        if self.visibility().is_private() {
+        let auth_config = self.site().get_repository_auth_config(self.id()).await?;
+        if self.visibility().is_private() || auth_config.enabled {
             if authentication.is_no_identification() {
                 return Ok(Some(RepoResponse::www_authenticate("Basic")));
             } else if !(authentication

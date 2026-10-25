@@ -410,7 +410,7 @@ async fn storage_create_posts_local_storage_config() {
     let requests = server.requests();
     server.join();
     assert_eq!(requests.len(), 1);
-    assert!(requests[0].starts_with("POST /api/storage/new/local HTTP/1.1"));
+    assert!(requests[0].starts_with("POST /api/storage/new/Local HTTP/1.1"));
     assert!(requests[0].contains(r#""name":"test-storage""#));
     assert!(requests[0].contains(r#""path":"/data/storage""#));
 }

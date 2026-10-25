@@ -2,6 +2,8 @@
 
 `pkglyctl` is the terminal client for operating a Pkgly instance. It talks to the existing Pkgly HTTP APIs and repository routes; it does not start the server or replace native package manager workflows.
 
+For AI clients, [`pkglyctl mcp serve`](./mcp) exposes these actions through the Model Context Protocol over stdio, using the configured token and its repository scopes.
+
 ## Build
 
 From the repository root:
@@ -114,6 +116,8 @@ Create a repository:
 pkglyctl repo create maven maven-releases --storage test-storage
 ```
 
+Omitting `--config` uses the repository type's defaults, including hosted mode for Maven. Pass a JSON configuration map to select proxy or virtual modes.
+
 Read and update repository config:
 
 ```bash
@@ -199,6 +203,8 @@ pkglyctl package upload ruby test-storage/ruby-internal ./pkg/app-1.0.0.gem
 pkglyctl package upload nuget test-storage/nuget-internal ./App.1.0.0.nupkg
 ```
 
+Debian uploads use multipart requests with the package filename. The server chooses the pool path from the package metadata and the repository's default distribution and component.
+
 For npm, Cargo, and Docker, use native tooling. `pkglyctl native` prints the exact command shape:
 
 ```bash
@@ -206,6 +212,9 @@ pkglyctl native npm test-storage/npm-internal
 pkglyctl native cargo test-storage/cargo-internal
 pkglyctl native docker test-storage/docker-internal app:1.0.0
 ```
+
+Cargo commands use the sparse index at `sparse+<base-url>/repositories/<storage>/<repository>/index/`.
+Docker image references use `<host>/<storage>/<repository>/<image>:<tag>`.
 
 ## Output
 

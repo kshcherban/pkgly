@@ -151,7 +151,7 @@ opentelemetry:
   logs: false
   config:
     serviceName: "pkgly"
-    serviceVersion: "3.0.0"
+    serviceVersion: "0.1.0"
     serviceEnvironment: "production"
     serviceNamespace: "pkgly"
 

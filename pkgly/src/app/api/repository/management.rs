@@ -1,3 +1,5 @@
+// ABOUTME: Serves repository creation, configuration, deletion, and refresh management APIs.
+// ABOUTME: Applies repository permissions and returns storage associations for created repositories.
 use ahash::HashMap;
 use axum::{
     Json, Router, debug_handler,
@@ -8,7 +10,7 @@ use axum::{
 use chrono::{DateTime, FixedOffset, Utc};
 use nr_core::{
     database::entities::{
-        repository::{DBRepository, GenericDBRepositoryConfig},
+        repository::{DBRepository, DBRepositoryWithStorageName, GenericDBRepositoryConfig},
         storage::{DBStorage, StorageDBType},
     },
     repository::{Visibility, config::RepositoryConfigType},
@@ -167,7 +169,7 @@ pub struct NewRepositoryRequest {
         ("repository_type" = String, Path, description = "The Repository Type"),
     ),
     responses(
-        (status = 200, description = "Create new Repository", body = DBRepository),
+        (status = 201, description = "Created repository with storage name", body = DBRepositoryWithStorageName),
     )
 )]
 #[instrument(
@@ -312,7 +314,10 @@ pub async fn new_repository(
             return Ok(ResponseBuilder::internal_server_error().body("Failed to load repository"));
         }
     }
-    Ok(ResponseBuilder::created().json(&db_repository))
+    match DBRepositoryWithStorageName::get_by_id(db_repository.id, site.as_ref()).await? {
+        Some(repository) => Ok(ResponseBuilder::created().json(&repository)),
+        None => Ok(RepositoryNotFound::Uuid(db_repository.id).into_response()),
+    }
 }
 
 #[utoipa::path(

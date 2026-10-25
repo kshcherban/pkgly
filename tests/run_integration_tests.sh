@@ -71,6 +71,7 @@ TEST_SUITES:
     access_logs Run HTTP access log enrichment integration tests
     security    Run security hardening integration tests
     storage_deletion Run storage deletion cascade and package cleanup tests
+    mcp         Run MCP stdio and scoped authorization tests (requires host Python 3)
     all         Run all test suites (default)
 
 EXAMPLES:
@@ -128,12 +129,12 @@ while [[ $# -gt 0 ]]; do
             STOP=0
             shift
             ;;
-        maven|npm|docker|s3|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security|storage_deletion)
+        maven|npm|docker|s3|docker_proxy|python|python_virtual|php|ruby|go|debian|cargo|helm|nuget|web_refresh|access_logs|security|storage_deletion|mcp)
             TEST_SUITES+=("$1")
             shift
             ;;
         all)
-            TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion)
+            TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion mcp)
             shift
             ;;
         *)
@@ -146,7 +147,7 @@ done
 
 # Default to all tests if none specified
 if [ ${#TEST_SUITES[@]} -eq 0 ]; then
-    TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion)
+    TEST_SUITES=(maven npm docker s3 docker_proxy python python_virtual php ruby go debian cargo helm nuget web_refresh access_logs security storage_deletion mcp)
 fi
 
 # Enable verbose mode
@@ -271,9 +272,13 @@ for suite in "${TEST_SUITES[@]}"; do
     # Make script executable
     chmod +x "$TEST_SCRIPT"
 
-    # Run test in test-runner container
+    # MCP runs on the host so its client can control the service's stdio subprocess.
     suite_passed=0
-    if "${COMPOSE_CMD[@]}" exec -T test-runner \
+    if [ "$suite" = "mcp" ]; then
+        if bash "$TEST_SCRIPT" "${COMPOSE_CMD[@]}"; then
+            suite_passed=1
+        fi
+    elif "${COMPOSE_CMD[@]}" exec -T test-runner \
        bash "/tests/test_${suite}.sh"; then
         suite_passed=1
     fi

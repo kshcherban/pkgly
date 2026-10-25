@@ -1,7 +1,7 @@
 # ABOUTME: Helm chart metadata for Pkgly - Universal artifact repository.
 # ABOUTME: Defines chart version, optional PostgreSQL dependency, and metadata.
 apiVersion: v2
-appVersion: 1.0.0-BETA
+appVersion: 0.1.0
 dependencies:
 - condition: postgresql.enabled
   name: postgresql

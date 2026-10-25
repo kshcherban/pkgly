@@ -1,3 +1,5 @@
+// ABOUTME: Defines Maven repository factories, configuration, and request dispatch.
+// ABOUTME: Creates hosted and proxy repositories with their required configuration.
 use ::http::status::StatusCode;
 use ahash::HashMap;
 use axum::response::IntoResponse;
@@ -38,6 +40,7 @@ impl RepositoryType for MavenRepositoryType {
 
     fn config_types(&self) -> Vec<&str> {
         vec![
+            MavenRepositoryConfigType::get_type_static(),
             MavenPushRulesConfigType::get_type_static(),
             RepositoryAuthConfigType::get_type_static(),
         ]

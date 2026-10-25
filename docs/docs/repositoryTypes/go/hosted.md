@@ -137,7 +137,9 @@ All validations and metadata refresh logic are shared with the multipart handler
 
 The Admin UI exposes the following controls for hosted repositories:
 
-- **Packages tab**: displays all hosted modules (under `packages/`) and allows deletion of individual artefacts. Removing `.info`, `.mod`, or `.zip` will cause the version to disappear from download responses until republished.
+- **Packages tab**: displays hosted module versions and allows deletion. Selecting a `.info`, `.mod`, or `.zip` entry removes all three artefacts for that version, its catalog records, and its entry in `@v/list`. The `@latest` and `go.mod` aliases are refreshed from the remaining versions or removed when none remain. Other versions remain available.
 - **Repository configuration**: Hosted mode selection under “Go” config panel.
 
-Use caution when deleting hosted artefacts manually; Pkgly will remove entries and refresh aliases on the next upload.
+The CLI and MCP `package_delete` tool use the same deletion API. Passing a module directory, such as `github.com/acme/widget`, removes that directory and its catalog entries within the selected repository. Directory matching respects path boundaries, so `github.com/acme/widget-other` is preserved.
+
+If files were already removed but a package still appears in listings or search, repeat deletion with its module directory or exact artefact path. Pkgly also clears stale catalog rows when storage reports the requested files as missing. The response's `deleted` count describes storage removals; `missing` can contain paths whose stale metadata was cleaned up.

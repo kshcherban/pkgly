@@ -74,6 +74,7 @@ RUN apt-get update \
 
 WORKDIR /app
 COPY --from=rust-builder /app/target/release/pkgly ./pkgly
+COPY --from=rust-builder /app/target/release/pkglyctl ./pkglyctl
 
 EXPOSE 6742
 VOLUME ["/data"]

@@ -1,3 +1,5 @@
+// ABOUTME: Exercises repository management against real PostgreSQL and local storage.
+// ABOUTME: Verifies repository creation, scoped permissions, and refresh locking.
 #![allow(clippy::expect_used, clippy::panic, clippy::unwrap_used)]
 use super::*;
 
@@ -149,47 +151,34 @@ async fn insert_deb_proxy_repo(pool: &PgPool, storage_id: Uuid) -> Uuid {
     repo.insert(storage_id, pool).await.expect("insert repo").id
 }
 
-fn sample_user(
-    user_id: i32,
-    system_manager: bool,
-) -> nr_core::database::entities::user::UserSafeData {
-    use chrono::{DateTime, FixedOffset};
-    use nr_core::user::{Email, Username, permissions::RepositoryActions};
-
-    let fixed_time: DateTime<FixedOffset> =
-        DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
-    nr_core::database::entities::user::UserSafeData {
-        id: user_id,
-        name: "Test User".into(),
-        username: Username::new("test_user".into()).expect("username"),
-        email: Some(Email::new("user@example.com".into()).expect("email")),
-        require_password_change: false,
-        active: true,
-        admin: false,
-        user_manager: false,
-        system_manager,
-        default_repository_actions: vec![RepositoryActions::Read],
-        updated_at: fixed_time,
-        created_at: fixed_time,
-    }
-}
-
-fn sample_auth_token(user_id: i32) -> nr_core::database::entities::user::auth_token::AuthToken {
-    use chrono::{DateTime, FixedOffset};
-
-    let fixed_time: DateTime<FixedOffset> =
-        DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
-    nr_core::database::entities::user::auth_token::AuthToken {
-        id: 1,
-        user_id,
-        name: Some("token".into()),
-        description: None,
-        token: "token".into(),
-        active: true,
+async fn sample_auth(pool: &PgPool, system_manager: bool) -> Authentication {
+    use nr_core::{
+        database::entities::user::{
+            UserSafeData,
+            auth_token::{AuthToken, NewAuthToken},
+        },
+        user::scopes::NRScope,
+    };
+    let user: UserSafeData = sqlx::query_as("INSERT INTO users (name,username,email,active,system_manager,default_repository_actions) VALUES ('Test User','test_user','user@example.com',true,$1,ARRAY['Read']::text[]) RETURNING *")
+        .bind(system_manager).fetch_one(pool).await.expect("insert user");
+    let (_, raw) = NewAuthToken {
+        user_id: user.id,
         source: "test".into(),
-        expires_at: None,
-        created_at: fixed_time,
+        scopes: vec![
+            NRScope::ReadRepository,
+            NRScope::WriteRepository,
+            NRScope::EditRepository,
+        ],
+        ..Default::default()
     }
+    .insert(pool)
+    .await
+    .expect("insert scoped token");
+    let token = AuthToken::get_by_token(&raw, pool)
+        .await
+        .expect("load token")
+        .expect("token exists");
+    Authentication::AuthToken(token, user)
 }
 
 #[tokio::test]
@@ -203,7 +192,7 @@ async fn deb_refresh_requires_edit_permission() {
 
     let site = build_site(&db, storage_root.path()).await;
 
-    let auth = Authentication::AuthToken(sample_auth_token(1), sample_user(1, false));
+    let auth = sample_auth(db.pool(), false).await;
     let response = deb_refresh(
         axum::extract::State(site.clone()),
         auth,
@@ -235,7 +224,7 @@ async fn deb_refresh_returns_conflict_when_advisory_lock_is_held() {
         .await
         .expect("lock acquired");
 
-    let auth = Authentication::AuthToken(sample_auth_token(1), sample_user(1, true));
+    let auth = sample_auth(db.pool(), true).await;
     let response = deb_refresh(
         axum::extract::State(site.clone()),
         auth,
@@ -279,7 +268,7 @@ fn new_repository_request_deserializes_storage_name() {
 }
 
 #[tokio::test]
-async fn new_repository_accepts_storage_name() {
+async fn new_repository_accepts_storage_name_and_defaults_to_hosted() {
     let _guard = DB_TEST_LOCK.lock().await;
     let db = fresh_db().await;
     let storage_root = tempfile::tempdir().expect("tempdir");
@@ -287,17 +276,12 @@ async fn new_repository_accepts_storage_name() {
     let storage_id = insert_local_storage(db.pool(), storage_root.path()).await;
     let site = build_site(&db, storage_root.path()).await;
 
-    let auth = Authentication::AuthToken(sample_auth_token(1), sample_user(1, true));
+    let auth = sample_auth(db.pool(), true).await;
     let request = NewRepositoryRequest {
         name: "maven-hosted".into(),
         storage: None,
         storage_name: Some(StorageName::new("primary".to_string()).expect("storage name")),
-        configs: ahash::HashMap::from_iter([(
-            "maven".to_string(),
-            serde_json::json!({
-                "type": "Hosted"
-            }),
-        )]),
+        configs: ahash::HashMap::default(),
     };
 
     let response = new_repository(
@@ -310,6 +294,12 @@ async fn new_repository_accepts_storage_name() {
     .expect("handler ok");
 
     assert_eq!(response.status(), StatusCode::CREATED);
+    let body = http_body_util::BodyExt::collect(response.into_body())
+        .await
+        .expect("creation body")
+        .to_bytes();
+    let created: serde_json::Value = serde_json::from_slice(&body).expect("creation JSON");
+    assert_eq!(created["storage_name"], "primary");
 
     let repository =
         DBRepository::get_id_from_storage_and_name("primary", "maven-hosted", db.pool())

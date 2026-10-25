@@ -1,5 +1,9 @@
+// ABOUTME: Exercises password hashing, session identifiers, and scoped authentication.
+// ABOUTME: Keeps authentication regressions covered at their owning boundaries.
 #![allow(clippy::expect_used, clippy::panic, clippy::todo, clippy::unwrap_used)]
 use super::password;
+
+mod scope_tests;
 
 #[test]
 fn encrypt_password_produces_verifiable_hash() {

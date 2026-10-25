@@ -50,7 +50,7 @@ Each delivery uses an Artifactory-style envelope:
   "subscription_key": "f38d0ec1-9e9e-4d6f-8f42-3f0c0e70d1af",
   "source": {
     "application": "pkgly",
-    "version": "3.0.0-BETA"
+    "version": "0.1.0"
   },
   "data": {
     "actor": {

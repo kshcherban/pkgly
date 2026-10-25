@@ -684,6 +684,10 @@ fn normalize_catalog_paths_skips_empty_paths() {
 }
 
 mod catalog_db_tests {
+    mod go_deletion;
+    mod helm_deletion;
+    mod version_deletion;
+
     use super::*;
     use crate::app::{
         authentication::session::SessionManagerConfig,
@@ -696,8 +700,11 @@ mod catalog_db_tests {
     use crate::repository::maven::{MavenRepositoryConfig, MavenRepositoryConfigType};
     use crate::test_support::DB_TEST_LOCK;
     use ahash::HashMap;
-    use nr_core::database::entities::user::auth_token::AuthToken;
-    use nr_core::user::{Email, Username, permissions::RepositoryActions};
+    use nr_core::database::entities::user::{
+        UserSafeData,
+        auth_token::{AuthToken, NewAuthToken},
+    };
+    use nr_core::user::scopes::NRScope;
     use nr_core::{database::DatabaseConfig, repository::config::RepositoryConfigType};
     use sqlx::{PgPool, postgres::PgPoolOptions};
     use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
@@ -1051,34 +1058,26 @@ mod catalog_db_tests {
         );
     }
 
-    fn sample_auth() -> Authentication {
-        let fixed_time =
-            chrono::DateTime::parse_from_rfc3339("2024-01-01T00:00:00+00:00").expect("time");
-        let token = AuthToken {
-            id: 1,
-            user_id: 1,
-            name: Some("token".into()),
-            description: None,
-            token: "token".into(),
-            active: true,
+    async fn sample_auth(pool: &PgPool) -> Authentication {
+        let user: UserSafeData = sqlx::query_as("INSERT INTO users (name,username,email,active,admin,system_manager,default_repository_actions) VALUES ('Test Admin','test_admin','admin@example.com',true,true,true,ARRAY['Read','Edit']::text[]) RETURNING *")
+            .fetch_one(pool).await.expect("insert admin");
+        let (_, raw) = NewAuthToken {
+            user_id: user.id,
             source: "test".into(),
-            expires_at: None,
-            created_at: fixed_time,
-        };
-        let user = nr_core::database::entities::user::UserSafeData {
-            id: 1,
-            name: "Test Admin".into(),
-            username: Username::new("test_admin".into()).expect("username"),
-            email: Some(Email::new("admin@example.com".into()).expect("email")),
-            require_password_change: false,
-            active: true,
-            admin: true,
-            user_manager: false,
-            system_manager: true,
-            default_repository_actions: vec![RepositoryActions::Read, RepositoryActions::Edit],
-            updated_at: fixed_time,
-            created_at: fixed_time,
-        };
+            scopes: vec![
+                NRScope::ReadRepository,
+                NRScope::WriteRepository,
+                NRScope::EditRepository,
+            ],
+            ..Default::default()
+        }
+        .insert(pool)
+        .await
+        .expect("insert scoped token");
+        let token = AuthToken::get_by_token(&raw, pool)
+            .await
+            .expect("load token")
+            .expect("token exists");
         Authentication::AuthToken(token, user)
     }
 
@@ -1187,7 +1186,7 @@ mod catalog_db_tests {
 
         let response = super::delete_cached_packages(
             State(site.clone()),
-            sample_auth(),
+            sample_auth(db.pool()).await,
             Path(repository_id),
             Json(PackageDeleteRequest {
                 paths: vec![package_path.to_string()],
@@ -1359,7 +1358,7 @@ mod catalog_db_tests {
 
         let response = super::list_cached_packages(
             State(site.clone()),
-            Some(sample_auth()),
+            Some(sample_auth(db.pool()).await),
             Path(repository_id),
             Query(PackageListQuery {
                 page: 1,
@@ -1445,7 +1444,7 @@ mod catalog_db_tests {
 
         let response = super::list_cached_packages(
             State(site.clone()),
-            Some(sample_auth()),
+            Some(sample_auth(db.pool()).await),
             Path(repository_id),
             Query(PackageListQuery {
                 page: 1,
@@ -1514,7 +1513,7 @@ mod catalog_db_tests {
 
         let response = super::list_cached_packages(
             State(site.clone()),
-            Some(sample_auth()),
+            Some(sample_auth(db.pool()).await),
             Path(repository_id),
             Query(PackageListQuery {
                 page: 1,
