@@ -73,6 +73,7 @@
 </template>
 
 <script setup lang="ts">
+import { createDockerRepositoryName } from "@/components/nr/repository/types/docker/DockerRepositoryHelpers";
 import CopyURL from "@/components/core/code/CopyCode.vue";
 import ErrorOnRequest from "@/components/ErrorOnRequest.vue";
 import RepositoryHelper from "@/components/nr/repository/RepositoryHelper.vue";
@@ -130,7 +131,9 @@ const url = computed(() => {
   if (!repository.value) {
     return "";
   }
-  return createRepositoryRoute(repository.value);
+  return repository.value.repository_type === "docker"
+    ? createDockerRepositoryName(repository.value)
+    : createRepositoryRoute(repository.value);
 });
 
 async function fetchRepository() {

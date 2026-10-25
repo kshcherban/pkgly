@@ -1,3 +1,5 @@
+// ABOUTME: Initializes shared application state, repositories, and services.
+// ABOUTME: Holds bounded token caches and coordinates repository operations.
 use std::{fmt::Debug, path::PathBuf, sync::Arc, time::Duration};
 
 use ahash::{HashMap, HashMapExt, RandomState};
@@ -227,6 +229,8 @@ pub struct Pkgly {
             ),
         >,
     >,
+    /// Repository-scoped anonymous Docker tokens, evicted when their lifetime ends.
+    pub anonymous_docker_tokens: moka::future::Cache<String, Vec<Uuid>>,
     pub jwks: Arc<JwksManager<ReqwestJwksFetcher>>,
 }
 
@@ -419,6 +423,12 @@ impl Pkgly {
             metrics: AppMetrics::default(),
             repository_metrics: RepositoryMetricsMeter::default(),
             auth_token_cache,
+            anonymous_docker_tokens: moka::future::Cache::builder()
+                .max_capacity(10_000)
+                .time_to_live(std::time::Duration::from_secs(
+                    crate::repository::docker::auth::DEFAULT_TOKEN_LIFETIME.unsigned_abs(),
+                ))
+                .build(),
             jwks,
         };
         pkgly.load_storages().await?;

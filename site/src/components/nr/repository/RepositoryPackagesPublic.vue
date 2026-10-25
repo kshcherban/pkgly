@@ -182,6 +182,15 @@
                   <span v-else>
                     {{ cellText(column.key, pkg) }}
                   </span>
+                  <button
+                    v-if="column.key === 'package' && isDockerRepository"
+                    type="button"
+                    class="packages__copy-pull"
+                    :aria-label="`Copy pull command for ${pkg.package} ${pkg.name}`"
+                    :title="createDockerPullCommand(pkg.package, pkg.name)"
+                    @click="copyPullCommand(pkg)">
+                    <v-icon size="x-small" icon="mdi-content-copy" aria-hidden="true" />
+                  </button>
                 </template>
               </div>
             </td>
@@ -225,6 +234,8 @@
 </template>
 
 <script setup lang="ts">
+import { createDockerPullCommand } from "./types/docker/DockerRepositoryHelpers";
+import { useAlertsStore } from "@/stores/alerts";
 import http from "@/http";
 import { computed, nextTick, ref, watch } from "vue";
 import { useRouter } from "vue-router";
@@ -260,6 +271,16 @@ const props = defineProps<{
   perPageOptions?: number[] | null;
 }>();
 const router = useRouter();
+const alerts = useAlertsStore();
+
+async function copyPullCommand(pkg: PackageEntry): Promise<void> {
+  try {
+    await navigator.clipboard.writeText(createDockerPullCommand(pkg.package, pkg.name));
+    alerts.success("Pull command copied");
+  } catch {
+    alerts.error("Failed to copy pull command");
+  }
+}
 
 const packages = ref<PackageEntry[]>([]);
 const isLoading = ref(false);
@@ -1056,6 +1077,27 @@ watch(
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.packages__copy-pull {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.75rem;
+  height: 1.75rem;
+  margin-left: var(--nr-spacing-xs);
+  border: 1px solid var(--nr-border-color);
+  border-radius: var(--nr-radius-md);
+  background: var(--nr-background);
+  color: var(--nr-text-secondary);
+  cursor: pointer;
+
+  &:hover,
+  &:focus-visible {
+    color: var(--nr-primary);
+    border-color: var(--nr-primary);
+  }
 }
 
 .packages__repository-link {

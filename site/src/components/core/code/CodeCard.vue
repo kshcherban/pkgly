@@ -1,3 +1,5 @@
+<!-- ABOUTME: Renders setup snippets with syntax highlighting for supported languages. -->
+<!-- ABOUTME: Includes shell highlighting for repository CLI instructions. -->
 <template>
   <div class="pkglyEditorParent">
     <pre class="pkglyEditPre hljs betterScroll">
@@ -9,6 +11,7 @@
 <script lang="ts" setup>
 import { computed } from "vue";
 import hljs from "highlight.js/lib/core";
+import bash from "highlight.js/lib/languages/bash";
 import xml from "highlight.js/lib/languages/xml";
 import java from "highlight.js/lib/languages/java";
 import groovy from "highlight.js/lib/languages/groovy";
@@ -16,6 +19,7 @@ import kotlin from "highlight.js/lib/languages/kotlin";
 import markdown from "highlight.js/lib/languages/markdown";
 import "highlight.js/styles/atom-one-dark.css";
 import type { CodeSnippet } from "./code";
+hljs.registerLanguage("bash", bash);
 hljs.registerLanguage("xml", xml);
 hljs.registerLanguage("kotlin", kotlin);
 hljs.registerLanguage("java", java);

@@ -24,6 +24,11 @@ use crate::app::{
 pub enum RepositoryAuthentication {
     /// An Auth Token was passed under the Authorization Header
     AuthToken(AuthToken, UserSafeData),
+    /// A short-lived Docker token permitting anonymous reads of the listed repositories.
+    AnonymousDocker {
+        token: String,
+        repositories: Vec<Uuid>,
+    },
     /// Uses a Session Cookie or Session Header
     Session(Session, UserSafeData),
     /// Uses Basic Authorization Header
@@ -206,6 +211,9 @@ impl RepositoryAuthentication {
             RepositoryAuthentication::Session(session, _) => {
                 AuthenticationRaw::Session(session.clone())
             }
+            RepositoryAuthentication::AnonymousDocker { token, .. } => {
+                AuthenticationRaw::AuthToken(token.clone())
+            }
             RepositoryAuthentication::Basic(Some(token), _) => {
                 AuthenticationRaw::AuthToken(token.token.clone())
             }
@@ -227,6 +235,12 @@ impl RepositoryAuthentication {
     ) -> Result<Self, AuthenticationError> {
         match raw_auth {
             AuthenticationRaw::AuthToken(token) => {
+                if let Some(repositories) = site.anonymous_docker_tokens.get(&token).await {
+                    return Ok(RepositoryAuthentication::AnonymousDocker {
+                        token,
+                        repositories,
+                    });
+                }
                 let (token, user) = get_by_auth_token_cached(&token, site).await?;
                 Ok(RepositoryAuthentication::AuthToken(token, user))
             }
