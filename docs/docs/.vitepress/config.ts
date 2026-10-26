@@ -6,6 +6,7 @@ export default defineConfig({
   lang: "en-US",
   title: "Pkgly",
   description: "A Fast Artifact Manager",
+  head: [["link", { rel: "icon", href: "/favicon.svg", type: "image/svg+xml" }]],
   lastUpdated: true,
   themeConfig: {
     nav: [
@@ -58,6 +59,7 @@ function generalInfo() {
         { text: "Features", link: "/features" },
         { text: "Command Line Interface", link: "/cli/" },
         { text: "Contributing", link: "/contributing" },
+        { text: "CI Build Caching", link: "/ci" },
         { text: "Single Sign-On", link: "/sso/" },
       ],
     },

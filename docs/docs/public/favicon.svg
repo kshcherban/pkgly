@@ -1,0 +1,69 @@
+<svg width="192" height="192" viewBox="0 0 192 192" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <linearGradient id="fav-top-left" x1="96" y1="29" x2="41" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFB319" />
+      <stop offset="0.52" stop-color="#FF9806" />
+      <stop offset="1" stop-color="#F27B00" />
+    </linearGradient>
+    <linearGradient id="fav-top-right" x1="96" y1="29" x2="151" y2="72" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFD04A" />
+      <stop offset="0.5" stop-color="#FFB41B" />
+      <stop offset="1" stop-color="#E28C00" />
+    </linearGradient>
+    <linearGradient id="fav-inner-left" x1="71" y1="74" x2="102" y2="109" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#C87500" />
+      <stop offset="1" stop-color="#F0A300" />
+    </linearGradient>
+    <linearGradient id="fav-inner-right" x1="120" y1="74" x2="91" y2="109" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#FFBF1F" />
+      <stop offset="1" stop-color="#D38200" />
+    </linearGradient>
+    <linearGradient id="fav-body-left" x1="31" y1="63" x2="96" y2="170" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#0E6075" />
+      <stop offset="1" stop-color="#0A3342" />
+    </linearGradient>
+    <linearGradient id="fav-body-right" x1="161" y1="63" x2="96" y2="170" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#177F93" />
+      <stop offset="1" stop-color="#114C5C" />
+    </linearGradient>
+    <linearGradient id="fav-floor" x1="96" y1="91" x2="96" y2="125" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#2D7E8E" />
+      <stop offset="1" stop-color="#144956" />
+    </linearGradient>
+    <filter id="fav-orange-glow" x="12" y="8" width="168" height="93" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="2"/>
+      <feGaussianBlur stdDeviation="8"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.992157 0 0 0 0 0.619608 0 0 0 0 0.0235294 0 0 0 0.7 0"/>
+      <feBlend mode="screen" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+    <filter id="fav-blue-glow" x="12" y="39" width="168" height="144" filterUnits="userSpaceOnUse" color-interpolation-filters="sRGB">
+      <feFlood flood-opacity="0" result="BackgroundImageFix"/>
+      <feColorMatrix in="SourceAlpha" type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 127 0" result="hardAlpha"/>
+      <feOffset dy="4"/>
+      <feGaussianBlur stdDeviation="9"/>
+      <feComposite in2="hardAlpha" operator="out"/>
+      <feColorMatrix type="matrix" values="0 0 0 0 0.0470588 0 0 0 0 0.705882 0 0 0 0 0.847059 0 0 0 0.42 0"/>
+      <feBlend mode="screen" in2="BackgroundImageFix" result="effect1_dropShadow_1_1"/>
+      <feBlend mode="normal" in="SourceGraphic" in2="effect1_dropShadow_1_1" result="shape"/>
+    </filter>
+  </defs>
+
+  <rect width="192" height="192" rx="34" fill="#040607" />
+
+  <g filter="url(#fav-orange-glow)">
+    <path d="M96 29L31 63L62 81L96 63V29Z" fill="url(#fav-top-left)" />
+    <path d="M96 29L161 63L130 81L96 63V29Z" fill="url(#fav-top-right)" />
+    <path d="M62 81L96 63V91L62 109V81Z" fill="url(#fav-inner-left)" />
+    <path d="M96 63L130 81V109L96 91V63Z" fill="url(#fav-inner-right)" />
+  </g>
+
+  <g filter="url(#fav-blue-glow)">
+    <path d="M31 63L62 81V109L96 126V170L31 137V63Z" fill="url(#fav-body-left)" />
+    <path d="M161 63L130 81V109L96 126V170L161 137V63Z" fill="url(#fav-body-right)" />
+    <path d="M96 91L62 109L96 126L130 109L96 91Z" fill="url(#fav-floor)" />
+  </g>
+</svg>

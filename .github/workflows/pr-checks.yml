@@ -47,7 +47,10 @@ jobs:
           tags: pkgly:test
           load: true
           pull: true
-          cache-from: type=gha,scope=pkgly
+          build-args: CARGO_INCREMENTAL=0
+          cache-from: |
+            type=gha,scope=pkgly
+            type=registry,ref=ghcr.io/kshcherban/pkgly:buildcache-amd64
           cache-to: type=gha,scope=pkgly,mode=max
       - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
         with:
@@ -58,6 +61,12 @@ jobs:
           pull: true
           cache-from: type=gha,scope=test-runner
           cache-to: type=gha,scope=test-runner,mode=max
+      - name: Check test-runner tools
+        run: |
+          docker run --rm \
+            -v "$PWD/tests/docker/test-runner.sh:/test-runner.sh:ro" \
+            -v "$PWD/tests/fixtures:/fixtures:ro" \
+            pkgly-test-runner:ci bash /test-runner.sh
       - run: ./tests/run_integration_tests.sh
         env:
           PKGLY_INTEGRATION_COMPOSE_OVERRIDE: ${{ github.workspace }}/tests/docker/docker-compose.ci-cache.yml

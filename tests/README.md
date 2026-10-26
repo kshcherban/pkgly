@@ -47,7 +47,7 @@ tests/
 | Package Type | Hosted | Proxy | Tests |
 |-------------|--------|-------|-------|
 | Maven       | ✅     | ✅    | 12    |
-| NPM         | ✅     | ✅    | 18    |
+| NPM         | ✅     | ✅    | 19    |
 | Docker      | ⚠️     | ✅    | 8     |
 | Python      | ✅     | ✅    | 11    |
 | Python (Virtual) | ✅ | ✅ | 10 |
@@ -130,7 +130,29 @@ The test environment consists of three Docker containers:
 
 1. **postgres** - PostgreSQL 17 database with pre-seeded test data
 2. **pkgly** - Pkgly server built from local source
-3. **test-runner** - Ubuntu container with all package management tools
+3. **test-runner** - Debian Trixie container with all package management tools
+
+### CI image checks
+
+PR builds import the published Pkgly amd64 cache from GHCR. The `Test runner cache`
+workflow populates the runner's GitHub Actions cache on `main`, where all PRs can
+restore it, and refreshes the tools every Monday.
+
+After building `pkgly-test-runner:ci`, run the image checks before the repository
+suites:
+
+```bash
+docker run --rm \
+  -v "$PWD/tests/docker/test-runner.sh:/test-runner.sh:ro" \
+  -v "$PWD/tests/fixtures:/fixtures:ro" \
+  pkgly-test-runner:ci bash /test-runner.sh
+PKGLY_INTEGRATION_COMPOSE_OVERRIDE="$PWD/tests/docker/docker-compose.ci-cache.yml" \
+  ./tests/run_integration_tests.sh
+```
+
+Run these commands from the repository root. The image checks verify package tools,
+Java discovery, and building and installing a Python wheel in an isolated venv.
+See [CI build caching](../docs/docs/ci.md) for cache ownership and refresh behavior.
 
 ### Pre-configured Data
 
@@ -176,7 +198,7 @@ All containers communicate on the `test-network` bridge network. Tests run insid
 11. ✅ Proxy caching verification
 12. ✅ Authentication and error handling
 
-### NPM Tests (18 tests)
+### NPM Tests (19 tests)
 
 1. ✅ Create NPM package tarball
 2. ✅ Publish package to hosted repository
@@ -196,6 +218,7 @@ All containers communicate on the `test-network` bridge network. Tests run insid
 16. ✅ Authentication required for publish
 17. ✅ 404 for non-existent package
 18. ✅ Scoped package support
+19. ✅ Unscoped hosted package metadata
 
 ### Docker Tests (8 tests)
 

@@ -1,5 +1,10 @@
-# Multi-stage test runner with all package management tools
-FROM ubuntu:22.04
+# ABOUTME: Builds Debian Trixie tooling for all package repository integration suites.
+# ABOUTME: Shares its base and runtime dependency layer with the Pkgly runtime image.
+FROM debian:trixie-slim
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
 
 # Prevent interactive prompts during installation
 ENV DEBIAN_FRONTEND=noninteractive
@@ -16,17 +21,16 @@ RUN apt-get update && apt-get install -y \
     ca-certificates \
     gnupg \
     lsb-release \
-    software-properties-common \
     pkg-config \
     libssl-dev \
     dpkg-dev \
     xz-utils \
-    openjdk-11-jdk \
+    default-jdk \
     && rm -rf /var/lib/apt/lists/*
 
 # Set architecture-aware JAVA_HOME and provide stable default-java symlink
 RUN arch="$(dpkg --print-architecture)" \
-    && JAVA_HOME_CAND="/usr/lib/jvm/java-11-openjdk-${arch}" \
+    && JAVA_HOME_CAND="/usr/lib/jvm/java-21-openjdk-${arch}" \
     && if [ ! -d "${JAVA_HOME_CAND}" ]; then echo "Missing ${JAVA_HOME_CAND}" >&2; exit 1; fi \
     && ln -sfn "${JAVA_HOME_CAND}" /usr/lib/jvm/default-java \
     && echo "export JAVA_HOME=${JAVA_HOME_CAND}" >/etc/profile.d/java_home.sh \
@@ -51,9 +55,9 @@ RUN npm install --global yarn@1.22.22
 
 # Install Docker CLI
 RUN install -m 0755 -d /etc/apt/keyrings \
-    && curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
+    && curl -fsSL https://download.docker.com/linux/debian/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg \
     && chmod a+r /etc/apt/keyrings/docker.gpg \
-    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+    && echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/debian \
     $(lsb_release -cs) stable" | tee /etc/apt/sources.list.d/docker.list > /dev/null \
     && apt-get update \
     && apt-get install -y docker-ce-cli \
@@ -65,9 +69,12 @@ RUN apt-get update && apt-get install -y \
     python3-pip \
     python3-setuptools \
     python3-wheel \
-    python3.10-venv \
+    python3-venv \
     twine \
-    && rm -rf /var/lib/apt/lists/*
+    && rm -rf /var/lib/apt/lists/* \
+    && python3 -m venv --system-site-packages /opt/python
+
+ENV PATH="/opt/python/bin:${PATH}"
 
 # Install Ruby + Bundler
 RUN apt-get update && apt-get install -y \
@@ -98,7 +105,7 @@ ENV PATH="${GOPATH}/bin:${PATH}"
 RUN curl https://raw.githubusercontent.com/helm/helm/main/scripts/get-helm-3 | bash
 
 # Install .NET SDK for NuGet integration tests
-RUN wget https://packages.microsoft.com/config/ubuntu/22.04/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
+RUN wget https://packages.microsoft.com/config/debian/13/packages-microsoft-prod.deb -O packages-microsoft-prod.deb \
     && dpkg -i packages-microsoft-prod.deb \
     && rm packages-microsoft-prod.deb \
     && apt-get update \

@@ -1,4 +1,6 @@
 #!/bin/bash
+# ABOUTME: Exercises hosted, proxy, and virtual NPM repositories with native clients.
+# ABOUTME: Verifies package metadata, installation, scoped packages, and authentication.
 # NPM integration tests
 # Tests hosted and proxy NPM repositories end-to-end
 
@@ -66,11 +68,11 @@ print_test "Fetch package metadata"
 ENCODED_NAME=$(echo "$PACKAGE_NAME" | sed 's/@/%40/g; s/\//%2F/g')
 METADATA_PATH="/repositories/${NPM_HOSTED_REPO}/${ENCODED_NAME}"
 
-METADATA=$(curl -sf "${PKGLY_URL}${METADATA_PATH}" || echo "")
+METADATA=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}${METADATA_PATH}" || echo "")
 record_output "$METADATA"
 
 set +e
-jq -e '.name == "@pkgly-test/hello-pkg"' <<<"$METADATA" > /dev/null 2>&1
+jq -s -e 'length == 1 and .[0].name == "@pkgly-test/hello-pkg"' <<<"$METADATA" > /dev/null 2>&1
 metadata_status=$?
 set -e
 
@@ -131,11 +133,11 @@ fi
 
 # Test 7: Verify both versions exist
 print_test "Verify both versions accessible"
-METADATA=$(curl -sf "${PKGLY_URL}${METADATA_PATH}" || echo "")
+METADATA=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}${METADATA_PATH}" || echo "")
 record_output "$METADATA"
 
 set +e
-jq -e ".versions | has(\"${VERSION_1}\") and has(\"${VERSION_2}\")" <<<"$METADATA" > /dev/null 2>&1
+jq -s -e "length == 1 and (.[0].versions | has(\"${VERSION_1}\") and has(\"${VERSION_2}\"))" <<<"$METADATA" > /dev/null 2>&1
 metadata_versions_status=$?
 set -e
 
@@ -395,7 +397,7 @@ fi
 print_test "Verify scoped package support"
 record_output "$METADATA"
 set +e
-jq -e '.name | startswith("@")' <<<"$METADATA" > /dev/null 2>&1
+jq -s -e 'length == 1 and (.[0].name | startswith("@"))' <<<"$METADATA" > /dev/null 2>&1
 metadata_scope_status=$?
 set -e
 if [ "$metadata_scope_status" -eq 0 ]; then
@@ -403,6 +405,29 @@ if [ "$metadata_scope_status" -eq 0 ]; then
     pass
 else
     fail "Scoped package not properly supported"
+fi
+
+# Test 19: NPM unscoped package metadata
+print_test "Verify unscoped hosted package metadata"
+UNSCOPED_DIR="$WORKSPACE/unscoped"
+cp -r "$FIXTURE_DIR" "$UNSCOPED_DIR"
+cp "$WORKSPACE/hello-pkg/.npmrc" "$UNSCOPED_DIR/.npmrc"
+cd "$UNSCOPED_DIR"
+jq '.name = "pkgly-test-unscoped"' package.json > package.json.tmp
+mv package.json.tmp package.json
+if run_cmd npm publish --registry="${PKGLY_URL}/repositories/${NPM_HOSTED_REPO}/"; then
+    UNSCOPED_METADATA=$(curl -sf -H "$(get_auth_header)" \
+        "${PKGLY_URL}/repositories/${NPM_HOSTED_REPO}/pkgly-test-unscoped" || echo "")
+    record_output "$UNSCOPED_METADATA"
+    if jq -s -e 'length == 1 and .[0].name == "pkgly-test-unscoped" and .[0]._id == "pkgly-test-unscoped"' \
+        <<<"$UNSCOPED_METADATA" >/dev/null 2>&1; then
+        clear_last_log
+        pass
+    else
+        fail "Unscoped package metadata did not preserve its name"
+    fi
+else
+    fail "Failed to publish unscoped package"
 fi
 
 # Cleanup

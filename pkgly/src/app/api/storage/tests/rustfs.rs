@@ -72,10 +72,6 @@ impl<'docker> TestRustfs<'docker> {
         panic!("RustFS did not become ready");
     }
 
-    pub(super) fn id(&self) -> &str {
-        self.container.id()
-    }
-
     fn endpoint(&self) -> String {
         format!(
             "http://127.0.0.1:{}",

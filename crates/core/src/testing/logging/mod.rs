@@ -19,6 +19,7 @@ impl TestingLoggerConfig {
         ONCE.call_once(|| {
             let targets: Targets = self.levels.into();
             let stdout_log = tracing_subscriber::fmt::layer()
+                .with_test_writer()
                 .without_time()
                 .with_thread_ids(false)
                 .with_thread_names(false);

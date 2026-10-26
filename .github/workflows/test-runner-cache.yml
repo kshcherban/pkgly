@@ -1,0 +1,49 @@
+# ABOUTME: Populates the integration runner cache on main so every PR can restore it.
+# ABOUTME: Refreshes package tools weekly and validates the resulting integration image.
+name: Test runner cache
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - tests/docker/Dockerfile.test-runner
+      - tests/docker/test-runner.sh
+      - tests/fixtures/python/**
+      - .github/workflows/test-runner-cache.yml
+  schedule:
+    - cron: "23 5 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-runner-cache-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test-runner:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd
+      - uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f
+        with:
+          context: ./tests/docker
+          file: ./tests/docker/Dockerfile.test-runner
+          tags: pkgly-test-runner:ci
+          load: true
+          pull: true
+          no-cache: ${{ github.event_name == 'schedule' }}
+          cache-from: type=gha,scope=test-runner
+          cache-to: type=gha,scope=test-runner,mode=max
+      - name: Check test-runner tools
+        run: |
+          docker run --rm \
+            -v "$PWD/tests/docker/test-runner.sh:/test-runner.sh:ro" \
+            -v "$PWD/tests/fixtures:/fixtures:ro" \
+            pkgly-test-runner:ci bash /test-runner.sh
