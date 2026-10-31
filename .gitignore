@@ -10,3 +10,4 @@ mise.toml
 .DS_Store
 .playwright-mcp/
 .plans/
+__pycache__
