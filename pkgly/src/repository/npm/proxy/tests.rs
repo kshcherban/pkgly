@@ -41,14 +41,17 @@ fn metadata_cache_path_is_separate_from_scoped_package_paths() {
     let path = StoragePath::from("@babel/code-frame");
     let cache = metadata_cache_path_for_npm_proxy(&path);
 
-    assert_eq!(cache.to_string(), "metadata/@babel/code-frame");
+    assert_eq!(
+        cache.to_string(),
+        "metadata-v2/packages/@babel/code-frame/document.json"
+    );
 }
 
 #[test]
 fn metadata_cache_path_uses_a_file_for_the_registry_root() {
     let cache = metadata_cache_path_for_npm_proxy(&StoragePath::default());
 
-    assert_eq!(cache.to_string(), "metadata/root.json");
+    assert_eq!(cache.to_string(), "metadata-v2/root/document.json");
 }
 
 #[test]
@@ -445,4 +448,167 @@ impl ProxyIndexing for RecordingIndexer {
     ) -> Result<(), ProxyIndexingError> {
         Ok(())
     }
+}
+
+#[test]
+fn prerelease_cache_index_keeps_the_complete_version() {
+    let path = StoragePath::from("packages/@scope/my-lib/my-lib-1.2.3-beta.1+build.4.tgz");
+    let key = super::npm_proxy_key_from_cache_path(&path).expect("prerelease cache key");
+    assert_eq!(key.package_key, "@scope/my-lib");
+    assert_eq!(key.version.as_deref(), Some("1.2.3-beta.1+build.4"));
+}
+
+#[test]
+fn percent_escape_case_keeps_the_same_registry_base() {
+    for path in [
+        "/Store/Npm/@scope%2fpkg",
+        "/Store/Npm/@scope%2Fpkg",
+        "/Store/Npm/@scope/pkg",
+        "/Store/Npm/%40scope%2Fpkg",
+        "/Store/Npm/%40scope/pkg",
+    ] {
+        assert_eq!(
+            super::repository_base_path(path, &StoragePath::from("@scope/pkg")),
+            Some("/repositories/Store/Npm".into())
+        );
+    }
+}
+
+#[tokio::test]
+async fn metadata_tarballs_preserve_https_behind_a_reverse_proxy() {
+    let (parts, _) = Request::builder()
+        .uri("/repositories/store/npm/demo")
+        .header(http::header::HOST, "registry.test")
+        .header("x-forwarded-proto", "https")
+        .body(())
+        .unwrap()
+        .into_parts();
+    let body = r#"{"versions":{"1.0.0":{"dist":{"tarball":"https://registry.npmjs.org/demo/-/demo-1.0.0.tgz"}}}}"#;
+    let dir = tempdir().unwrap();
+    let file_path = dir.path().join("metadata.json");
+    std::fs::write(&file_path, body).unwrap();
+    let file = StorageFile::File {
+        meta: nr_storage::StorageFileMeta::read_from_file(&file_path).unwrap(),
+        content: nr_storage::StorageFileReader::Bytes(nr_storage::FileContentBytes::Bytes(
+            Bytes::from_static(body.as_bytes()),
+        )),
+    };
+    let response = super::rewrite_metadata_tarballs(&parts, &StoragePath::from("demo"), file)
+        .await
+        .unwrap()
+        .unwrap();
+    let RepoResponse::Other(response) = response else {
+        panic!("expected metadata")
+    };
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        value["versions"]["1.0.0"]["dist"]["tarball"],
+        "https://registry.test/repositories/store/npm/demo/-/demo-1.0.0.tgz"
+    );
+}
+
+#[test]
+fn proxy_cache_keys_preserve_prerelease_and_build_case() {
+    for package in ["my-hyphenated-lib", "@scope/my-hyphenated-lib"] {
+        for version in ["1.2.3-RC.1+Build.X", "1.2.3-rc.1+build.x"] {
+            let name = package.rsplit('/').next().unwrap();
+            let path = StoragePath::from(format!("packages/{package}/{name}-{version}.tgz"));
+            let key = super::npm_proxy_key_from_cache_path(&path).unwrap();
+            assert_eq!(key.package_key, package);
+            assert_eq!(key.version.as_deref(), Some(version));
+        }
+    }
+}
+
+#[test]
+fn metadata_cache_files_never_block_other_package_or_version_paths() {
+    for (first, second) in [
+        ("demo", "demo/1.0.0-beta.1"),
+        ("demo", "demo.json/1.0.0-beta.1"),
+        ("@scope/demo", "@scope/demo/1.0.0-beta.1"),
+    ] {
+        let first = metadata_cache_path_for_npm_proxy(&StoragePath::from(first)).to_string();
+        let second = metadata_cache_path_for_npm_proxy(&StoragePath::from(second)).to_string();
+        assert!(
+            !second.starts_with(&format!("{first}/")),
+            "{first} blocks {second}"
+        );
+        assert_ne!(first, second);
+    }
+}
+
+#[tokio::test]
+async fn exact_version_metadata_rewrites_its_tarball_url() {
+    let (parts, _) = Request::builder()
+        .uri("https://pkgly.test/repositories/store/npm-proxy/@scope/pkg/1.2.3-rc.1+Build.7")
+        .header(http::header::HOST, "pkgly.test")
+        .body(())
+        .unwrap()
+        .into_parts();
+    let body = br#"{"name":"@scope/pkg","version":"1.2.3-rc.1+Build.7","dist":{"tarball":"https://upstream.test/@scope/pkg/-/pkg-1.2.3-rc.1+Build.7.tgz"}}"#;
+    let root = tempdir().unwrap();
+    let path = root.path().join("manifest.json");
+    std::fs::write(&path, body).unwrap();
+    let file = StorageFile::File {
+        meta: nr_storage::StorageFileMeta::read_from_file(&path).unwrap(),
+        content: nr_storage::StorageFileReader::Bytes(nr_storage::FileContentBytes::Bytes(
+            Bytes::from_static(body),
+        )),
+    };
+    let response = super::rewrite_metadata_tarballs(
+        &parts,
+        &StoragePath::from("@scope/pkg/1.2.3-rc.1+Build.7"),
+        file,
+    )
+    .await
+    .unwrap()
+    .unwrap()
+    .into_response_default();
+    let bytes = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+    let metadata: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    assert_eq!(
+        metadata["dist"]["tarball"],
+        "https://pkgly.test/repositories/store/npm-proxy/@scope/pkg/-/pkg-1.2.3-rc.1+Build.7.tgz"
+    );
+}
+
+#[tokio::test]
+async fn metadata_cache_upgrade_reads_previous_namespace_without_upstream() {
+    let repository_id = Uuid::new_v4();
+    let storage = test_storage().await;
+    let path = StoragePath::from("@scope/pkg");
+    storage
+        .save_file(
+            repository_id,
+            FileContent::Bytes(Bytes::from_static(b"cached document")),
+            &StoragePath::from("metadata/@scope/pkg"),
+        )
+        .await
+        .unwrap();
+    let cached = super::open_cached_file(
+        &storage,
+        repository_id,
+        &metadata_cache_path_for_npm_proxy(&path),
+        Some(&path),
+    )
+    .await
+    .unwrap();
+    assert!(
+        cached.is_some(),
+        "old metadata cache must remain usable without an upstream"
+    );
+    let version_path = StoragePath::from("@scope/pkg/1.0.0-beta.1");
+    assert!(
+        super::open_cached_file(
+            &storage,
+            repository_id,
+            &metadata_cache_path_for_npm_proxy(&version_path),
+            Some(&version_path)
+        )
+        .await
+        .unwrap()
+        .is_none(),
+        "an older package cache file must not block a version cache miss"
+    );
 }

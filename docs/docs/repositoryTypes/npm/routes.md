@@ -1,518 +1,267 @@
 # NPM Registry HTTP Routes
 
-Pkgly implements a CouchDB-compatible NPM registry API for both hosted and proxy repositories. This reference details every HTTP route, its purpose, and example usage. Replace placeholders with your own hostname, storage name, repository name, package name, and authentication credentials.
+Pkgly implements a subset of the npm registry API.
+All paths below are relative to `/repositories/<storage>/<repository>/`.
+For scoped package metadata, npm encodes the slash, for example `@scope%2Fmy-package`.
+Tarball paths can contain the unencoded scope and package name.
 
-- `<host>` – Pkgly base URL (e.g. `pkgly.example.com`)
-- `<storage>` – Storage identifier that backs the repository
-- `<repository>` – Repository name
-- `<package>` – NPM package name (including scope: `@mycompany/package`)
-- `<version>` – Package version (e.g. `1.0.0`)
-- `<revision>` – Package revision number for CouchDB compatibility
-- `<username>` – Username for authentication
-- `<password>` – Password for authentication
-- `<token>` – Bearer token for API authentication
+## Package reads
 
-## Registry Information
+Hosted repositories support these routes. HEAD returns the same status and headers without a response body:
 
-### Root Endpoint
-Get registry information and capabilities:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/"
+| Method | Path | Result |
+| --- | --- | --- |
+| GET | `<name>` | Package metadata, versions, README, and distribution tags |
+| GET | `<name>/<version>` | Metadata for one exact version |
+| GET | `<name>/<tag>` | Metadata for the version selected by a tag |
+| GET | `<name>/-/<basename>-<version>.tgz` | Package archive |
+
+For `@scope/my-package`, the basename is `my-package`.
+Prerelease identifiers and build metadata remain part of the exact version.
+Use authentication headers when the repository requires authentication.
+
+```sh
+curl -H "Authorization: Bearer <token>" \
+     "https://<host>/repositories/<storage>/<repository>/@scope%2Fmy-package"
+curl -H "Authorization: Bearer <token>" \
+     "https://<host>/repositories/<storage>/<repository>/@scope%2Fmy-package/beta"
+curl -H "Authorization: Bearer <token>" \
+     -O "https://<host>/repositories/<storage>/<repository>/@scope/my-package/-/my-package-1.2.0-beta.1.tgz"
 ```
-**Response:**
+
+An exact-version response includes the manifest and download information. For example:
+
 ```json
 {
-  "db_name": "npm-registry",
-  "doc_count": 1234,
-  "doc_del_count": 0,
-  "update_seq": 5678,
-  "disk_size": 1048576,
-  "data_size": 524288,
-  "instance_start_time": "2023-12-15T10:00:00Z"
-}
-```
-
-## Package Operations
-
-### Get Package Information
-Retrieve complete package metadata including all versions:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/package/<package>"
-```
-**Response:**
-```json
-{
-  "_id": "@mycompany/my-package",
-  "_rev": "1-abc123...",
-  "name": "@mycompany/my-package",
-  "description": "My awesome package",
-  "dist-tags": {
-    "latest": "1.2.0",
-    "beta": "1.3.0-beta.1"
-  },
-  "versions": {
-    "1.0.0": {
-      "name": "@mycompany/my-package",
-      "version": "1.0.0",
-      "description": "Initial release",
-      "main": "index.js",
-      "scripts": {
-        "test": "jest"
-      },
-      "keywords": ["awesome", "package"],
-      "author": {
-        "name": "Author Name",
-        "email": "author@example.com"
-      },
-      "license": "MIT",
-      "dependencies": {
-        "lodash": "^4.17.21"
-      },
-      "devDependencies": {
-        "jest": "^29.0.0"
-      },
-      "dist": {
-        "integrity": "sha512-...",
-        "shasum": "abc123...",
-        "tarball": "https://<host>/repositories/<storage>/<repository>/package/@mycompany/my-package/1.0.0/my-package-1.0.0.tgz"
-      },
-      "_npmUser": {
-        "name": "username",
-        "email": "user@example.com"
-      },
-      "_npmVersion": "8.19.0",
-      "_nodeVersion": "18.12.0"
-    }
-  },
-  "readme": "# My Package\n\nDescription of the package...",
-  "_attachments": {
-    "my-package-1.0.0.tgz": {
-      "content_type": "application/octet-stream",
-      "revpos": 1,
-      "digest": "md5-abc123...",
-      "length": 12345,
-      "stub": true
-    }
-  }
-}
-```
-
-### Get Specific Version
-Retrieve metadata for a specific package version:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>"
-```
-**Response:**
-```json
-{
-  "_id": "@mycompany/my-package@1.0.0",
-  "_rev": "1-def456...",
-  "name": "@mycompany/my-package",
-  "version": "1.0.0",
-  "description": "Initial release",
-  "main": "index.js",
+  "_id": "@scope/my-package@1.2.0-beta.1",
+  "name": "@scope/my-package",
+  "version": "1.2.0-beta.1",
   "dist": {
     "integrity": "sha512-...",
-    "shasum": "abc123...",
-    "tarball": "https://<host>/repositories/<storage>/<repository>/package/@mycompany/my-package/1.0.0/my-package-1.0.0.tgz"
+    "shasum": "...",
+    "tarball": "https://<host>/repositories/<storage>/<repository>/@scope/my-package/-/my-package-1.2.0-beta.1.tgz"
   }
 }
 ```
 
-### Download Package Tarball
-Download the actual package archive:
-```bash
-# Download with curl
-curl -O "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>/<package>-<version>.tgz"
+Proxy repositories cache upstream metadata and tarballs.
+Virtual repositories resolve reads through their configured members.
+They forward publication, deprecation, and tag changes to their configured hosted target.
 
-# Download with authentication (if required)
-curl -H "Authorization: Bearer <token>" \
-     -O "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>/<package>-<version>.tgz"
+## Publish a new version
+
+Use `npm publish` with the repository URL as the registry:
+
+```sh
+npm publish --registry="https://<host>/repositories/<storage>/<repository>/" --tag beta
 ```
 
-### Get Package Attachments
-List package attachments and metadata:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/package/<package>?attachments=true"
-```
+The client sends `PUT <name>` with `Npm-Command: publish`.
+Its JSON body contains the package `name`, one entry in `versions`, and base64 tarball data in `_attachments`.
+Each version includes its manifest, `dist` hashes and tarball URL, `_id`, `_nodeVersion`, and `_npmVersion`.
+The tarball URL must point into the target storage and repository.
+Metadata and archive upload form one publish request. Pkgly does not support a separate archive upload endpoint.
 
-## Publishing Operations
+A publication must contain exactly one version and one attachment.
+Pkgly decodes the attachment before creating catalog entries.
+An existing package version cannot be published again. Duplicate publication returns `409 Conflict` without replacing its tarball, metadata, or tags.
+Invalid attachment data, empty attachments, mismatched versions, and invalid distribution tags return `400 Bad Request`.
 
-### Publish New Package Version
-Publish a new version with CouchDB-style request:
-```bash
+The `dist-tags` object controls which tags change.
+Missing or empty tags default to `latest`, including for prereleases.
+An explicit `beta` tag leaves `latest` unchanged. An explicit `latest` can select a prerelease.
+See [Publishing](standard.md#publishing) for client behavior and examples.
+
+### Publish with HTTP
+
+Use this request shape for custom clients. Replace the hash, attachment data, and length placeholders with values from the tarball. The attachment length is the number of bytes before base64 encoding.
+
+```sh
 curl -X PUT \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
      -H "Npm-Command: publish" \
-     -d @package.json \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>"
+     --data-binary @publish.json \
+     "https://<host>/repositories/<storage>/<repository>/my-package"
 ```
 
-**Request Body (package.json with additional metadata):**
 ```json
 {
-  "_id": "@mycompany/my-package@1.0.0",
-  "name": "@mycompany/my-package",
-  "version": "1.0.0",
-  "description": "My awesome package",
-  "main": "index.js",
-  "scripts": {
-    "test": "jest"
+  "name": "my-package",
+  "dist-tags": {"beta": "1.2.0-beta.1"},
+  "versions": {
+    "1.2.0-beta.1": {
+      "_id": "my-package@1.2.0-beta.1",
+      "name": "my-package",
+      "version": "1.2.0-beta.1",
+      "_nodeVersion": "22.0.0",
+      "_npmVersion": "11.0.0",
+      "dist": {
+        "integrity": "sha512-<base64-sha512>",
+        "shasum": "<hex-sha1>",
+        "tarball": "https://<host>/repositories/<storage>/<repository>/my-package/-/my-package-1.2.0-beta.1.tgz"
+      }
+    }
   },
-  "dependencies": {
-    "lodash": "^4.17.21"
-  },
-  "devDependencies": {
-    "jest": "^29.0.0"
-  },
-  "dist": {
-    "integrity": "sha512-...",
-    "shasum": "abc123..."
-  },
-  "_npmUser": {
-    "name": "username",
-    "email": "user@example.com"
+  "_attachments": {
+    "my-package-1.2.0-beta.1.tgz": {
+      "content_type": "application/octet-stream",
+      "data": "<base64-tarball>",
+      "length": 123
+    }
   }
 }
 ```
 
-### Upload Package Tarball
-Upload the package archive as an attachment:
-```bash
-curl -X PUT \
-     -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/octet-stream" \
-     --data-binary @my-package-1.0.0.tgz \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>/<package>-<version>.tgz?rev=<rev>"
+## Update package metadata
+
+For README or ordinary manifest changes, edit the package files and publish a new version.
+The README normally comes from `README.md` beside `package.json`.
+Pkgly stores README content supplied in the version metadata.
+If that content is absent, it accepts `readme` and `readmeFilename` from the root of the publish body.
+
+The package response exposes the README and public metadata from the version selected by `latest`.
+If there is no `latest` tag, it uses the most recent published version.
+Public fields include description, author, contributors, license, keywords, homepage, bugs, repository, and maintainers.
+Older versions keep their own metadata.
+
+```sh
+npm version patch
+npm publish --registry="https://<host>/repositories/<storage>/<repository>/"
+npm view my-package readme --registry="https://<host>/repositories/<storage>/<repository>/"
 ```
 
-### Update Package Metadata
-Update package information (dist-tags, readme, etc.):
-```bash
+Pkgly does not offer arbitrary edits to an existing version's manifest or a standalone package README update.
+The separate operations below change tags and deprecation messages without a new publication.
+
+## Manage distribution tags
+
+| Method | Path | Request body |
+| --- | --- | --- |
+| GET | `-/package/<name>/dist-tags` | None |
+| PUT | `-/package/<name>/dist-tags/<tag>` | A JSON string with an existing version |
+| DELETE | `-/package/<name>/dist-tags/<tag>` | None |
+
+For scoped packages, `<name>` includes the scope, such as `@scope/my-package`.
+Tag reads from hosted repositories require Read permission when repository authentication is enabled or visibility is Private or Hidden.
+Tokens must also grant Read access to that repository.
+Public proxy and virtual repositories continue to allow anonymous tag reads, even when repository authentication is enabled.
+Private and Hidden proxy and virtual repositories require Read permission and Read access in the token for tag reads.
+
+Tag changes require Write permission and Write access in the token. They do not require Read permission.
+These checks apply to the distribution-tag endpoints. Existing package metadata, version, and tarball read rules stay unchanged.
+Tag names preserve case and cannot be semantic-version ranges.
+They can contain ASCII letters, digits, and `- _ . ! ~ * ' ( )`.
+Unicode, spaces, percent signs, and path separators are invalid tag characters.
+A tag such as `release*candidate` is valid, while standalone `*` is a version range and is invalid.
+Request paths are percent-decoded once before tag validation.
+
+```sh
+npm dist-tag ls my-package
+npm dist-tag add my-package@1.2.0-beta.1 beta
+npm dist-tag rm my-package beta
+```
+
+The equivalent HTTP request to set a tag is:
+
+```sh
 curl -X PUT \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
-     -d '{
-       "dist-tags": {
-         "latest": "1.1.0",
-         "beta": "1.2.0-beta.1"
-       },
-       "readme": "# Updated Readme\n\nNew description..."
-     }' \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>?rev=<current_rev>"
+     -d '"1.2.0-beta.1"' \
+     "https://<host>/repositories/<storage>/<repository>/-/package/my-package/dist-tags/beta"
 ```
 
-### Unpublish Package Version
-Remove a specific version:
-```bash
-curl -X DELETE \
-     -H "Authorization: Bearer <token>" \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>?rev=<rev>"
+## Deprecate and undeprecate versions
+
+Use the npm CLI to select a version or version range:
+
+```sh
+npm deprecate 'my-package@1.x' 'Use version 2 instead'
+npm deprecate 'my-package@1.x' ''
 ```
 
-### Deprecate Package Version
-Mark a version as deprecated:
-```bash
-curl -X PUT \
-     -H "Authorization: Bearer <token>" \
-     -H "Content-Type: application/json" \
-     -d '{
-       "deprecated": "This version has been deprecated. Please use version 2.0.0 instead."
-     }' \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>/<version>?rev=<rev>"
-```
+The CLI first reads the package document with `GET <name>?write=true`.
+It sets `deprecated` on the matching versions, then sends the document to `PUT <name>` with `Npm-Command: deprecate`.
+Pkgly also accepts `Npm-Command: undeprecate` for clients with a separate undeprecate command.
+An empty message clears the warning.
 
-## User Authentication
+Pkgly changes only the supplied versions' `deprecated` fields.
+It preserves their other metadata, tarballs, and distribution tags.
+The entire update fails if a target version is missing or a deprecation message is not a string.
+These changes require repository write permission.
 
-### User Registration
-Create a new user account:
-```bash
-curl -X PUT \
-     -H "Content-Type: application/json" \
-     -d '{
-       "_id": "org.couchdb.user:newuser",
-       "name": "newuser",
-       "password": "securepassword",
-       "email": "user@example.com",
-       "type": "user",
-       "roles": [],
-       "date": "2023-12-15T10:00:00.000Z"
-     }' \
-     "https://<host>/repositories/<storage>/<repository>/-/user/org.couchdb.user:newuser"
-```
+## Repository management API
 
-### User Authentication
-Authenticate user and get session:
-```bash
-curl -X POST \
-     -H "Content-Type: application/json" \
-     -d '{
-       "name": "username",
-       "password": "password"
-     }' \
-     "https://<host>/repositories/<storage>/<repository>/-_session"
-```
-**Response:**
-```json
-{
-  "ok": true,
-  "name": "username",
-  "roles": ["user"]
-}
-```
+These Pkgly management endpoints are separate from the npm registry protocol:
 
-### Get Current User Information
-Retrieve current user details:
-```bash
-curl -H "Authorization: Bearer <token>" \
-     "https://<host>/repositories/<storage>/<repository>/-/whoami"
-```
-**Response:**
-```json
-{
-  "username": "username",
-  "name": "username",
-  "email": "user@example.com",
-  "roles": ["user"]
-}
-```
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/api/repository/<repository-id>/packages?page=1&per_page=50` | List stored packages |
+| DELETE | `/api/repository/<repository-id>/packages` | Delete paths returned by the package list |
+| GET | `/api/repository/<repository-id>/config/npm` | Read npm repository configuration |
+| PUT | `/api/repository/<repository-id>/config/npm` | Change npm repository configuration |
 
-## Search and Discovery
+Deletion requires repository edit permission and a JSON body such as `{"paths":["<path-from-package-list>"]}`.
+It is not an implementation of `npm unpublish`.
 
-### Search Packages
-Search for packages by keyword:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/-/v1/search?text=my-search-term&size=20&from=0"
-```
-**Response:**
-```json
-{
-  "objects": [
-    {
-      "package": {
-        "name": "@mycompany/my-package",
-        "version": "1.0.0",
-        "description": "My awesome package",
-        "keywords": ["awesome", "package"],
-        "publisher": {
-          "username": "username",
-          "email": "user@example.com"
-        },
-        "maintainers": [
-          {
-            "username": "username",
-            "email": "user@example.com"
-          }
-        ]
-      },
-      "score": 1.0,
-      "searchScore": 1.0
-    }
-  ],
-  "total": 1,
-  "time": "2023-12-15T10:00:00.000Z"
-}
-```
-
-### Get Popular Packages
-List most downloaded packages:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/-/v1/search?text=*&size=50&sort=popularity"
-```
-
-### Get Recently Updated
-List recently updated packages:
-```bash
-curl "https://<host>/repositories/<storage>/<repository>/-/v1/search?text=*&size=50&sort=modified"
-```
-
-## Repository Management API
-
-### List Cached Packages
-List cached NPM packages:
-```bash
+```sh
 curl -H "Authorization: Bearer <token>" \
      "https://<host>/api/repository/<repository-id>/packages?page=1&per_page=50"
+curl -H "Authorization: Bearer <token>" \
+     "https://<host>/api/repository/<repository-id>/config/npm"
 ```
 
-### Delete Cached Packages
-Remove cached packages (requires repository edit permission):
-```bash
+To delete a listed path or update the npm configuration:
+
+```sh
 curl -X DELETE \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
-     -d '{"paths": ["@mycompany/my-package/my-package-1.0.0.tgz"]}' \
+     --data '{"paths":["<path-from-package-list>"]}' \
      "https://<host>/api/repository/<repository-id>/packages"
-```
-
-### Repository Configuration
-Get NPM repository configuration:
-```bash
-curl -H "Authorization: Bearer <token>" \
-     "https://<host>/api/repository/<repository-id>/config/npm"
-```
-
-Update repository configuration:
-```bash
 curl -X PUT \
      -H "Authorization: Bearer <token>" \
      -H "Content-Type: application/json" \
-     -d @config.json \
+     --data-binary @config.json \
      "https://<host>/api/repository/<repository-id>/config/npm"
 ```
 
-### Repository Statistics
-Get repository usage statistics:
-```bash
-curl -H "Authorization: Bearer <token>" \
-     "https://<host>/api/repository/<repository-id>/stats"
-```
-**Response:**
-```json
-{
-  "total_packages": 456,
-  "total_versions": 1234,
-  "total_downloads": 56789,
-  "storage_used": "1.5GB",
-  "last_activity": "2023-12-15T15:30:00Z",
-  "top_packages": [
-    {"name": "@mycompany/core", "download_count": 1234},
-    {"name": "@mycompany/utils", "download_count": 987}
-  ]
-}
-```
+A proxy configuration uses the following shape:
 
-## Complete Publishing Workflow
-
-### Full Package Publishing Sequence
-```bash
-#!/bin/bash
-HOST="https://pkgly.example.com"
-STORAGE="storage"
-REPO="npm-repo"
-PACKAGE="@mycompany/my-package"
-VERSION="1.0.0"
-TOKEN="your-bearer-token"
-
-# 1. Get current package info (if exists)
-PACKAGE_REV=$(curl -s -H "Authorization: Bearer $TOKEN" \
-  "${HOST}/repositories/${STORAGE}/${REPO}/package/${PACKAGE}" \
-  | jq -r '._rev // empty')
-
-# 2. Prepare package metadata
-cat > package.json << EOF
-{
-  "_id": "${PACKAGE}@${VERSION}",
-  "name": "${PACKAGE}",
-  "version": "${VERSION}",
-  "description": "My awesome package",
-  "main": "index.js",
-  "dist": {
-    "integrity": "$(sha512sum my-package-1.0.0.tgz | cut -d' ' -f1)",
-    "shasum": "$(sha1sum my-package-1.0.0.tgz | cut -d' ' -f1)"
-  },
-  "_npmUser": {
-    "name": "username",
-    "email": "user@example.com"
-  }
-}
-EOF
-
-# 3. Publish package metadata
-curl -X PUT \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -H "Npm-Command: publish" \
-     -d @package.json \
-     "${HOST}/repositories/${STORAGE}/${REPO}/package/${PACKAGE}/${VERSION}"
-
-# 4. Upload package tarball
-curl -X PUT \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/octet-stream" \
-     --data-binary @my-package-1.0.0.tgz \
-     "${HOST}/repositories/${STORAGE}/${REPO}/package/${PACKAGE}/${VERSION}/${PACKAGE}-${VERSION}.tgz"
-
-# 5. Update dist-tags (if latest version)
-curl -X PUT \
-     -H "Authorization: Bearer $TOKEN" \
-     -H "Content-Type: application/json" \
-     -d '{"dist-tags": {"latest": "'${VERSION}'"}}' \
-     "${HOST}/repositories/${STORAGE}/${REPO}/package/${PACKAGE}?rev=${PACKAGE_REV}"
-```
-
-## Proxy Repository Operations
-
-### Proxy Route Configuration
-Configure upstream registries for proxy mode:
 ```json
 {
   "type": "Proxy",
-  "proxy": {
+  "config": {
     "routes": [
-      {
-        "url": "https://registry.npmjs.org",
-        "name": "NPM Official",
-        "priority": 10
-      },
-      {
-        "url": "https://registry.yarnpkg.com",
-        "name": "Yarn Registry",
-        "priority": 5
-      }
+      {"url": "https://registry.npmjs.org", "name": "NPM Official"}
     ]
   }
 }
 ```
 
-### Proxy Cache Bypass
-Force refresh from upstream repositories:
-```bash
+## Authentication and unsupported operations
+
+Use a Pkgly repository token in `.npmrc`, or log in with an existing Pkgly account:
+
+```sh
+npm login --auth-type=legacy --registry="https://<host>/repositories/<storage>/<repository>/"
+```
+
+For direct package reads, use a repository token or Basic authentication with an existing Pkgly account:
+
+```sh
 curl -H "Authorization: Bearer <token>" \
-     -H "Cache-Control: no-cache" \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>"
+     "https://<host>/repositories/<storage>/<repository>/my-package"
+curl -u "<username>" \
+     "https://<host>/repositories/<storage>/<repository>/my-package"
 ```
 
-## Authentication Methods
+With only the username supplied, curl prompts for the password.
 
-### Bearer Token Authentication
-```bash
-curl -H "Authorization: Bearer <token>" \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>"
-```
+Legacy login uses `PUT -/user/org.couchdb.user:<username>` and returns a repository token.
+It does not register a new Pkgly account. Web login is not implemented.
 
-### Basic Authentication
-```bash
-curl -u "username:password" \
-     "https://<host>/repositories/<storage>/<repository>/package/<package>"
-```
-
-## Error Responses
-
-### Common Error Codes
-- `401 Unauthorized` - Authentication required or invalid credentials
-- `403 Forbidden` - Insufficient permissions
-- `404 Not Found` - Package or version does not exist
-- `409 Conflict` - Version already exists or revision conflict
-- `422 Unprocessable Entity` - Invalid package metadata
-- `500 Internal Server Error` - Server-side error during upload
-
-### Error Response Format
-```json
-{
-  "error": "Forbidden",
-  "message": "You do not have permission to publish this package",
-  "details": {
-    "package": "@mycompany/my-package",
-    "version": "1.0.0",
-    "user": "username"
-  }
-}
-```
-
-Use these endpoints as a foundation for NPM client integration, package managers like Yarn, or custom tooling when working with Pkgly NPM repositories.
-
----
-
-*Complete reference for NPM registry HTTP routes. See [NPM Quick Reference](reference.md) for usage examples and configuration.*
+Hosted repositories do not currently implement npm unpublish, registry search, registry statistics, `whoami`, or CouchDB session endpoints.
+A root registry information document and an attachments listing endpoint are also not implemented.
+These limits do not prevent package publication, installation, tag management, or deprecation through npm.

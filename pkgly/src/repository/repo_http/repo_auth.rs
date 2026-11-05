@@ -45,7 +45,7 @@ pub enum RepositoryAuthentication {
     NoIdentification,
 }
 impl RepositoryAuthentication {
-    #[instrument]
+    #[instrument(skip(self, database))]
     pub async fn can_access_repository(
         &self,
         action: RepositoryActions,
@@ -75,7 +75,7 @@ impl RepositoryAuthentication {
             _ => Ok(false),
         }
     }
-    #[instrument]
+    #[instrument(skip(self, database))]
     pub async fn get_user_if_has_action(
         &self,
         action: RepositoryActions,
@@ -228,7 +228,7 @@ impl RepositoryAuthentication {
             RepositoryAuthentication::NoIdentification => AuthenticationRaw::NoIdentification,
         }
     }
-    #[instrument(skip(site))]
+    #[instrument(skip(raw_auth, site))]
     pub async fn from_raw(
         raw_auth: AuthenticationRaw,
         site: &Pkgly,
@@ -262,7 +262,7 @@ impl RepositoryAuthentication {
             }
             AuthenticationRaw::NoIdentification => Ok(RepositoryAuthentication::NoIdentification),
             AuthenticationRaw::AuthorizationHeaderUnknown(scheme, value) => {
-                debug!("Unknown Authorization Header: {} {}", scheme, value);
+                debug!(%scheme, "Unknown authorization scheme");
                 Ok(RepositoryAuthentication::Other(scheme, value))
             }
         }

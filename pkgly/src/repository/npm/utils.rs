@@ -15,7 +15,7 @@ pub mod npm_time {
     }
 }
 pub trait NpmRegistryExt: Repository {
-    #[instrument]
+    #[instrument(skip(self, release), fields(repository_id = %self.id(), package = %release.name, version = %release.version))]
     async fn get_or_create_project(
         &self,
         save_path: &StoragePath,
@@ -43,8 +43,9 @@ pub trait NpmRegistryExt: Repository {
             }
         }
     }
-    #[instrument]
-    async fn create_or_update_version(
+    /// Creates an immutable npm version. Returns a conflict when the version already exists.
+    #[instrument(skip(self, release), fields(repository_id = %self.id(), package = %release.name, version = %release.version))]
+    async fn create_version(
         &self,
         publisher: i32,
         save_path: &StoragePath,
@@ -58,12 +59,19 @@ pub trait NpmRegistryExt: Repository {
         )
         .await?
         {
-            return Ok(());
+            return Err(NPMRegistryError::VersionAlreadyExists);
         }
 
         match release.new_version(project.id, self.id(), save_path.to_string(), publisher) {
             Ok(ok) => {
-                ok.insert(&self.site().database).await?;
+                match ok.insert(&self.site().database).await {
+                    Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
+                        return Err(NPMRegistryError::VersionAlreadyExists);
+                    }
+                    result => {
+                        result?;
+                    }
+                }
                 return Ok(());
             }
             Err(err) => {
@@ -72,3 +80,42 @@ pub trait NpmRegistryExt: Repository {
         }
     }
 }
+
+pub(crate) fn audit_action(
+    method: &http::Method,
+    path: &StoragePath,
+    headers: &http::HeaderMap,
+) -> Option<&'static str> {
+    if super::tags::parse_tag_path(&path.to_string()).is_some() {
+        return match *method {
+            http::Method::GET | http::Method::HEAD => Some("package.dist_tag.list"),
+            http::Method::PUT => Some("package.dist_tag.set"),
+            http::Method::DELETE => Some("package.dist_tag.delete"),
+            _ => None,
+        };
+    }
+    if *method == http::Method::PUT
+        && headers
+            .get(super::types::NPM_COMMAND_HEADER)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|command| matches!(command, "deprecate" | "undeprecate"))
+    {
+        return Some("package.deprecation.update");
+    }
+    None
+}
+
+/// Extracts a complete semantic version from an npm tarball filename.
+pub(crate) fn extract_version_from_file(file: &str, package: &str) -> Option<String> {
+    let name = package.rsplit('/').next()?;
+    let version = file
+        .strip_prefix(name)?
+        .strip_prefix('-')?
+        .strip_suffix(".tgz")?;
+    semver::Version::parse(version)
+        .ok()
+        .map(|_| version.to_owned())
+}
+
+#[cfg(test)]
+mod tests;

@@ -27,7 +27,8 @@ pub struct NpmRegistryPackageResponse {
     #[serde(rename = "_id")]
     pub id: String,
     pub name: String,
-    pub description: Option<String>,
+    #[serde(flatten)]
+    pub metadata: HashMap<String, Value>,
     #[serde(rename = "dist-tags")]
     pub dist_tags: HashMap<String, String>,
     pub versions: HashMap<String, PublishVersion>,

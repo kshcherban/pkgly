@@ -7,6 +7,7 @@ use utoipa::ToSchema;
 use uuid::Uuid;
 use versions::{DBProjectVersion, DBProjectVersionColumn, ProjectVersionType};
 mod new;
+pub mod npm;
 pub use new::*;
 
 use crate::{database::prelude::*, repository::project::ReleaseType};

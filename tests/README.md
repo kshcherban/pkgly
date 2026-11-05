@@ -20,6 +20,7 @@ tests/
 │   ├── common.sh                   # Shared utilities and functions
 │   ├── test_maven.sh               # Maven integration tests
 │   ├── test_npm.sh                 # NPM integration tests
+│   ├── npm_registry_behavior.sh    # NPM routes, casing, and permissions
 │   ├── test_docker.sh              # Docker integration tests
 │   ├── test_python.sh              # Python/PyPI integration tests
 │   ├── test_python_virtual.sh      # Python virtual repository integration tests
@@ -47,7 +48,7 @@ tests/
 | Package Type | Hosted | Proxy | Tests |
 |-------------|--------|-------|-------|
 | Maven       | ✅     | ✅    | 12    |
-| NPM         | ✅     | ✅    | 19    |
+| NPM         | ✅     | ✅    | 140   |
 | Docker      | ⚠️     | ✅    | 8     |
 | Python      | ✅     | ✅    | 11    |
 | Python (Virtual) | ✅ | ✅ | 10 |
@@ -198,27 +199,50 @@ All containers communicate on the `test-network` bridge network. Tests run insid
 11. ✅ Proxy caching verification
 12. ✅ Authentication and error handling
 
-### NPM Tests (19 tests)
+### NPM Tests
 
-1. ✅ Create NPM package tarball
-2. ✅ Publish package to hosted repository
-3. ✅ Fetch package metadata
-4. ✅ Install package from hosted repository
-5. ✅ Verify installed package functionality
-6. ✅ Publish second version
-7. ✅ Verify both versions in metadata
-8. ✅ Install specific version
-9. ✅ Install latest version
-10. ✅ Proxy package from npmjs.org
-11. ✅ Proxy caching verification
-12. ✅ Yarn Classic scoped-package proxy install
-13. ✅ Configure npm virtual repository members
-14. ✅ Install hosted package through npm virtual repository
-15. ✅ Install proxied package through npm virtual repository
-16. ✅ Authentication required for publish
-17. ✅ 404 for non-existent package
-18. ✅ Scoped package support
-19. ✅ Unscoped hosted package metadata
+The npm suite uses native npm and Yarn commands, plus direct HTTP requests for inputs that the clients reject or do not send.
+
+1. Publish and install scoped and unscoped packages and specific versions.
+2. Preserve prerelease identifiers and build metadata.
+3. Publish with beta, latest, multiple tags, omitted tags, and empty tags.
+4. Add, resolve, promote, and remove distribution tags through npm and virtual repositories.
+5. Preserve distinct tag names and accept npm-compatible punctuation.
+6. Decode scoped paths and tag characters once, with either percent-escape case.
+7. Reject Unicode tags, malformed bodies, and invalid paths without metadata changes.
+8. Update README and manifest metadata through new publications.
+9. Deprecate and restore selected versions without changing unrelated metadata.
+10. Proxy and cache packages, including scoped Yarn installations.
+11. Publish through mixed-case storage and repository URLs.
+12. Deny writes with read-only tokens and preserve stored metadata.
+
+`npm_registry_behavior.sh` and `npm_prerelease_lifecycle.sh` run as part of `test_npm.sh` and use its fixtures and result counters.
+The npm lifecycle suite covers successive beta publications, fresh and reused client caches, immutable versions, and deletion of all distribution tags.
+Rust HTTP tests also cover rejected publications without partial catalog changes and prerelease downloads through hosted, proxy, and virtual repositories.
+The retrieval fixture stops its controlled upstream before repeated downloads to check cache use.
+The mixed cache test checks offline GET and HEAD requests against all three metadata layouts.
+It also checks that the new entry takes precedence when all three layouts contain the same document.
+
+Database-backed HTTP handler tests preserve the existing npm read contract and cover tag Read and Write permissions, token scopes, virtual delegation, audit actions, and handler spans.
+They cover both GET and HEAD, and check that traces exclude request bodies and credentials.
+
+#### Concurrent tag updates
+
+Run the PostgreSQL concurrency tests with:
+
+```sh
+cargo test -q -p pkgly repository::npm::tags::tests::concurrency
+```
+
+Each test uses separate database connections for two writers.
+A third connection holds a row lock on the package before either write starts.
+The test checks `pg_stat_activity` until both writers wait for a database lock, then releases the held lock.
+This forces overlapping writes without relying on an arbitrary delay.
+Timeouts turn blocked or stalled tests into failures.
+
+The cases cover two tag additions, initialization of legacy tag storage, removal during another addition, and two writes to the same tag.
+They assert the complete final tag map, including preservation of `latest` and removal of the deleted tag.
+The database suite checks that npm retains the shared case-insensitive catalog schema and that upgrades preserve existing packages.
 
 ### Docker Tests (8 tests)
 

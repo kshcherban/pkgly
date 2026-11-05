@@ -123,28 +123,47 @@ async fn serve_cached_response(
     )
 }
 
+fn cached_file_candidates(
+    cache_path: &StoragePath,
+    legacy_metadata_path: Option<&StoragePath>,
+) -> Vec<StoragePath> {
+    let mut candidates = vec![cache_path.clone()];
+    if let Some(path) = legacy_metadata_path {
+        candidates.push(if path.to_string().is_empty() {
+            StoragePath::from("metadata/root.json")
+        } else {
+            StoragePath::from(format!("metadata/{path}"))
+        });
+        candidates.push(path.clone());
+    }
+    candidates
+}
+
+fn is_blocked_cache_path(error: &nr_storage::StorageError) -> bool {
+    // An older metadata file can occupy the parent of a version cache path.
+    matches!(
+        error,
+        nr_storage::StorageError::LocalStorageError(
+            nr_storage::local::error::LocalStorageError::IOError(error),
+        ) if error.kind() == std::io::ErrorKind::NotADirectory
+    )
+}
+
 async fn open_cached_file(
     storage: &DynStorage,
     repository_id: Uuid,
     cache_path: &StoragePath,
     legacy_metadata_path: Option<&StoragePath>,
 ) -> Result<Option<StorageFile>, NPMRegistryError> {
-    if let Some(file @ StorageFile::File { .. }) =
-        storage.open_file(repository_id, cache_path).await?
-    {
-        return Ok(Some(file));
+    for candidate in cached_file_candidates(cache_path, legacy_metadata_path) {
+        match storage.open_file(repository_id, &candidate).await {
+            Ok(Some(file @ StorageFile::File { .. })) => return Ok(Some(file)),
+            Ok(_) => {}
+            Err(error) if is_blocked_cache_path(&error) => {}
+            Err(error) => return Err(error.into()),
+        }
     }
-
-    let Some(legacy_metadata_path) = legacy_metadata_path else {
-        return Ok(None);
-    };
-    Ok(storage
-        .open_file(repository_id, legacy_metadata_path)
-        .await?
-        .and_then(|file| match file {
-            file @ StorageFile::File { .. } => Some(file),
-            StorageFile::Directory { .. } => None,
-        }))
+    Ok(None)
 }
 
 async fn cached_file_information(
@@ -153,23 +172,20 @@ async fn cached_file_information(
     cache_path: &StoragePath,
     legacy_metadata_path: Option<&StoragePath>,
 ) -> Result<Option<StorageFileMeta<FileType>>, NPMRegistryError> {
-    let metadata = storage
-        .get_file_information(repository_id, cache_path)
-        .await?;
-    if metadata
-        .as_ref()
-        .is_some_and(|metadata| matches!(metadata.file_type(), FileType::File(_)))
-    {
-        return Ok(metadata);
+    for candidate in cached_file_candidates(cache_path, legacy_metadata_path) {
+        match storage
+            .get_file_information(repository_id, &candidate)
+            .await
+        {
+            Ok(Some(metadata)) if matches!(metadata.file_type(), FileType::File(_)) => {
+                return Ok(Some(metadata));
+            }
+            Ok(_) => {}
+            Err(error) if is_blocked_cache_path(&error) => {}
+            Err(error) => return Err(error.into()),
+        }
     }
-
-    let Some(legacy_metadata_path) = legacy_metadata_path else {
-        return Ok(None);
-    };
-    let metadata = storage
-        .get_file_information(repository_id, legacy_metadata_path)
-        .await?;
-    Ok(metadata.filter(|metadata| matches!(metadata.file_type(), FileType::File(_))))
+    Ok(None)
 }
 
 impl NpmProxyRegistry {
@@ -454,6 +470,15 @@ impl Repository for NpmProxyRegistry {
             let query = request.parts.uri.query().map(|q| q.to_string());
             let can_read = if request.authentication.is_virtual_repository() {
                 true
+            } else if super::tags::parse_tag_path(&request.path.to_string()).is_some() {
+                super::tags::can_read_tags(
+                    &request.authentication,
+                    false,
+                    this.visibility(),
+                    this.id(),
+                    &this.site(),
+                )
+                .await?
             } else {
                 can_read_repository(
                     &request.authentication,
@@ -540,6 +565,15 @@ impl Repository for NpmProxyRegistry {
             let query = request.parts.uri.query().map(|q| q.to_string());
             let can_read = if request.authentication.is_virtual_repository() {
                 true
+            } else if super::tags::parse_tag_path(&request.path.to_string()).is_some() {
+                super::tags::can_read_tags(
+                    &request.authentication,
+                    false,
+                    this.visibility(),
+                    this.id(),
+                    &this.site(),
+                )
+                .await?
             } else {
                 can_read_repository(
                     &request.authentication,
@@ -642,12 +676,15 @@ fn cache_path_for_npm_proxy(path: &StoragePath) -> Option<StoragePath> {
 }
 
 fn metadata_cache_path_for_npm_proxy(path: &StoragePath) -> StoragePath {
-    let path = path.to_string();
-    if path.is_empty() {
-        StoragePath::from("metadata/root.json")
-    } else {
-        StoragePath::from(format!("metadata/{path}"))
-    }
+    let key = match super::types::request::GetPath::try_from(path.clone()) {
+        Ok(super::types::request::GetPath::RegistryBase) => "root".to_owned(),
+        Ok(super::types::request::GetPath::GetPackageInfo { name }) => format!("packages/{name}"),
+        Ok(super::types::request::GetPath::VersionInfo { name, version }) => {
+            format!("versions/{name}/{version}")
+        }
+        _ => format!("routes/{path}"),
+    };
+    StoragePath::from(format!("metadata-v2/{key}/document.json"))
 }
 
 #[cfg(test)]
@@ -667,30 +704,13 @@ fn npm_package_components(path: &StoragePath) -> Option<(String, String)> {
     Some((package_name, file_name))
 }
 
-fn npm_version_from_filename(file_name: &str) -> Option<String> {
-    let stem = file_name.strip_suffix(".tgz")?;
-    let (_name_part, version_part) = stem.rsplit_once('-')?;
-    if version_part.is_empty() {
-        return None;
-    }
-    if !version_part
-        .chars()
-        .next()
-        .map(|c| c.is_ascii_digit())
-        .unwrap_or(false)
-    {
-        return None;
-    }
-    Some(version_part.to_string())
-}
-
 pub(super) fn npm_proxy_meta_from_cache_path(
     path: &StoragePath,
     size: u64,
     upstream_url: Option<&Url>,
 ) -> Option<ProxyArtifactMeta> {
     let (package_name, file_name) = npm_package_components(path)?;
-    let version = npm_version_from_filename(&file_name)?;
+    let version = super::utils::extract_version_from_file(&file_name, &package_name)?;
     let mut builder =
         ProxyArtifactMeta::builder(package_name.clone(), package_name.clone(), path.to_string())
             .version(version)
@@ -704,7 +724,7 @@ pub(super) fn npm_proxy_meta_from_cache_path(
 
 pub(super) fn npm_proxy_key_from_cache_path(path: &StoragePath) -> Option<ProxyArtifactKey> {
     let (package_name, file_name) = npm_package_components(path)?;
-    let version = npm_version_from_filename(&file_name)?;
+    let version = super::utils::extract_version_from_file(&file_name, &package_name)?;
     Some(ProxyArtifactKey {
         package_key: package_name,
         version: Some(version),
@@ -838,7 +858,13 @@ async fn rewrite_metadata_tarballs(
     let Some(host) = host else {
         return Ok(None);
     };
-    let scheme = parts.uri.scheme_str().unwrap_or("http");
+    let scheme = parts
+        .headers
+        .get("x-forwarded-proto")
+        .and_then(|value| value.to_str().ok())
+        .filter(|value| matches!(*value, "http" | "https"))
+        .or_else(|| parts.uri.scheme_str())
+        .unwrap_or("http");
 
     // Yarn Classic percent-encodes the slash in scoped package metadata paths.
     let Some(base_path) = repository_base_path(parts.uri.path(), requested_path) else {
@@ -862,21 +888,10 @@ async fn rewrite_metadata_tarballs(
         Err(_) => return Ok(None),
     };
 
+    rewrite_manifest_tarball(&mut value, &base);
     if let Some(versions) = value.get_mut("versions").and_then(Value::as_object_mut) {
         for version in versions.values_mut() {
-            if let Some(dist) = version.get_mut("dist").and_then(Value::as_object_mut) {
-                if let Some(tarball) = dist.get_mut("tarball") {
-                    if let Some(tarball_str) = tarball.as_str() {
-                        let parsed = Url::parse(tarball_str).or_else(|_| base.join(tarball_str));
-                        if let Ok(parsed) = parsed {
-                            let path = parsed.path().trim_start_matches('/');
-                            if let Ok(rewritten) = base.join(path) {
-                                *tarball = Value::String(rewritten.to_string());
-                            }
-                        }
-                    }
-                }
-            }
+            rewrite_manifest_tarball(version, &base);
         }
     }
 
@@ -888,6 +903,23 @@ async fn rewrite_metadata_tarballs(
         builder = builder.header(CONTENT_TYPE, "application/json");
     }
     Ok(Some(RepoResponse::Other(builder.body(bytes))))
+}
+
+fn rewrite_manifest_tarball(manifest: &mut Value, base: &Url) {
+    let Some(tarball) = manifest
+        .get_mut("dist")
+        .and_then(|dist| dist.get_mut("tarball"))
+    else {
+        return;
+    };
+    let Some(url) = tarball.as_str() else {
+        return;
+    };
+    if let Ok(parsed) = Url::parse(url).or_else(|_| base.join(url)) {
+        if let Ok(rewritten) = base.join(parsed.path().trim_start_matches('/')) {
+            *tarball = Value::String(rewritten.to_string());
+        }
+    }
 }
 
 fn repository_base_path(full_path: &str, requested_path: &StoragePath) -> Option<String> {
@@ -905,6 +937,10 @@ fn repository_base_path(full_path: &str, requested_path: &StoragePath) -> Option
             .map(|part| format!("/{part}"))
             .collect::<String>();
         suffixes.push(format!("/{scope}%2f{package}{rest}"));
+        if let Some(scope) = scope.strip_prefix('@') {
+            suffixes.push(format!("/%40{scope}%2f{package}{rest}"));
+            suffixes.push(format!("/%40{scope}/{package}{rest}"));
+        }
     }
 
     let base_path = suffixes

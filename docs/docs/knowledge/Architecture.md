@@ -59,6 +59,29 @@ Pkgly’s search and package listing flows are **database-backed** (no storage d
 
 Operational and query details live in `docs/docs/knowledge/search.md`.
 
+### npm registry metadata
+
+npm handlers validate requests and use `DBNpmProjectMetadata` from `crates/core/src/database/entities/project/npm.rs` for persistence.
+This API owns distribution tags, legacy version queries, and transactional deprecation updates.
+The generic `DBProject` and `DBProjectVersion` APIs do not expose npm-specific operations.
+Tag reads select a project by ID and load its JSONB map.
+Tag writes merge or remove keys atomically within PostgreSQL.
+Legacy packages infer `latest` from stable versions in upload order without loading version manifests.
+
+The distribution-tag handlers check Read permission and token scope for protected tag reads.
+Tag changes require Write permission and token scope.
+These checks preserve existing metadata, version, and tarball read behavior.
+
+The shared HTTP audit context identifies tag list/set/delete operations and deprecation updates before dispatch.
+Handler spans skip request bodies and credentials.
+npm retains the shared case-insensitive catalog paths and indexes.
+Versions whose paths differ only by letter case cannot coexist.
+The npm documentation records this compatibility difference from npmjs.
+
+npm proxies store package and version metadata in separate cache paths under `metadata-v2`.
+Both package documents and exact-version manifests advertise tarball URLs through the proxy.
+Readers retain fallback access to both previous metadata cache layouts, including when the upstream is unavailable.
+
 ## Storage and Proxy Caching
 - Artifact bytes live in the configured storage backend (local filesystem or S3).
 - The S3 implementation includes disk caching and defensive behavior for production (for example retrying transient deletion failures and using adaptive buffering for large response bodies under memory pressure).

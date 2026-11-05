@@ -656,7 +656,7 @@ async fn handle_repo_request_core(
         parent: &parent_span,
         "Repository Request",
         request_path = ?request_path,
-        authentication = ?authentication
+        authenticated = authentication.get_user_id().is_some()
     );
     async move {
         debug!(?request_path, "Repository Request Happening");
@@ -701,7 +701,16 @@ async fn handle_repo_request_core(
         let (parts, body) = request.into_parts();
         let audit_ctx = parts.extensions.get::<AccessLogContext>().cloned();
         let path = path.unwrap_or_default();
+        let npm_audit_action = if matches!(repository, DynRepository::NPM(_)) {
+            crate::repository::npm::utils::audit_action(&method, &path, &parts.headers)
+        } else {
+            None
+        };
         if let Some(ctx) = &audit_ctx {
+            ctx.set_audit_action(
+                npm_audit_action
+                    .unwrap_or_else(|| classify_repo_audit_action(&method, &path, None)),
+            );
             ctx.set_repository_id(repository.id());
             ctx.set_storage_id(
                 repository
@@ -776,7 +785,10 @@ async fn handle_repo_request_core(
 
         if requires_auth && !is_authenticated {
             if let Some(ctx) = &audit_ctx {
-                ctx.set_audit_action(classify_repo_audit_action(&method, &path, None));
+                ctx.set_audit_action(
+                    npm_audit_action
+                        .unwrap_or_else(|| classify_repo_audit_action(&method, &path, None)),
+                );
             }
             if matches!(repository, DynRepository::Docker(_)) {
                 let actions: &[&str] = if is_read_operation {
@@ -848,7 +860,11 @@ async fn handle_repo_request_core(
         match &response {
             Ok(ok) => {
                 if let Some(ctx) = &audit_ctx {
-                    ctx.set_audit_action(classify_repo_audit_action(&method, &path, Some(ok)));
+                    ctx.set_audit_action(
+                        npm_audit_action.unwrap_or_else(|| {
+                            classify_repo_audit_action(&method, &path, Some(ok))
+                        }),
+                    );
                 }
                 trace.ok()
             }
@@ -896,8 +912,60 @@ pub async fn handle_repo_request(
     State(site): State<Pkgly>,
     Path(request_path): Path<RepoRequestPath>,
     parent_span: Option<RequestSpan>,
-    authentication: RepositoryAuthentication,
+    authentication: Result<RepositoryAuthentication, AuthenticationError>,
     request: Request,
 ) -> Result<Response, RepositoryHandlerError> {
+    let authentication = match authentication {
+        Ok(authentication) => authentication,
+        Err(error) => {
+            record_rejected_repository_action(
+                &site,
+                &request_path,
+                request.method(),
+                request.headers(),
+                request.extensions().get::<AccessLogContext>().cloned(),
+            )
+            .await;
+            return Ok(error.into_response());
+        }
+    };
     handle_repo_request_core(site, request_path, parent_span, authentication, request).await
+}
+
+async fn record_rejected_repository_action(
+    site: &Pkgly,
+    request_path: &RepoRequestPath,
+    method: &Method,
+    headers: &http::HeaderMap,
+    ctx: Option<AccessLogContext>,
+) {
+    let Some(ctx) = ctx else {
+        return;
+    };
+    let names = RepositoryStorageName::from((
+        request_path.storage.clone(),
+        request_path.repository.clone(),
+    ));
+    let Ok(Some(repository)) = site.get_repository_from_names(&names).await else {
+        return;
+    };
+    let path = request_path.path.clone().unwrap_or_default();
+    let action = if matches!(repository, DynRepository::NPM(_)) {
+        crate::repository::npm::utils::audit_action(method, &path, headers)
+    } else {
+        None
+    };
+    ctx.set_audit_action(action.unwrap_or_else(|| classify_repo_audit_action(method, &path, None)));
+    ctx.set_repository_id(repository.id());
+    ctx.set_storage_id(
+        repository
+            .get_storage()
+            .storage_config()
+            .storage_config
+            .storage_id,
+    );
+    ctx.set_resource_kind("repository");
+    ctx.set_resource_id(repository.id().to_string());
+    ctx.set_resource_name(repository.name());
+    ctx.set_audit_path(path.to_string());
 }

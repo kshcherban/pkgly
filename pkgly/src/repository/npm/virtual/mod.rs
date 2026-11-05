@@ -30,7 +30,6 @@ use crate::{
             RepositoryAuthentication, RepositoryRequestBody,
             repo_tracing::{RepositoryMetricsMeter, RepositoryRequestTracing},
         },
-        utils::can_read_repository,
     },
 };
 
@@ -282,7 +281,13 @@ impl Repository for NpmVirtualRepository {
         request: RepositoryRequest,
     ) -> impl std::future::Future<Output = Result<RepoResponse, Self::Error>> + Send {
         let this = self.clone();
-        async move { this.forward_publish(request).await }
+        async move { this.forward_mutation(request).await }
+    }
+    async fn handle_delete(
+        &self,
+        request: RepositoryRequest,
+    ) -> Result<RepoResponse, NPMRegistryError> {
+        self.forward_mutation(request).await
     }
 }
 
@@ -292,13 +297,24 @@ impl NpmVirtualRepository {
         request: RepositoryRequest,
         method: Method,
     ) -> Result<RepoResponse, NPMRegistryError> {
-        let can_read = can_read_repository(
-            &request.authentication,
-            self.visibility(),
-            self.id(),
-            self.site().as_ref(),
-        )
-        .await?;
+        let can_read = if super::tags::parse_tag_path(&request.path.to_string()).is_some() {
+            super::tags::can_read_tags(
+                &request.authentication,
+                false,
+                self.visibility(),
+                self.id(),
+                &self.site(),
+            )
+            .await?
+        } else {
+            crate::repository::utils::can_read_repository(
+                &request.authentication,
+                self.visibility(),
+                self.id(),
+                self.site().as_ref(),
+            )
+            .await?
+        };
         if !can_read {
             return Ok(RepoResponse::unauthorized());
         }
@@ -318,7 +334,7 @@ impl NpmVirtualRepository {
         }
     }
 
-    async fn forward_publish(
+    async fn forward_mutation(
         &self,
         request: RepositoryRequest,
     ) -> Result<RepoResponse, NPMRegistryError> {
@@ -378,7 +394,11 @@ impl NpmVirtualRepository {
         };
 
         match member_repo {
-            super::NPMRegistry::Hosted(hosted) => hosted.handle_put(member_request).await,
+            super::NPMRegistry::Hosted(hosted) => match member_request.parts.method {
+                Method::PUT => hosted.handle_put(member_request).await,
+                Method::DELETE => hosted.handle_delete(member_request).await,
+                _ => Err(NPMRegistryError::InvalidGetRequest),
+            },
             _ => Ok(RepoResponse::basic_text_response(
                 StatusCode::BAD_REQUEST,
                 "Publish target must be a hosted repository",
@@ -485,6 +505,12 @@ fn clone_parts(parts: &Parts) -> Parts {
 }
 
 fn derive_cache_key(path: &StoragePath) -> Result<Option<String>, NPMRegistryError> {
+    if let Some((name, tag)) = super::tags::parse_tag_path(&path.to_string()) {
+        return Ok(Some(format!(
+            "dist-tags:{name}:{}",
+            tag.as_deref().unwrap_or("")
+        )));
+    }
     match GetPath::try_from(path.clone()) {
         Ok(GetPath::GetPackageInfo { name }) => Ok(Some(name)),
         Ok(GetPath::VersionInfo { name, version }) | Ok(GetPath::GetTar { name, version, .. }) => {
