@@ -7,7 +7,10 @@ use axum::response::{IntoResponse, Response};
 use derive_more::derive::Deref;
 use http::{StatusCode, header::CONTENT_TYPE};
 use nr_core::{
-    database::entities::{project::versions::DBProjectVersion, repository::DBRepository},
+    database::entities::{
+        project::{npm::DBNpmProjectMetadata, versions::DBProjectVersion},
+        repository::DBRepository,
+    },
     repository::config::RepositoryConfigType,
     storage::StoragePath,
     user::permissions::RepositoryActions,
@@ -17,7 +20,7 @@ use tracing::{debug, info, instrument, warn};
 
 use super::{
     metadata::{deprecation_updates, normalize_readme, package_fields, save_deprecations},
-    tags::{load_tags, parse_tag_path, publish_tags, remove_tag, save_tags},
+    tags::{load_tags, load_tags_on, parse_tag_path, publish_tags},
     types::{
         NPM_COMMAND_HEADER, NpmRegistryPackageResponse,
         request::{GetPath, InvalidNPMCommand, NPMCommand, PublishVersion},
@@ -31,7 +34,7 @@ use crate::{
     },
     repository::{
         RepoResponse, Repository, RepositoryAuthConfigType, RepositoryFactoryError,
-        RepositoryHandlerError, RepositoryRequest,
+        RepositoryRequest,
         npm::{NPMRegistryConfigType, NPMRegistryError, types::PublishRequest},
         utils::RepositoryExt,
     },
@@ -71,6 +74,7 @@ impl NPMHostedRegistry {
             .get_user_if_has_action(RepositoryActions::Write, self.id, self.site.as_ref())
             .await?
         else {
+            info!("No acceptable user authentication provided");
             return Ok(RepoResponse::unauthorized());
         };
         let body = request.body.body_as_string().await?;
@@ -91,47 +95,15 @@ impl NPMHostedRegistry {
             .ok_or(NPMRegistryError::VersionNotFound)?;
         normalize_readme(&mut data, &other);
         let dist_tags = publish_tags(dist_tags, &version)?;
-        if version != data.version {
-            return Err(NPMRegistryError::InvalidDistTags);
-        }
-        {
-            let storage_config: nr_storage::BorrowedStorageConfig<'_> =
-                self.storage.storage_config();
-            data.dist.validate_tarball(
-                &storage_config.storage_config.storage_name,
-                &self.repository.name,
-            )?;
-        }
         let (file, attachment) = attachments
             .into_iter()
             .next()
             .ok_or(NPMRegistryError::OnlyOneReleaseOrAttachmentAtATime)?;
+        let file = self.validate_publication(&request.path, &name, &version, &data, &file)?;
         let attachment_data = attachment.read_data()?;
-        let project_path = StoragePath::from(name.clone());
-        let project = self.get_or_create_project(&project_path, &data).await?;
-        let previous_tags = load_tags(project.id, &self.site.database).await?;
-        let mut version_path = project_path.clone();
-        version_path.push_mut(&version);
-
-        self.create_version(user.id, &version_path, &project, &data)
+        let version_path = self
+            .persist_publication(user.id, &data, &file, attachment_data, dist_tags)
             .await?;
-
-        {
-            let mut path = version_path.clone();
-            if file.starts_with("@") && file.contains("/") {
-                let split = file.split("/").collect::<Vec<&str>>();
-                path.push_mut(split.last().ok_or(RepositoryHandlerError::NotFound)?);
-            } else {
-                path.push_mut(&file);
-            }
-            info!(file = %file, attachment.size_bytes = attachment_data.len(), "Saving attachment");
-            let storage = self.get_storage();
-            storage
-                .save_file(self.id, FileContent::Content(attachment_data), &path)
-                .await?;
-        }
-
-        save_tags(project.id, dist_tags, previous_tags, &self.site.database).await?;
 
         if let Err(err) = webhooks::enqueue_package_path_event(
             &self.site,
@@ -148,6 +120,97 @@ impl NPMHostedRegistry {
 
         Ok(ResponseBuilder::no_content().empty().into())
     }
+    #[instrument(skip(self), fields(repository_id = %self.id))]
+    async fn resolve_tarball_path(
+        &self,
+        name: &str,
+        version: &str,
+        file: &str,
+    ) -> Result<Option<StoragePath>, NPMRegistryError> {
+        let Some(project) = self.get_project_from_key(name).await? else {
+            return Ok(None);
+        };
+        let Some(version) = self.get_project_version(project.id, version).await? else {
+            return Ok(None);
+        };
+        let mut path = StoragePath::from(version.path.as_str());
+        path.push_mut(file);
+        debug!(project_id = %project.id, version_id = %version.id, storage_path = %path, "Getting file");
+        Ok(Some(path))
+    }
+
+    #[instrument(skip(self, data), fields(repository_id = %self.id))]
+    fn validate_publication(
+        &self,
+        route: &StoragePath,
+        name: &str,
+        version: &str,
+        data: &PublishVersion,
+        attachment: &str,
+    ) -> Result<String, NPMRegistryError> {
+        if name.is_empty()
+            || data.name.name.is_empty()
+            || name != data.name.to_string()
+            || route.to_string() != name
+            || version != data.version
+            || semver::Version::parse(version).is_err()
+        {
+            return Err(NPMRegistryError::InvalidPublication);
+        }
+        let file = format!("{}-{version}.tgz", data.name.name);
+        let scoped_attachment = data
+            .name
+            .scope
+            .as_ref()
+            .map(|scope| format!("@{scope}/{file}"));
+        if attachment != file && scoped_attachment.as_deref() != Some(attachment) {
+            return Err(NPMRegistryError::InvalidPublication);
+        }
+        let storage = self.storage.storage_config();
+        let advertised = data
+            .dist
+            .validate_tarball(&storage.storage_config.storage_name, &self.repository.name)?;
+        match GetPath::try_from(advertised) {
+            Ok(GetPath::GetTar {
+                name: target,
+                version: target_version,
+                file: target_file,
+            }) if target == name && target_version == version && target_file == file => Ok(file),
+            _ => Err(NPMRegistryError::InvalidPublication),
+        }
+    }
+
+    #[instrument(skip(self, data, attachment, tags), fields(repository_id = %self.id, attachment_bytes = attachment.len()))]
+    async fn persist_publication(
+        &self,
+        publisher: i32,
+        data: &PublishVersion,
+        file: &str,
+        attachment: Vec<u8>,
+        tags: HashMap<String, String>,
+    ) -> Result<StoragePath, NPMRegistryError> {
+        let project_path = StoragePath::from(data.name.to_string());
+        let project = self.get_or_create_project(&project_path, data).await?;
+        let fallback = load_tags(project.id, &self.site.database).await?;
+        let mut version_path = project_path;
+        version_path.push_mut(&data.version);
+        self.create_version_if_missing(publisher, &version_path, &project, data)
+            .await?;
+
+        let mut tarball_path = version_path.clone();
+        tarball_path.push_mut(file);
+        info!(%file, attachment.size_bytes = attachment.len(), "Saving attachment");
+        self.storage
+            .save_file(self.id, FileContent::Content(attachment), &tarball_path)
+            .await?;
+
+        let mut tx = self.site.database.begin().await?;
+        DBNpmProjectMetadata::lock_project(&mut tx, project.id).await?;
+        DBNpmProjectMetadata::merge_tags(project.id, tags, fallback, &mut *tx).await?;
+        tx.commit().await?;
+        Ok(version_path)
+    }
+
     #[instrument(skip(self, request), fields(repository_id = %self.id))]
     async fn handle_deprecate(
         &self,
@@ -170,31 +233,6 @@ impl NPMHostedRegistry {
         debug!(package = %name, version_count, "Updated npm deprecation messages");
         Ok(ResponseBuilder::no_content().empty().into())
     }
-    #[instrument(skip(self, tags), fields(repository_id = %self.id))]
-    async fn set_dist_tag(
-        &self,
-        project: uuid::Uuid,
-        tag: String,
-        version: String,
-        tags: HashMap<String, String>,
-    ) -> Result<RepoResponse, NPMRegistryError> {
-        if self.get_project_version(project, &version).await?.is_none() {
-            return Ok(Response::builder()
-                .status(StatusCode::NOT_FOUND)
-                .body("Version not found".into())
-                .into());
-        }
-        save_tags(
-            project,
-            HashMap::from_iter([(tag.clone(), version.clone())]),
-            tags,
-            &self.site.database,
-        )
-        .await?;
-        debug!(%project, %tag, %version, "Updated npm distribution tag");
-        Ok(ResponseBuilder::no_content().empty().into())
-    }
-
     #[instrument(skip(self, request), fields(repository_id = %self.id))]
     async fn handle_dist_tags(
         &self,
@@ -230,32 +268,62 @@ impl NPMHostedRegistry {
                 .body("Project not found".into())
                 .into());
         };
-        let tags = load_tags(project.id, &self.site.database).await?;
-        debug!(package = %name, tag_count = tags.len(), "Loaded npm distribution tags");
         match (method, tag) {
-            (http::Method::GET, None) => Ok(Response::builder()
-                .status(StatusCode::OK)
-                .header(CONTENT_TYPE, "application/json")
-                .body(serde_json::to_string(&tags)?.into())
-                .into()),
-            (http::Method::PUT, Some(tag)) => {
-                let version: String = serde_json::from_str(&request.body.body_as_string().await?)
-                    .map_err(|_| NPMRegistryError::InvalidDistTags)?;
-                self.set_dist_tag(project.id, tag, version, tags).await
+            (http::Method::GET, None) => {
+                let tags = load_tags(project.id, &self.site.database).await?;
+                Ok(Response::builder()
+                    .status(StatusCode::OK)
+                    .header(CONTENT_TYPE, "application/json")
+                    .body(serde_json::to_string(&tags)?.into())
+                    .into())
             }
-            (http::Method::DELETE, Some(tag)) => {
-                if !tags.contains_key(&tag) {
-                    return Ok(Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body("Tag not found".into())
-                        .into());
-                }
-                remove_tag(project.id, &tag, &self.site.database).await?;
-                debug!(package = %name, %tag, "Removed npm distribution tag");
-                Ok(ResponseBuilder::no_content().empty().into())
+            (method @ (http::Method::PUT | http::Method::DELETE), Some(tag)) => {
+                self.change_dist_tag(project.id, request, method, tag).await
             }
             _ => Err(NPMRegistryError::InvalidDistTags),
         }
+    }
+
+    #[instrument(skip(self, request), fields(repository_id = %self.id))]
+    async fn change_dist_tag(
+        &self,
+        project: uuid::Uuid,
+        request: RepositoryRequest,
+        method: http::Method,
+        tag: String,
+    ) -> Result<RepoResponse, NPMRegistryError> {
+        let version = if method == http::Method::PUT {
+            Some(
+                serde_json::from_str::<String>(&request.body.body_as_string().await?)
+                    .map_err(|_| NPMRegistryError::InvalidDistTags)?,
+            )
+        } else {
+            if tag == "latest" {
+                return Err(NPMRegistryError::CannotRemoveLatest);
+            }
+            None
+        };
+        let mut tx = self.site.database.begin().await?;
+        DBNpmProjectMetadata::lock_project(&mut tx, project).await?;
+        let fallback = load_tags_on(project, &mut tx).await?;
+        if let Some(version) = version {
+            if !DBNpmProjectMetadata::set_tag(project, tag, version, fallback, &mut tx).await? {
+                return Ok(RepoResponse::basic_text_response(
+                    StatusCode::NOT_FOUND,
+                    "Version not found",
+                ));
+            }
+        } else {
+            if !fallback.contains_key(&tag) {
+                return Ok(RepoResponse::basic_text_response(
+                    StatusCode::NOT_FOUND,
+                    "Tag not found",
+                ));
+            }
+            DBNpmProjectMetadata::remove_tag(project, &tag, fallback, &mut *tx).await?;
+        }
+        tx.commit().await?;
+        Ok(ResponseBuilder::no_content().empty().into())
     }
 }
 impl NpmRegistryExt for NPMHostedRegistry {}
@@ -359,8 +427,12 @@ impl Repository for NPMHostedRegistry {
                 let metadata = package_fields(
                     dist_tags
                         .get("latest")
-                        .or(newest_version.as_ref())
-                        .and_then(|version| versions_map.get(version)),
+                        .and_then(|version| versions_map.get(version))
+                        .or_else(|| {
+                            newest_version
+                                .as_ref()
+                                .and_then(|version| versions_map.get(version))
+                        }),
                 );
                 let project_response = NpmRegistryPackageResponse {
                     id: project.key.clone(),
@@ -414,26 +486,10 @@ impl Repository for NPMHostedRegistry {
                 version,
                 file,
             } => {
-                let Some(project) = self.get_project_from_key(&name).await? else {
-                    return Ok(Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(format!("Project {} not found in repository", name).into())
-                        .into());
+                let Some(path) = self.resolve_tarball_path(&name, &version, &file).await? else {
+                    return Ok(ResponseBuilder::not_found().empty().into());
                 };
-                debug!(?project, ?version, "Getting version");
-                let Some(version) = self.get_project_version(project.id, &version).await? else {
-                    return Ok(Response::builder()
-                        .status(StatusCode::NOT_FOUND)
-                        .body(format!("Version {} not found in project {}", version, name).into())
-                        .into());
-                };
-                debug!(version_id = %version.id, version = %version.version, "Loaded npm version");
-                let mut storage_path = StoragePath::from(version.path.as_str());
-                storage_path.push_mut(&file);
-                debug!(?storage_path, "Getting file");
-                let storage = self.get_storage();
-                let file = storage.open_file(self.id, &storage_path).await?;
-                Ok(RepoResponse::from(file))
+                Ok(self.storage.open_file(self.id, &path).await?.into())
             }
             _ => Ok(Response::builder()
                 .status(StatusCode::NOT_FOUND)
@@ -442,10 +498,26 @@ impl Repository for NPMHostedRegistry {
         }
     }
 
+    #[instrument(skip(self, request), fields(repository_id = %self.id))]
     async fn handle_head(
         &self,
         mut request: RepositoryRequest,
     ) -> Result<RepoResponse, NPMRegistryError> {
+        if let Ok(GetPath::GetTar {
+            name,
+            version,
+            file,
+        }) = GetPath::try_from(request.path.clone())
+        {
+            let Some(path) = self.resolve_tarball_path(&name, &version, &file).await? else {
+                return Ok(ResponseBuilder::not_found().empty().into());
+            };
+            return Ok(self
+                .storage
+                .get_file_information(self.id, &path)
+                .await?
+                .into());
+        }
         request.parts.method = http::Method::GET;
         let mut response = self.handle_get(request).await?.into_response_default();
         *response.body_mut() = axum::body::Body::empty();
@@ -463,16 +535,17 @@ impl Repository for NPMHostedRegistry {
         } else if path_as_string.eq("-/v1/login") {
             return super::login::web_login::perform_login(self, request).await;
         }
+        if let Some((name, tag)) = parse_tag_path(&path_as_string) {
+            return self.handle_dist_tags(request, name, tag).await;
+        }
         let Some(_user) = request
             .authentication
             .get_user_if_has_action(RepositoryActions::Write, self.id, self.site.as_ref())
             .await?
         else {
+            info!("No acceptable user authentication provided");
             return Ok(RepoResponse::unauthorized());
         };
-        if let Some((name, tag)) = parse_tag_path(&path_as_string) {
-            return self.handle_dist_tags(request, name, tag).await;
-        }
         let command_header = match request
             .headers()
             .get(NPM_COMMAND_HEADER)

@@ -52,29 +52,23 @@ for LIFE_NAME in pkgly-beta-lifecycle @pkgly-test/beta-lifecycle; do
         if lifecycle_install "$LIFE_NAME" "$LIFE_VERSION" "$LIFE_VERSION" "exact-${LIFE_VERSION}" "$NPM_HOSTED_REPO" "$WORKSPACE/lifecycle-exact-cache"; then pass; else fail "Exact prerelease was lost"; fi
     done
     cd "$LIFE_DIRECTORY" || return 1
-    print_test "Duplicate publication of ${LIFE_NAME} preserves the original tarball and tags"
-    LIFE_BEFORE=$(api_get "$LIFE_PATH")
-    LIFE_TARBALL=$(jq -r '.versions["2.0.0-beta.2"].dist.tarball' <<<"$LIFE_BEFORE")
-    LIFE_HASH_BEFORE=$(curl -fsS -H "$(get_auth_header)" "$LIFE_TARBALL" | sha256sum)
-    printf '\n// Duplicate publication must not replace these bytes.\n' >> index.js
-    if run_cmd npm publish --tag latest; then
-        fail "Duplicate publication succeeded"
-    else
-        LIFE_AFTER=$(api_get "$LIFE_PATH")
-        LIFE_HASH_AFTER=$(curl -fsS -H "$(get_auth_header)" "$LIFE_TARBALL" | sha256sum)
-        if [ "$LIFE_HASH_BEFORE" = "$LIFE_HASH_AFTER" ] && jq -e --argjson before "$LIFE_BEFORE" '. == $before' <<<"$LIFE_AFTER" > /dev/null; then pass; else fail "Rejected duplicate changed package state"; fi
-    fi
-    print_test "Remove latest and all remaining tags for ${LIFE_NAME}"
-    if run_cmd npm dist-tag rm "$LIFE_NAME" latest &&
-       api_get "$LIFE_PATH" | jq -e '.["dist-tags"] | has("latest") | not' > /dev/null &&
+    print_test "Protect latest and allow removal of other tags for ${LIFE_NAME}"
+    if ! run_cmd npm dist-tag rm "$LIFE_NAME" latest &&
        run_cmd npm dist-tag rm "$LIFE_NAME" beta && run_cmd npm dist-tag rm "$LIFE_NAME" canary &&
-       api_get "$LIFE_TAGS" | jq -e '. == {}' > /dev/null &&
-       api_get "$LIFE_PATH" | jq -e '.["dist-tags"] == {}' > /dev/null; then pass; else fail "Deleted tags were restored"; fi
-    print_test "Beta publication after tag deletion does not restore latest for ${LIFE_NAME}"
-    jq '.version="2.0.0-beta.3"' package.json > package.json.tmp
+       api_get "$LIFE_TAGS" | jq -e '. == {"latest":"1.0.0"}' > /dev/null; then pass; else fail "Latest protection or tag removal failed"; fi
+    print_test "Remove and republish the final beta tag without creating latest for ${LIFE_NAME}"
+    LIFE_BETA_NAME="${LIFE_NAME}-only"
+    LIFE_BETA_TAGS="/repositories/${NPM_HOSTED_REPO}/-/package/${LIFE_BETA_NAME}/dist-tags"
+    jq --arg name "$LIFE_BETA_NAME" '.name=$name | .version="2.0.0-beta.3"' package.json > package.json.tmp
     mv package.json.tmp package.json
     if run_cmd npm publish --tag beta &&
-       api_get "$LIFE_TAGS" | jq -e '. == {"beta":"2.0.0-beta.3"}' > /dev/null; then pass; else fail "Publication restored latest"; fi
+       run_cmd npm dist-tag rm "$LIFE_BETA_NAME" beta &&
+       api_get "$LIFE_BETA_TAGS" | jq -e '. == {}' > /dev/null; then
+        jq '.version="2.0.0-beta.4"' package.json > package.json.tmp
+        mv package.json.tmp package.json
+        if run_cmd npm publish --tag beta &&
+           api_get "$LIFE_BETA_TAGS" | jq -e '. == {"beta":"2.0.0-beta.4"}' > /dev/null; then pass; else fail "Publication restored latest"; fi
+    else fail "Final beta tag removal failed"; fi
 
 done
 cd "$WORKSPACE/hello-pkg" || return 1

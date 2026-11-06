@@ -59,6 +59,7 @@ async fn npm_handler_spans_and_audit_events_exclude_request_contents() {
             (Method::PUT, "demo", "deprecate", "{\"name\":\"demo\",\"versions\":{\"1.0.0\":{\"deprecated\":\"sensitive-deprecation-message\"}}}"),
             (Method::PUT, "demo", "publish", r#"{"name":"demo","versions":{"2.0.0":{"name":"demo","version":"2.0.0","dist":{"tarball":"http://registry.test/repositories/npm-test/public/demo/-/demo-2.0.0.tgz","shasum":"hash","integrity":"hash"},"_id":"demo@2.0.0","_nodeVersion":"22","_npmVersion":"11","readme":"sensitive-readme"}},"dist-tags":{"beta":"2.0.0"},"_attachments":{"demo-2.0.0.tgz":{"content_type":"application/octet-stream","data":"ZGVtbw==","length":4}}}"#),
             (Method::GET, "demo", "", "sensitive-request-body"),
+            (Method::HEAD, "demo/-/demo-2.0.0.tgz", "", "sensitive-request-body"),
         ] {
             let ctx = AccessLogContext::default();
             let mut request = http::Request::builder().method(method.clone()).uri(format!("/repositories/npm-test/public/{path}"))
@@ -85,14 +86,38 @@ async fn npm_handler_spans_and_audit_events_exclude_request_contents() {
     let log = String::from_utf8(writer.0.lock().unwrap().clone()).unwrap();
     for span in [
         "handle_dist_tags",
-        "set_dist_tag",
+        "change_dist_tag",
         "handle_deprecate",
         "handle_publish",
+        "get_or_create_project",
+        "create_version_if_missing",
+        "validate_publication",
+        "persist_publication",
+        "handle_head",
+        "resolve_tarball_path",
     ] {
         assert!(
             log.contains(&format!("\"name\":\"{span}\"")),
             "missing span {span}"
         );
+    }
+    let entries: Vec<serde_json::Value> = log
+        .lines()
+        .map(|line| serde_json::from_str(line).unwrap())
+        .collect();
+    for name in ["get_or_create_project", "create_version_if_missing"] {
+        let span = entries
+            .iter()
+            .map(|entry| &entry["span"])
+            .find(|span| span["name"] == name)
+            .unwrap();
+        assert_eq!(span["package"], "demo");
+        assert_eq!(span["version"], "2.0.0");
+        assert!(span["repository_id"].is_string());
+        if name == "create_version_if_missing" {
+            assert!(span["project_id"].is_string());
+            assert!(span.get("project").is_none());
+        }
     }
     for action in [
         "package.dist_tag.list",
@@ -107,6 +132,7 @@ async fn npm_handler_spans_and_audit_events_exclude_request_contents() {
         "sensitive-credential",
         "sensitive-deprecation-message",
         "sensitive-readme",
+        "ZGVtbw==",
     ] {
         assert!(
             !log.contains(secret),

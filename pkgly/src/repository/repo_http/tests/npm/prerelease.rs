@@ -47,7 +47,7 @@ async fn request(
         request,
     )
     .await
-    .unwrap()
+    .unwrap_or_else(IntoResponse::into_response)
 }
 
 async fn json_get(site: &Pkgly, auth: &RepositoryAuthentication, repo: &str, path: &str) -> Value {
@@ -93,48 +93,41 @@ async fn writer(db: &TestDb) -> RepositoryAuthentication {
 }
 
 #[tokio::test]
-async fn duplicate_prerelease_publication_preserves_bytes_metadata_and_tags() {
+async fn republishing_prerelease_preserves_version_metadata_and_applies_tags() {
     let _guard = DB_LOCK.lock().await;
     let db = fresh_db().await;
     let root = tempfile::tempdir().unwrap();
     let site = npm_site(&db, root.path()).await;
     let auth = writer(&db).await;
-    let mut failures = Vec::new();
-    for changed in [false, true] {
-        let name = if changed {
-            "duplicate-changed"
-        } else {
-            "duplicate-identical"
-        };
-        let original = publication("public", name, "1.0.0-beta.1", "beta", BYTES);
-        assert_eq!(
-            request(&site, &auth, "public", name, Method::PUT, original.clone())
-                .await
-                .status(),
-            StatusCode::NO_CONTENT
-        );
-        let before = json_get(&site, &auth, "public", name).await;
-        let mut duplicate = original;
-        if changed {
-            duplicate = publication(
-                "public",
-                name,
-                "1.0.0-beta.1",
-                "latest",
-                b"replacement tarball",
-            );
-            duplicate["versions"]["1.0.0-beta.1"]["readme"] = json!("Replacement README");
-        }
-        let status = request(&site, &auth, "public", name, Method::PUT, duplicate)
+    let name = "republished-prerelease";
+    let version = "1.0.0-beta.1";
+    let original = publication("public", name, version, "beta", BYTES);
+    assert_eq!(
+        request(&site, &auth, "public", name, Method::PUT, original)
             .await
-            .status();
-        let unchanged = json_get(&site, &auth, "public", name).await == before;
-        let bytes_unchanged = tarball(&site, &auth, "public", name, "1.0.0-beta.1").await == BYTES;
-        if status != StatusCode::CONFLICT || !unchanged || !bytes_unchanged {
-            failures.push(format!("changed={changed}: status={status}, metadata unchanged={unchanged}, bytes unchanged={bytes_unchanged}"));
-        }
-    }
-    assert!(failures.is_empty(), "{}", failures.join("\n"));
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let before = json_get(&site, &auth, "public", name).await;
+    let replacement = b"replacement tarball";
+    let mut repeat = publication("public", name, version, "next", replacement);
+    repeat["versions"][version]["readme"] = json!("Replacement README");
+    assert_eq!(
+        request(&site, &auth, "public", name, Method::PUT, repeat)
+            .await
+            .status(),
+        StatusCode::NO_CONTENT
+    );
+    let after = json_get(&site, &auth, "public", name).await;
+    assert_eq!(after["versions"], before["versions"]);
+    assert_eq!(
+        after["dist-tags"],
+        json!({"beta": version, "next": version})
+    );
+    assert_eq!(
+        tarball(&site, &auth, "public", name, version).await,
+        replacement
+    );
 }
 
 #[tokio::test]
@@ -216,7 +209,7 @@ async fn invalid_prerelease_publications_leave_no_partial_state() {
 }
 
 #[tokio::test]
-async fn deleting_latest_and_final_tag_does_not_restore_legacy_fallback() {
+async fn latest_is_protected_but_a_beta_only_package_can_remove_its_final_tag() {
     let _guard = DB_LOCK.lock().await;
     let db = fresh_db().await;
     let root = tempfile::tempdir().unwrap();
@@ -260,38 +253,35 @@ async fn deleting_latest_and_final_tag_does_not_restore_legacy_fallback() {
             )
             .await
             .status(),
-            StatusCode::NO_CONTENT
+            StatusCode::BAD_REQUEST
         );
-        for _ in 0..2 {
-            assert_eq!(json_get(&site, &auth, "public", &tags).await, json!({}));
-            assert_eq!(
-                json_get(&site, &auth, "public", &name).await["dist-tags"],
-                json!({})
-            );
-        }
+        assert_eq!(
+            json_get(&site, &auth, "public", &tags).await,
+            json!({"latest":"1.0.0"})
+        );
+        assert_eq!(tarball(&site, &auth, "public", &name, "1.0.0").await, BYTES);
+    }
+    let name = "beta-only";
+    for version in ["1.0.0-beta.1", "1.0.0-beta.2"] {
         assert_eq!(
             request(
                 &site,
                 &auth,
                 "public",
-                &name,
+                name,
                 Method::PUT,
-                publication("public", &name, "2.0.0-beta.1", "beta", BYTES)
+                publication("public", name, version, "beta", BYTES)
             )
             .await
             .status(),
             StatusCode::NO_CONTENT
         );
         assert_eq!(
-            json_get(&site, &auth, "public", &tags).await,
-            json!({"beta":"2.0.0-beta.1"})
-        );
-        assert_eq!(
             request(
                 &site,
                 &auth,
                 "public",
-                &format!("{tags}/beta"),
+                "-/package/beta-only/dist-tags/beta",
                 Method::DELETE,
                 Value::Null
             )
@@ -300,11 +290,11 @@ async fn deleting_latest_and_final_tag_does_not_restore_legacy_fallback() {
             StatusCode::NO_CONTENT
         );
         assert_eq!(
-            json_get(&site, &auth, "public", &name).await["dist-tags"],
+            json_get(&site, &auth, "public", name).await["dist-tags"],
             json!({})
         );
-        assert_eq!(tarball(&site, &auth, "public", &name, "1.0.0").await, BYTES);
     }
 }
 
 mod retrieval;
+mod review;

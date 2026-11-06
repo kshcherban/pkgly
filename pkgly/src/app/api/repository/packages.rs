@@ -315,13 +315,51 @@ async fn delete_version_records_by_path(
     repository_id: Uuid,
     version_paths: &HashSet<String>,
     include_descendants: bool,
+    clear_npm_tags: bool,
 ) -> Result<u64, sqlx::Error> {
     let normalized = normalize_catalog_paths(version_paths);
     if normalized.is_empty() {
         return Ok(0);
     }
 
-    sql_delete_project_versions(database, repository_id, normalized, include_descendants).await
+    sql_delete_project_versions(
+        database,
+        repository_id,
+        normalized,
+        include_descendants,
+        clear_npm_tags,
+    )
+    .await
+}
+
+async fn lock_npm_deletion_projects(
+    transaction: &mut sqlx::PgConnection,
+    repository_id: Uuid,
+    paths: &[String],
+    include_descendants: bool,
+) -> Result<std::collections::HashMap<Uuid, String>, sqlx::Error> {
+    // Match the tag write lock order: project rows before version rows.
+    let projects: Vec<(Uuid, bool)> = sqlx::query_as(
+        "SELECT p.id, p.npm_dist_tags IS NULL FROM projects p WHERE p.repository_id = $1 AND EXISTS (
+            SELECT 1 FROM project_versions v, unnest($2::text[]) AS target(path)
+            WHERE v.project_id = p.id AND (lower(rtrim(v.path, '/')) = target.path
+            OR ($3 AND starts_with(lower(rtrim(v.path, '/')), target.path || '/')))
+         ) ORDER BY p.id FOR UPDATE",
+    )
+    .bind(repository_id).bind(paths).bind(include_descendants)
+    .fetch_all(&mut *transaction).await?;
+    let mut inferred_latest = std::collections::HashMap::new();
+    for (project, legacy) in projects {
+        if legacy
+            && let Some(version) =
+                crate::repository::npm::load_tags_in_transaction(project, transaction)
+                    .await?
+                    .remove("latest")
+        {
+            inferred_latest.insert(project, version);
+        }
+    }
+    Ok(inferred_latest)
 }
 
 async fn sql_delete_project_versions(
@@ -329,17 +367,30 @@ async fn sql_delete_project_versions(
     repository_id: Uuid,
     normalized_paths: Vec<String>,
     include_descendants: bool,
+    clear_npm_tags: bool,
 ) -> Result<u64, sqlx::Error> {
     let mut transaction = database.begin().await?;
+    let inferred_latest = if clear_npm_tags {
+        lock_npm_deletion_projects(
+            &mut transaction,
+            repository_id,
+            &normalized_paths,
+            include_descendants,
+        )
+        .await?
+    } else {
+        std::collections::HashMap::new()
+    };
+
     let mut total_deleted = 0u64;
     for path in normalized_paths {
-        let rows = sqlx::query(
+        let rows: Vec<(Uuid, String)> = sqlx::query_as(
             r#"
             DELETE FROM project_versions
             WHERE repository_id = $1
               AND (LOWER(RTRIM(path, '/')) = $2
                    OR ($3 AND starts_with(LOWER(RTRIM(path, '/')), $2 || '/')))
-            RETURNING id
+            RETURNING project_id, version
             "#,
         )
         .bind(repository_id)
@@ -348,6 +399,14 @@ async fn sql_delete_project_versions(
         .fetch_all(&mut *transaction)
         .await?;
         total_deleted += rows.len() as u64;
+        if clear_npm_tags {
+            for (project, version) in rows {
+                nr_core::database::entities::project::npm::DBNpmProjectMetadata::clear_deleted_version_tags(
+                    &mut transaction, project, &version,
+                    inferred_latest.get(&project) == Some(&version),
+                ).await?;
+            }
+        }
         sqlx::query(
             "UPDATE package_files SET deleted_at = NOW(), updated_at = NOW()
              WHERE repository_id = $1 AND deleted_at IS NULL
@@ -644,7 +703,8 @@ fn is_valid_cache_path(path: &str, strategy: PackageStrategy) -> bool {
         PackageStrategy::NpmProxy => {
             path.starts_with("packages/") && is_valid_repository_path(path)
         }
-        PackageStrategy::NpmHosted | PackageStrategy::NpmVirtual => {
+        PackageStrategy::NpmHosted => is_valid_repository_path(path),
+        PackageStrategy::NpmVirtual => {
             path.starts_with("packages/") && is_valid_repository_path(path)
         }
         PackageStrategy::MavenHosted
@@ -1316,6 +1376,7 @@ pub async fn delete_cached_package_paths(
                             repository.id(),
                             &targets,
                             true,
+                            false,
                         )
                         .await?;
                         deleted += result.removed;
@@ -1388,10 +1449,23 @@ pub async fn delete_cached_package_paths(
     }
 
     if catalog_mode != CatalogDeletionMode::None {
-        delete_version_records_by_path(&site.database, repository.id(), &catalog_targets, false)
-            .await?;
-        delete_version_records_by_path(&site.database, repository.id(), &catalog_trees, true)
-            .await?;
+        let clear_npm_tags = matches!(strategy, PackageStrategy::NpmHosted);
+        delete_version_records_by_path(
+            &site.database,
+            repository.id(),
+            &catalog_targets,
+            false,
+            clear_npm_tags,
+        )
+        .await?;
+        delete_version_records_by_path(
+            &site.database,
+            repository.id(),
+            &catalog_trees,
+            true,
+            clear_npm_tags,
+        )
+        .await?;
     }
     if !deleted_paths.is_empty() {
         let mut paths: Vec<String> = deleted_paths.into_iter().collect();

@@ -21,6 +21,7 @@ pub mod login;
 mod metadata;
 pub mod proxy;
 mod tags;
+pub(crate) use tags::load_tags_on as load_tags_in_transaction;
 pub mod types;
 pub mod utils;
 pub mod r#virtual;
@@ -66,12 +67,14 @@ pub enum NPMRegistryError {
         "Invalid GET request. The requested route is invalid to the NPM Registry. This could be a bug. AS the code is very sketchy"
     )]
     InvalidGetRequest,
+    #[error("Package name, version or tarball does not match the publish request")]
+    InvalidPublication,
+    #[error("The latest distribution tag cannot be removed directly")]
+    CannotRemoveLatest,
     #[error("Invalid npm distribution tags")]
     InvalidDistTags,
     #[error("Invalid npm metadata update")]
     InvalidMetadataUpdate,
-    #[error("This package version already exists")]
-    VersionAlreadyExists,
     #[error("Version not found")]
     VersionNotFound,
     #[error("Invalid Package Attachment. Error: {0}")]
@@ -144,10 +147,6 @@ pub(crate) fn validate_virtual_config(
 impl IntoResponse for NPMRegistryError {
     fn into_response(self) -> Response {
         match self {
-            NPMRegistryError::VersionAlreadyExists => Response::builder()
-                .status(StatusCode::CONFLICT)
-                .body(self.to_string().into())
-                .unwrap_or_default(),
             NPMRegistryError::InvalidGetRequest => Response::builder()
                 .status(StatusCode::NOT_FOUND)
                 .body("Invalid GET request".into())

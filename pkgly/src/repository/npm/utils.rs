@@ -1,3 +1,4 @@
+use crate::repository::Repository;
 use nr_core::{
     database::entities::project::{DBProject, ProjectDBType, versions::DBProjectVersion},
     storage::StoragePath,
@@ -5,7 +6,6 @@ use nr_core::{
 use tracing::{info, instrument};
 
 use super::{NPMRegistryError, types::request::PublishVersion};
-use crate::repository::Repository;
 
 pub mod npm_time {
     use chrono::{DateTime, FixedOffset};
@@ -21,63 +21,39 @@ pub trait NpmRegistryExt: Repository {
         save_path: &StoragePath,
         release: &PublishVersion,
     ) -> Result<DBProject, NPMRegistryError> {
-        if let Some(project) = DBProject::find_by_project_key(
-            &release.name.to_string(),
-            self.id(),
-            self.site().as_ref(),
-        )
-        .await?
+        let database = &self.site().database;
+        if let Some(project) =
+            DBProject::find_by_project_key(&release.name.to_string(), self.id(), database).await?
         {
-            // TODO: Update
             return Ok(project);
         }
-
-        match release.new_project(save_path.to_string(), self.id()) {
-            Ok(ok) => {
-                let insert = ok.insert(self.site().as_ref()).await?;
-                info!(?insert, "Created new project");
-                Ok(insert)
-            }
-            Err(err) => {
-                return Err(err);
-            }
-        }
+        let project = release
+            .new_project(save_path.to_string(), self.id())?
+            .insert(database)
+            .await?;
+        info!(project_id = %project.id, "Created new project");
+        Ok(project)
     }
-    /// Creates an immutable npm version. Returns a conflict when the version already exists.
-    #[instrument(skip(self, release), fields(repository_id = %self.id(), package = %release.name, version = %release.version))]
-    async fn create_version(
+
+    #[instrument(skip(self, project, release), fields(repository_id = %self.id(), project_id = %project.id, package = %release.name, version = %release.version))]
+    async fn create_version_if_missing(
         &self,
         publisher: i32,
         save_path: &StoragePath,
         project: &DBProject,
         release: &PublishVersion,
     ) -> Result<(), NPMRegistryError> {
-        if let Some(_version) = DBProjectVersion::find_by_version_and_project(
-            &release.version,
-            project.id,
-            &self.site().database,
-        )
-        .await?
+        let database = &self.site().database;
+        if DBProjectVersion::find_by_version_and_project(&release.version, project.id, database)
+            .await?
+            .is_none()
         {
-            return Err(NPMRegistryError::VersionAlreadyExists);
+            release
+                .new_version(project.id, self.id(), save_path.to_string(), publisher)?
+                .insert(database)
+                .await?;
         }
-
-        match release.new_version(project.id, self.id(), save_path.to_string(), publisher) {
-            Ok(ok) => {
-                match ok.insert(&self.site().database).await {
-                    Err(sqlx::Error::Database(error)) if error.is_unique_violation() => {
-                        return Err(NPMRegistryError::VersionAlreadyExists);
-                    }
-                    result => {
-                        result?;
-                    }
-                }
-                return Ok(());
-            }
-            Err(err) => {
-                return Err(err);
-            }
-        }
+        Ok(())
     }
 }
 

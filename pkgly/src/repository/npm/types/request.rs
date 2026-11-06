@@ -82,7 +82,7 @@ impl PublishDist {
         &self,
         storage_name: &str,
         repository_name: &str,
-    ) -> Result<(), NPMRegistryError> {
+    ) -> Result<StoragePath, NPMRegistryError> {
         let url = url::Url::from_str(&self.tarball).map_err(|error| {
             info!(?error, "Invalid tarball");
             NPMRegistryError::InvalidTarball {
@@ -123,7 +123,14 @@ impl PublishDist {
                 error: Cow::Borrowed("Missing repository name"),
             });
         }
-        Ok(())
+        let suffix = path.collect::<Vec<_>>().join("/");
+        let decoded = percent_encoding::percent_decode_str(&suffix)
+            .decode_utf8()
+            .map_err(|_| NPMRegistryError::InvalidTarball {
+                tarball_route: self.tarball.clone(),
+                error: Cow::Borrowed("Invalid UTF-8 in tarball path"),
+            })?;
+        Ok(StoragePath::from(decoded.as_ref()))
     }
 }
 impl PublishVersion {

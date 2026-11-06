@@ -87,29 +87,19 @@ pub(super) async fn load_tags(
     project: Uuid,
     database: &PgPool,
 ) -> Result<HashMap<String, String>, NPMRegistryError> {
-    if let Some(tags) = DBNpmProjectMetadata::load_tags(project, database).await? {
+    let mut connection = database.acquire().await?;
+    Ok(load_tags_on(project, &mut connection).await?)
+}
+
+pub(crate) async fn load_tags_on(
+    project: Uuid,
+    database: &mut sqlx::PgConnection,
+) -> Result<HashMap<String, String>, sqlx::Error> {
+    if let Some(tags) = DBNpmProjectMetadata::load_tags(project, &mut *database).await? {
         return Ok(tags);
     }
     let versions = DBNpmProjectMetadata::stable_version_candidates(project, database).await?;
     Ok(legacy_dist_tags(versions.iter().map(String::as_str)))
-}
-
-pub(super) async fn save_tags(
-    project: Uuid,
-    tags: HashMap<String, String>,
-    fallback: HashMap<String, String>,
-    database: &PgPool,
-) -> Result<(), NPMRegistryError> {
-    Ok(DBNpmProjectMetadata::merge_tags(project, tags, fallback, database).await?)
-}
-
-pub(super) async fn remove_tag(
-    project: Uuid,
-    tag: &str,
-    database: &PgPool,
-) -> Result<(), NPMRegistryError> {
-    let fallback = load_tags(project, database).await?;
-    Ok(DBNpmProjectMetadata::remove_tag(project, tag, fallback, database).await?)
 }
 
 #[cfg(test)]

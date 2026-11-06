@@ -217,9 +217,10 @@ The npm suite uses native npm and Yarn commands, plus direct HTTP requests for i
 12. Deny writes with read-only tokens and preserve stored metadata.
 
 `npm_registry_behavior.sh` and `npm_prerelease_lifecycle.sh` run as part of `test_npm.sh` and use its fixtures and result counters.
-The npm lifecycle suite covers successive beta publications, fresh and reused client caches, immutable versions, and deletion of all distribution tags.
+The npm lifecycle suite covers successive beta publications, fresh and reused client caches, and tag removal from beta-only packages.
 Rust HTTP tests also cover rejected publications without partial catalog changes and prerelease downloads through hosted, proxy, and virtual repositories.
 The retrieval fixture stops its controlled upstream before repeated downloads to check cache use.
+Rust HTTP tests also check tag cleanup after version deletion and tarball HEAD responses.
 The mixed cache test checks offline GET and HEAD requests against all three metadata layouts.
 It also checks that the new entry takes precedence when all three layouts contain the same document.
 

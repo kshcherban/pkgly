@@ -69,7 +69,6 @@ fn deprecation_request_rejects_malformed_or_mismatched_documents() {
         json!({"name":"other", "versions":{"1.0.0":{"deprecated":"old"}}}),
         json!({"name":"demo"}),
         json!({"name":"demo", "versions":{}}),
-        json!({"name":"demo", "versions":{"bad":{"deprecated":"old"}}}),
         json!({"name":"demo", "versions":{"1.0.0":{"deprecated":null}}}),
         json!({"name":"demo", "versions":{"1.0.0":{"deprecated":42}}}),
         json!({"name":"demo", "versions":{"1.0.0":null}}),
@@ -77,4 +76,18 @@ fn deprecation_request_rejects_malformed_or_mismatched_documents() {
     ] {
         assert!(deprecation_updates(&body, "demo").is_err(), "{body}");
     }
+}
+
+#[test]
+fn deprecation_ignores_unrelated_legacy_versions() {
+    let updates = deprecation_updates(
+        &serde_json::json!({
+            "name": "demo",
+            "versions": {"1.0": {"name":"demo"}, "2.0.0": {"deprecated":""}}
+        }),
+        "demo",
+    )
+    .unwrap();
+    assert_eq!(updates.len(), 1);
+    assert_eq!(updates["2.0.0"], "");
 }

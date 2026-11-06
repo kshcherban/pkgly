@@ -60,7 +60,7 @@ pub(super) fn deprecation_updates(
         .ok_or(NPMRegistryError::InvalidMetadataUpdate)?;
     let mut updates = HashMap::default();
     for (version, metadata) in versions {
-        if semver::Version::parse(version).is_err() || !metadata.is_object() {
+        if !metadata.is_object() {
             return Err(NPMRegistryError::InvalidMetadataUpdate);
         }
         if let Some(message) = metadata.get("deprecated") {

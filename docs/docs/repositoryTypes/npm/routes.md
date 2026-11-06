@@ -62,9 +62,10 @@ Each version includes its manifest, `dist` hashes and tarball URL, `_id`, `_node
 The tarball URL must point into the target storage and repository.
 Metadata and archive upload form one publish request. Pkgly does not support a separate archive upload endpoint.
 
-A publication must contain exactly one version and one attachment.
+A publication must contain exactly one SemVer version and one attachment.
+The package name in the route must match the publish body and manifest.
+The attachment and advertised download URL must use the tarball filename for that name and version.
 Pkgly decodes the attachment before creating catalog entries.
-An existing package version cannot be published again. Duplicate publication returns `409 Conflict` without replacing its tarball, metadata, or tags.
 Invalid attachment data, empty attachments, mismatched versions, and invalid distribution tags return `400 Bad Request`.
 
 The `dist-tags` object controls which tags change.
@@ -155,6 +156,7 @@ They can contain ASCII letters, digits, and `- _ . ! ~ * ' ( )`.
 Unicode, spaces, percent signs, and path separators are invalid tag characters.
 A tag such as `release*candidate` is valid, while standalone `*` is a version range and is invalid.
 Request paths are percent-decoded once before tag validation.
+To change `latest`, assign it to another version. Direct removal of `latest` returns `400 Bad Request`.
 
 ```sh
 npm dist-tag ls my-package
@@ -204,6 +206,8 @@ These Pkgly management endpoints are separate from the npm registry protocol:
 
 Deletion requires repository edit permission and a JSON body such as `{"paths":["<path-from-package-list>"]}`.
 It is not an implementation of `npm unpublish`.
+When Pkgly deletes a version through this API or package retention, it clears any tags that point to it.
+If that includes `latest`, Pkgly does not promote another version. Assign a new `latest` if needed.
 
 ```sh
 curl -H "Authorization: Bearer <token>" \

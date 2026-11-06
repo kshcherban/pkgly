@@ -3,13 +3,13 @@
 use std::time::Duration;
 
 use ahash::HashMap;
-use nr_core::database::migration::run_migrations;
+use nr_core::database::{entities::project::npm::DBNpmProjectMetadata, migration::run_migrations};
 use serde_json::{Value, json};
 use sqlx::{PgPool, postgres::PgPoolOptions, types::Json};
 use testcontainers::clients::Cli;
 use tokio::task::JoinHandle;
 
-use super::super::{load_tags, remove_tag, save_tags};
+use super::super::load_tags;
 use super::migration::{PROJECT, previous_database};
 use crate::test_support::DB_TEST_LOCK;
 
@@ -136,11 +136,11 @@ fn start_write(
     pool: PgPool,
     fallback: HashMap<String, String>,
     write: Write,
-) -> JoinHandle<Result<(), super::super::super::NPMRegistryError>> {
+) -> JoinHandle<Result<(), sqlx::Error>> {
     tokio::spawn(async move {
         match write {
             Write::Set(tag, version) => {
-                save_tags(
+                DBNpmProjectMetadata::merge_tags(
                     PROJECT,
                     HashMap::from_iter([(tag.into(), version.into())]),
                     fallback,
@@ -148,7 +148,9 @@ fn start_write(
                 )
                 .await
             }
-            Write::Remove(tag) => remove_tag(PROJECT, tag, &pool).await,
+            Write::Remove(tag) => {
+                DBNpmProjectMetadata::remove_tag(PROJECT, tag, fallback, &pool).await
+            }
         }
     })
 }

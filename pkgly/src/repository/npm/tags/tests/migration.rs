@@ -7,9 +7,9 @@ use sqlx::{PgPool, migrate::Migrator, postgres::PgPoolOptions};
 use testcontainers::{Container, clients::Cli, images::generic::GenericImage};
 use uuid::Uuid;
 
-use super::super::{load_tags, save_tags};
+use super::super::load_tags;
 use crate::test_support::DB_TEST_LOCK;
-use nr_core::database::migration::run_migrations;
+use nr_core::database::{entities::project::npm::DBNpmProjectMetadata, migration::run_migrations};
 
 const TAG_MIGRATION: i64 = 20261016120000;
 pub(super) const PROJECT: Uuid = Uuid::from_u128(3);
@@ -40,7 +40,7 @@ async fn upgrade_preserves_existing_packages_and_stored_tags_on_restart() {
     );
 
     let beta = super::HashMap::from_iter([("beta".into(), "2.0.0-beta.1".into())]);
-    save_tags(PROJECT, beta.clone(), fallback.clone(), &pool)
+    DBNpmProjectMetadata::merge_tags(PROJECT, beta.clone(), fallback.clone(), &pool)
         .await
         .unwrap();
     run_migrations(&pool)
@@ -63,7 +63,7 @@ async fn rollback_removes_only_tag_storage_and_reupgrade_preserves_packages() {
     let before = package_snapshot(&pool).await;
     run_migrations(&pool).await.unwrap();
     let tags = super::HashMap::from_iter([("beta".into(), "2.0.0-beta.1".into())]);
-    save_tags(
+    DBNpmProjectMetadata::merge_tags(
         PROJECT,
         tags,
         load_tags(PROJECT, &pool).await.unwrap(),
