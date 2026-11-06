@@ -499,4 +499,10 @@ ON CONFLICT DO NOTHING;
 
 -- Reset sequences
 SELECT setval('users_id_seq', 1, true);
-SELECT setval('user_auth_tokens_id_seq', 1, true);
+-- Read-only token for npm permission regressions. The value is a SHA-256 hash.
+INSERT INTO user_auth_tokens (id, user_id, name, token, active, source)
+VALUES (2, 1, 'npm-read-only', 'Xopt3b1QwQBw8dx8V15A14arjsqfRvPcjHFhqu2JFFk=', true, 'integration')
+ON CONFLICT (id) DO NOTHING;
+INSERT INTO user_auth_token_scopes (user_auth_token_id, scope)
+VALUES (2, 'ReadRepository') ON CONFLICT DO NOTHING;
+SELECT setval('user_auth_tokens_id_seq', 2, true);

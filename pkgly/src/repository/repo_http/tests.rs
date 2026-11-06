@@ -585,3 +585,5 @@ async fn anonymous_docker_tokens_preserve_anonymous_identity_and_revoke_access()
         RepositoryAuthentication::from_raw(AuthenticationRaw::AuthToken(token), &site).await;
     assert!(result.is_err(), "revoked anonymous tokens must be rejected");
 }
+
+mod npm;

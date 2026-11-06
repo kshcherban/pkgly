@@ -91,10 +91,13 @@ async fn direct_repository_or_frontend_request(
     State(site): State<Pkgly>,
     Path(request_path): Path<RepoRequestPath>,
     parent_span: Option<RequestSpan>,
-    authentication: RepositoryAuthentication,
+    authentication: Result<
+        RepositoryAuthentication,
+        crate::app::authentication::AuthenticationError,
+    >,
     request: axum::extract::Request,
 ) -> Response {
-    if frontend::is_browser_spa_navigation_request(&site, &request) {
+    if authentication.is_ok() && frontend::is_browser_spa_navigation_request(&site, &request) {
         return match frontend::frontend_request(State(site), request).await {
             Ok(response) => response,
             Err(error) => error.into_response(),

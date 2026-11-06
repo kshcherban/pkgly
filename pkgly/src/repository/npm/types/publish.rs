@@ -48,6 +48,9 @@ impl PublishAttachment {
 pub struct PublishRequest {
     pub name: String,
     pub versions: HashMap<String, PublishVersion>,
+    /// Tags that this publish request assigns to its version.
+    #[serde(default, rename = "dist-tags")]
+    pub dist_tags: HashMap<String, String>,
     #[serde(flatten)]
     pub other: HashMap<String, Value>,
     #[serde(rename = "_attachments")]

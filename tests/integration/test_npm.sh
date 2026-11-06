@@ -84,6 +84,16 @@ else
 fi
 
 # Test 4: Install package from hosted repository
+print_test "npm view returns the README and package metadata from publication"
+if jq -e '.readme == "# Hello package\n\nInitial README for the npm integration fixture.\n"
+    and .description == "A minimal NPM package for integration testing"
+    and .license == "MIT" and .keywords == ["test", "integration"]' <<<"$METADATA" > /dev/null && \
+   [ "$(npm view "$PACKAGE_NAME" readme)" = "$(cat README.md)" ]; then
+    pass
+else
+    fail "Published README or package metadata missing from the package document"
+fi
+
 print_test "Install package from npm-hosted"
 INSTALL_DIR="$WORKSPACE/install-test"
 mkdir -p "$INSTALL_DIR"
@@ -123,7 +133,9 @@ print_test "Publish second version (${VERSION_2})"
 cd "$WORKSPACE/hello-pkg"
 
 # Update package.json version
-jq ".version = \"${VERSION_2}\"" package.json > package.json.tmp && mv package.json.tmp package.json
+jq --arg version "$VERSION_2" '.version = $version | .description = "Updated package description"' \
+    package.json > package.json.tmp && mv package.json.tmp package.json
+printf '# Hello package\n\nUpdated README for version 1.0.1.\n' > README.md
 
 if run_cmd npm publish --registry="${PKGLY_URL}/repositories/${NPM_HOSTED_REPO}/"; then
     pass
@@ -149,6 +161,17 @@ else
 fi
 
 # Test 8: Install specific version
+print_test "New publication updates the README and description without changing old version metadata"
+if jq -e '.readme == "# Hello package\n\nUpdated README for version 1.0.1.\n"
+    and .description == "Updated package description"
+    and .versions["1.0.0"].description == "A minimal NPM package for integration testing"
+    and .versions["1.0.0"].readme == "# Hello package\n\nInitial README for the npm integration fixture.\n"' \
+    <<<"$METADATA" > /dev/null; then
+    pass
+else
+    fail "New publication did not update package metadata or changed an older version"
+fi
+
 print_test "Install specific version (${VERSION_1})"
 INSTALL_DIR_V1="$WORKSPACE/install-v1"
 mkdir -p "$INSTALL_DIR_V1"
@@ -193,6 +216,319 @@ if run_cmd npm install "$PACKAGE_NAME@latest"; then
 else
     fail "Failed to install latest version"
 fi
+
+# Prerelease and distribution tag regressions use the native npm client.
+print_test "Publish prerelease with beta tag and preserve latest"
+cd "$WORKSPACE/hello-pkg"
+PRERELEASE="2.0.0-beta.1"
+jq --arg version "$PRERELEASE" '.version = $version | .description = "Prerelease description"' package.json > package.json.tmp
+mv package.json.tmp package.json
+printf '# Prerelease README\n' > README.md
+if run_cmd npm publish --tag beta; then
+    METADATA=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}${METADATA_PATH}" || echo '{}')
+    if jq -e --arg stable "$VERSION_2" --arg beta "$PRERELEASE" \
+        '.["dist-tags"].latest == $stable and .["dist-tags"].beta == $beta
+         and .description == "Updated package description"
+         and .readme == "# Hello package\n\nUpdated README for version 1.0.1.\n"
+         and .versions[$beta].readme == "# Prerelease README\n"' <<<"$METADATA" > /dev/null; then
+        pass
+    else
+        fail "Publishing beta changed latest or lost the beta tag"
+    fi
+else
+    fail "Failed to publish prerelease"
+fi
+
+for SPEC in "$PRERELEASE" beta latest; do
+    print_test "Install scoped package at ${SPEC} with a fresh npm cache"
+    SPEC_INSTALL_DIR="$WORKSPACE/install-prerelease-${SPEC}"
+    mkdir -p "$SPEC_INSTALL_DIR"
+    cp "$INSTALL_DIR_LATEST/.npmrc" "$SPEC_INSTALL_DIR/.npmrc"
+    cd "$SPEC_INSTALL_DIR"
+    EXPECTED="$PRERELEASE"
+    if [ "$SPEC" = latest ]; then EXPECTED="$VERSION_2"; fi
+    if run_cmd npm install "${PACKAGE_NAME}@${SPEC}" --cache "$WORKSPACE/cache-${SPEC}" && \
+       [ "$(jq -r .version node_modules/@pkgly-test/hello-pkg/package.json)" = "$EXPECTED" ]; then
+        pass
+    else
+        fail "Failed to install expected version for ${SPEC}"
+    fi
+done
+
+print_test "npm dist-tag list returns beta and latest"
+cd "$WORKSPACE/hello-pkg"
+TAG_OUTPUT=$(npm dist-tag ls "$PACKAGE_NAME" 2>&1 || echo "")
+record_output "$TAG_OUTPUT"
+if grep -Fxq "beta: $PRERELEASE" <<<"$TAG_OUTPUT" && \
+   grep -Fxq "latest: $VERSION_2" <<<"$TAG_OUTPUT"; then
+    clear_last_log
+    pass
+else
+    fail "Distribution tags do not include beta and latest"
+fi
+
+print_test "Promote prerelease to latest with npm dist-tag"
+if run_cmd npm dist-tag add "${PACKAGE_NAME}@${PRERELEASE}" latest && \
+   [ "$(npm view "${PACKAGE_NAME}@latest" version)" = "$PRERELEASE" ] && \
+   [ "$(npm view "$PACKAGE_NAME" readme)" = '# Prerelease README' ]; then
+    pass
+else
+    fail "Cannot promote beta to latest"
+fi
+
+print_test "Restore stable latest and remove beta tag"
+if run_cmd npm dist-tag add "${PACKAGE_NAME}@${VERSION_2}" latest && \
+   run_cmd npm dist-tag rm "$PACKAGE_NAME" beta; then
+    METADATA=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}${METADATA_PATH}" || echo '{}')
+    if jq -e --arg stable "$VERSION_2" \
+        '.["dist-tags"].latest == $stable and (.["dist-tags"] | has("beta") | not)' <<<"$METADATA" > /dev/null; then
+        pass
+    else
+        fail "Tag removal or stable latest restoration failed"
+    fi
+else
+    fail "Cannot restore latest or remove beta tag"
+fi
+
+print_test "First prerelease under next does not create latest"
+UNSCOPED_NAME="pkgly-prerelease-test"
+jq --arg name "$UNSCOPED_NAME" '.name = $name | .version = "1.0.0-rc-test.2"' package.json > package.json.tmp
+mv package.json.tmp package.json
+if run_cmd npm publish --tag next; then
+    METADATA_UNSCOPED=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}/repositories/${NPM_HOSTED_REPO}/${UNSCOPED_NAME}" || echo '{}')
+    if jq -e '.["dist-tags"].next == "1.0.0-rc-test.2" and (.["dist-tags"] | has("latest") | not)' <<<"$METADATA_UNSCOPED" > /dev/null; then
+        pass
+    else
+        fail "First next publish created latest or lost next"
+    fi
+else
+    fail "Failed to publish first prerelease"
+fi
+
+print_test "Install unscoped prerelease with hyphens in its name and version"
+cd "$INSTALL_DIR_LATEST"
+if run_cmd npm install "${UNSCOPED_NAME}@next" --cache "$WORKSPACE/cache-unscoped" && \
+   [ "$(jq -r .version "node_modules/${UNSCOPED_NAME}/package.json")" = "1.0.0-rc-test.2" ]; then
+    pass
+else
+    fail "Failed to retrieve unscoped prerelease"
+fi
+
+print_test "Explicit latest tag can select a prerelease"
+cd "$WORKSPACE/hello-pkg"
+jq '.version = "1.0.0-rc-test.3"' package.json > package.json.tmp
+mv package.json.tmp package.json
+if run_cmd npm publish --tag latest && \
+   [ "$(npm view "${UNSCOPED_NAME}@latest" version)" = "1.0.0-rc-test.3" ]; then
+    pass
+else
+    fail "Explicit latest tag did not select the prerelease"
+fi
+
+print_test "Stable publish under next preserves the explicit latest tag"
+jq '.version = "1.0.0"' package.json > package.json.tmp
+mv package.json.tmp package.json
+if run_cmd npm publish --tag next; then
+    METADATA_UNSCOPED=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}/repositories/${NPM_HOSTED_REPO}/${UNSCOPED_NAME}" || echo '{}')
+    if jq -e '.["dist-tags"].next == "1.0.0" and .["dist-tags"].latest == "1.0.0-rc-test.3"' <<<"$METADATA_UNSCOPED" > /dev/null; then
+        pass
+    else
+        fail "Stable next publish changed latest"
+    fi
+else
+    fail "Stable next publish failed"
+fi
+
+# npm deprecate writes a package document back to the same package endpoint.
+for DEPRECATE_NAME in "$PACKAGE_NAME" "$UNSCOPED_NAME"; do
+    DEPRECATE_VERSION="$PRERELEASE"
+    if [ "$DEPRECATE_NAME" = "$UNSCOPED_NAME" ]; then DEPRECATE_VERSION="1.0.0-rc-test.3"; fi
+    DEPRECATE_PATH="/repositories/${NPM_HOSTED_REPO}/${DEPRECATE_NAME}"
+    cd "$WORKSPACE/hello-pkg"
+    BEFORE_DEPRECATION=$(api_get "$DEPRECATE_PATH")
+    print_test "npm deprecate updates only the selected version of ${DEPRECATE_NAME}"
+    if run_cmd npm deprecate "${DEPRECATE_NAME}@${DEPRECATE_VERSION}" 'Use the stable release'; then
+        AFTER_DEPRECATION=$(api_get "$DEPRECATE_PATH")
+        if jq -e --arg version "$DEPRECATE_VERSION" --argjson before "$BEFORE_DEPRECATION" \
+            '.versions[$version].deprecated == "Use the stable release"
+             and (del(.versions[$version].deprecated, .time) == ($before | del(.versions[$version].deprecated, .time)))' \
+            <<<"$AFTER_DEPRECATION" > /dev/null; then
+            pass
+        else
+            fail "Deprecation changed other metadata or did not save the message"
+        fi
+    else
+        fail "npm deprecate failed"
+    fi
+
+    print_test "npm deprecate with an empty message undeprecates ${DEPRECATE_NAME}"
+    if run_cmd npm deprecate "${DEPRECATE_NAME}@${DEPRECATE_VERSION}" '' && \
+       [ "$(npm view "${DEPRECATE_NAME}@${DEPRECATE_VERSION}" deprecated)" = "" ]; then
+        pass
+    else
+        fail "Could not remove the deprecation message"
+    fi
+
+    print_test "npm deprecate handles multiple versions of ${DEPRECATE_NAME}"
+    if run_cmd npm deprecate "${DEPRECATE_NAME}@*" 'Package retired'; then
+        AFTER_DEPRECATION=$(api_get "$DEPRECATE_PATH")
+        if jq -e '.versions | all(.deprecated == "Package retired")' <<<"$AFTER_DEPRECATION" > /dev/null; then
+            pass
+        else
+            fail "Deprecation did not update all matching versions"
+        fi
+    else
+        fail "Could not deprecate multiple versions"
+    fi
+
+    print_test "npm deprecate restores all versions of ${DEPRECATE_NAME}"
+    if run_cmd npm deprecate "${DEPRECATE_NAME}@*" ''; then pass; else fail "Could not restore versions"; fi
+done
+
+# Metadata updates must not rewrite published manifests or distribution tags.
+print_test "Deprecation ignores unrelated metadata changes"
+METADATA_BEFORE=$(api_get "$METADATA_PATH")
+jq '.readme = "must not replace the README" | .["dist-tags"].latest = "1.0.0"
+    | .versions["1.0.0"].description = "must not replace the manifest"
+    | .versions["1.0.0"].deprecated = "Deprecation only"' <<<"$METADATA_BEFORE" > "$WORKSPACE/metadata-update.json"
+if run_cmd api_put "$METADATA_PATH" -H 'Content-Type: application/json' \
+    -H 'npm-command: deprecate' --data-binary "@$WORKSPACE/metadata-update.json"; then
+    METADATA_AFTER=$(api_get "$METADATA_PATH")
+    if jq -e --argjson before "$METADATA_BEFORE" \
+        '.versions["1.0.0"].deprecated == "Deprecation only"
+         and (del(.versions["1.0.0"].deprecated, .time) == ($before | del(.versions["1.0.0"].deprecated, .time)))' \
+        <<<"$METADATA_AFTER" > /dev/null; then
+        pass
+    else
+        fail "Deprecation rewrote unrelated metadata"
+    fi
+else
+    fail "Deprecation request failed"
+fi
+
+for INVALID_UPDATE in unknown-version wrong-name invalid-message; do
+    print_test "Reject ${INVALID_UPDATE} metadata update without partial changes"
+    METADATA_BEFORE=$(api_get "$METADATA_PATH")
+    jq --arg mode "$INVALID_UPDATE" '
+        .versions["1.0.0"].deprecated = "must not save"
+        | if $mode == "unknown-version" then .versions["9.9.9"] = {"deprecated":"missing"}
+          elif $mode == "wrong-name" then .name = "different-package"
+          else .versions["1.0.1"].deprecated = 123 end' \
+        <<<"$METADATA_BEFORE" > "$WORKSPACE/metadata-update.json"
+    EXPECTED_STATUS=400
+    if [ "$INVALID_UPDATE" = unknown-version ]; then EXPECTED_STATUS=404; fi
+    STATUS=$(curl -s -o "$WORKSPACE/metadata-error.txt" -w '%{http_code}' -X PUT \
+        -H "$(get_auth_header)" -H 'Content-Type: application/json' -H 'npm-command: deprecate' \
+        --data-binary "@$WORKSPACE/metadata-update.json" "${PKGLY_URL}${METADATA_PATH}")
+    METADATA_AFTER=$(api_get "$METADATA_PATH")
+    if [ "$STATUS" = "$EXPECTED_STATUS" ] && \
+       jq -e --argjson before "$METADATA_BEFORE" '. == $before' <<<"$METADATA_AFTER" > /dev/null; then
+        pass
+    else
+        fail "Invalid metadata update returned ${STATUS} or saved partial changes"
+    fi
+done
+
+print_test "Metadata updates require authentication"
+STATUS=$(curl -s -o /dev/null -w '%{http_code}' -X PUT -H 'Content-Type: application/json' \
+    -H 'npm-command: deprecate' --data-binary "@$WORKSPACE/metadata-update.json" "${PKGLY_URL}${METADATA_PATH}")
+if [ "$STATUS" = 401 ] || [ "$STATUS" = 403 ]; then pass; else fail "Metadata update accepted without authentication"; fi
+
+# Direct HTTP requests cover cases that the npm CLI cannot send.
+for TAG_MODE in omitted empty latest beta-and-latest; do
+    RAW_NAME="pkgly-raw-${TAG_MODE}"
+    if [ "$TAG_MODE" = empty ]; then RAW_NAME="@pkgly-test/${RAW_NAME}"; fi
+    RAW_PATH="/repositories/${NPM_HOSTED_REPO}/${RAW_NAME}"
+    RAW_PACKAGE_DIR="$WORKSPACE/raw-${TAG_MODE}"
+    mkdir -p "$RAW_PACKAGE_DIR"
+    cp "$FIXTURE_DIR/"* "$RAW_PACKAGE_DIR/"
+    cp "$WORKSPACE/hello-pkg/.npmrc" "$RAW_PACKAGE_DIR/.npmrc"
+
+    for PHASE in first update; do
+        cd "$RAW_PACKAGE_DIR"
+        RAW_VERSION="1.0.0-beta.1"
+        if [ "$PHASE" = update ]; then
+            RAW_VERSION="2.0.0-beta.1"
+            print_test "Seed stable latest before ${TAG_MODE} HTTP publish"
+            jq --arg name "$RAW_NAME" '.name = $name | .version = "1.0.0"' package.json > package.json.tmp
+            mv package.json.tmp package.json
+            if run_cmd npm publish --tag latest && \
+               run_cmd npm dist-tag add "${RAW_NAME}@1.0.0-beta.1" next; then
+                pass
+            else
+                fail "Could not seed stable latest and next"
+            fi
+        fi
+
+        jq --arg name "$RAW_NAME" --arg version "$RAW_VERSION" \
+            '.name = $name | .version = $version' package.json > package.json.tmp
+        mv package.json.tmp package.json
+        npm pack --json --pack-destination "$WORKSPACE" > "$WORKSPACE/pack.json"
+        node - "$WORKSPACE" "$TAG_MODE" "${PKGLY_URL}${RAW_PATH}" > "$WORKSPACE/publish.json" <<'NODE'
+const fs = require('node:fs');
+const [workspace, mode, packageUrl] = process.argv.slice(2);
+const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+const [packed] = JSON.parse(fs.readFileSync(`${workspace}/pack.json`, 'utf8'));
+const tarball = fs.readFileSync(`${workspace}/${packed.filename}`);
+const filename = `${manifest.name.split('/').pop()}-${manifest.version}.tgz`;
+const version = {
+    ...manifest,
+    _id: `${manifest.name}@${manifest.version}`,
+    _nodeVersion: process.version,
+    _npmVersion: 'integration-test',
+    dist: {shasum: packed.shasum, integrity: packed.integrity, tarball: `${packageUrl}/-/${filename}`},
+};
+const body = {
+    name: manifest.name,
+    readme: '# HTTP README',
+    readmeFilename: 'README.md',
+    versions: {[manifest.version]: version},
+    _attachments: {[filename]: {content_type: 'application/octet-stream', data: tarball.toString('base64'), length: tarball.length}},
+};
+if (mode !== 'omitted') body['dist-tags'] = {};
+if (mode === 'latest' || mode === 'beta-and-latest') body['dist-tags'].latest = manifest.version;
+if (mode === 'beta-and-latest') body['dist-tags'].beta = manifest.version;
+console.log(JSON.stringify(body));
+NODE
+
+        print_test "${PHASE} HTTP prerelease publish with ${TAG_MODE} tags selects latest"
+        if run_cmd api_put "$RAW_PATH" -H 'Content-Type: application/json' \
+            -H 'npm-command: publish' --data-binary "@$WORKSPACE/publish.json"; then
+            RAW_METADATA=$(api_get "$RAW_PATH" || echo '{}')
+            record_output "$RAW_METADATA"
+            if jq -e --arg version "$RAW_VERSION" --arg mode "$TAG_MODE" --arg phase "$PHASE" \
+                '.["dist-tags"].latest == $version and (.versions | has($version))
+                 and .readme == "# HTTP README" and .versions[$version].readme == "# HTTP README"
+                 and (if $mode == "beta-and-latest" then .["dist-tags"].beta == $version else true end)
+                 and (if $phase == "update" then .["dist-tags"].next == "1.0.0-beta.1" else true end)' \
+                <<<"$RAW_METADATA" > /dev/null; then
+                clear_last_log
+                pass
+            else
+                fail "HTTP publish did not preserve the expected tags and version"
+            fi
+        else
+            fail "HTTP prerelease publish failed"
+        fi
+
+        print_test "Install ${PHASE} HTTP prerelease with ${TAG_MODE} tags through latest"
+        RAW_INSTALL_DIR="$WORKSPACE/install-raw-${TAG_MODE}-${PHASE}"
+        mkdir -p "$RAW_INSTALL_DIR"
+        cp "$RAW_PACKAGE_DIR/.npmrc" "$RAW_INSTALL_DIR/.npmrc"
+        cd "$RAW_INSTALL_DIR"
+        if run_cmd npm install "${RAW_NAME}@latest" --cache "$WORKSPACE/cache-raw-${TAG_MODE}-${PHASE}" && \
+           [ "$(jq -r .version "node_modules/${RAW_NAME}/package.json")" = "$RAW_VERSION" ]; then
+            pass
+        else
+            fail "Latest did not retrieve the HTTP-published prerelease"
+        fi
+    done
+done
+
+# Restore the fixture identity for subsequent tests.
+cd "$WORKSPACE/hello-pkg"
+jq --arg name "$PACKAGE_NAME" --arg version "$VERSION_2" '.name = $name | .version = $version' package.json > package.json.tmp
+mv package.json.tmp package.json
 
 # Test 10: Proxy repository - fetch from npmjs.org
 print_test "Proxy: fetch lodash from npmjs.org"
@@ -364,6 +700,10 @@ else
     fail "Virtual repo failed to proxy lodash"
 fi
 
+# Route, casing, and permission checks share this suite's package fixtures.
+source "${SCRIPT_DIR}/npm_registry_behavior.sh"
+source "${SCRIPT_DIR}/npm_prerelease_lifecycle.sh"
+
 # Test 16: Authentication required for publish
 print_test "Verify authentication required for publish"
 cd "$WORKSPACE/hello-pkg"
@@ -395,6 +735,7 @@ fi
 
 # Test 18: NPM scoped package support
 print_test "Verify scoped package support"
+METADATA=$(curl -sf -H "$(get_auth_header)" "${PKGLY_URL}${METADATA_PATH}" || echo "{}")
 record_output "$METADATA"
 set +e
 jq -s -e 'length == 1 and (.[0].name | startswith("@"))' <<<"$METADATA" > /dev/null 2>&1

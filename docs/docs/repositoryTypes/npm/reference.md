@@ -20,12 +20,11 @@ include credentials when repository authentication is enabled.
 ```json
 {
   "type": "Proxy",
-  "proxy": {
+  "config": {
     "routes": [
       {
         "url": "https://registry.npmjs.org",
-        "name": "NPM Registry",
-        "priority": 1
+        "name": "NPM Registry"
       }
     ]
   }
@@ -36,17 +35,15 @@ include credentials when repository authentication is enabled.
 ```json
 {
   "type": "Proxy",
-  "proxy": {
+  "config": {
     "routes": [
       {
         "url": "https://registry.npmjs.org",
-        "name": "NPM Official",
-        "priority": 10
+        "name": "NPM Official"
       },
       {
         "url": "https://registry.yarnpkg.com",
-        "name": "Yarn Registry",
-        "priority": 5
+        "name": "Yarn Registry"
       }
     ]
   }
@@ -67,15 +64,12 @@ npm config set registry https://your-pkgly.example.com/repositories/storage/npm-
 npm config get registry
 ```
 
-### Add User/Configure Authentication
-```bash
-# Add user to the registry
-npm adduser --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
-# Follow prompts to enter username, password, and email
+### Configure Authentication
 
-# Or login with existing credentials
-npm login --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
-# Enter username, password, and email when prompted
+Log in with an existing Pkgly account. This command does not register a new account.
+
+```sh
+npm login --auth-type=legacy --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
 ```
 
 ### Configure in .npmrc
@@ -123,13 +117,9 @@ npm view my-package versions --registry https://your-pkgly.example.com/repositor
 ```
 
 ### Search Packages
-```bash
-# Search packages
-npm search my-search-term --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
 
-# Search with JSON output
-npm search my-search-term --json --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
-```
+Hosted registries do not currently implement `npm search`.
+Use the Pkgly package list to find stored packages.
 
 ## Publishing Workflows
 
@@ -142,7 +132,7 @@ npm init
 npm pkg set publishConfig.registry=https://your-pkgly.example.com/repositories/storage/npm-repo/
 
 # Login
-npm login --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
+npm login --auth-type=legacy --registry https://your-pkgly.example.com/repositories/storage/npm-repo/
 
 # Publish
 npm publish
@@ -230,15 +220,21 @@ jobs:
 
 ## Common Endpoints
 
-| Description | Endpoint | Example |
-|-------------|----------|---------|
-| Root Registry | `GET /` | Registry information |
-| Package Info | `GET /package/{name}` | Package metadata and versions |
-| Package Version | `GET /package/{name}/{version}` | Specific version info |
-| Download Tarball | `GET /package/{name}/{version}/{file}` | Download package tarball |
-| Publish Package | `PUT /` | Upload new package version |
-| User Info | `GET /-/whoami` | Get current user info |
-| User Auth | `GET /-/user/org.couchdb.user:{username}` | User authentication |
+Paths are relative to `/repositories/<storage>/<repository>/`.
+
+| Description | Endpoint |
+| --- | --- |
+| Package metadata | `GET <name>` |
+| Exact version or tag | `GET <name>/<version-or-tag>` |
+| Package tarball | `GET <name>/-/<basename>-<version>.tgz` |
+| Publish a version | `PUT <name>` with `Npm-Command: publish` |
+| Deprecate versions | `PUT <name>` with `Npm-Command: deprecate` |
+| List tags | `GET -/package/<name>/dist-tags` |
+| Set a tag | `PUT -/package/<name>/dist-tags/<tag>` |
+| Remove a tag | `DELETE -/package/<name>/dist-tags/<tag>` |
+| Legacy login | `PUT -/user/org.couchdb.user:<username>` |
+
+See the [HTTP route reference](routes.md) for request bodies, authentication, and unsupported operations.
 
 ## Yarn Integration
 
@@ -274,25 +270,16 @@ yarn npm publish --access public
 
 ## Troubleshooting Commands
 
-### Test Registry Connectivity
-```bash
-# Check if registry is accessible
-curl -I https://your-pkgly.example.com/repositories/storage/npm-repo/
+### Test Package Access
 
-# Get registry info
-curl https://your-pkgly.example.com/repositories/storage/npm-repo/
+Use the name of a package that exists in the repository:
+
+```sh
+curl -H "Authorization: Bearer $PKGLY_NPM_TOKEN" \
+     https://your-pkgly.example.com/repositories/storage/npm-repo/my-package
 ```
 
-### Test Authentication
-```bash
-# Test with token authentication
-curl -H "Authorization: Bearer $PKGLY_NPM_TOKEN" \
-     https://your-pkgly.example.com/repositories/storage/npm-repo/-/whoami
-
-# Test package access
-curl -H "Authorization: Bearer $PKGLY_NPM_TOKEN" \
-     https://your-pkgly.example.com/repositories/storage/npm-repo/package/my-package
-```
+The root registry information document and `whoami` endpoint are not implemented by hosted repositories.
 
 ### Debug Publishing Issues
 ```bash
