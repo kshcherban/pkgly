@@ -22,7 +22,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/kshcherban/pkgly
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   release:
@@ -174,11 +174,12 @@ jobs:
           RELEASE_TAGS: ${{ steps.release-context.outputs.release_tags }}
         run: |
           set -euo pipefail
-          docker buildx imagetools inspect "${IMAGE_NAME}:${COMMIT_SHA}" >/dev/null
+          image="${IMAGE_NAME,,}"
+          docker buildx imagetools inspect "${image}:${COMMIT_SHA}" >/dev/null
           for release_tag in $RELEASE_TAGS; do
             docker buildx imagetools create \
-              --tag "${IMAGE_NAME}:${release_tag}" \
-              "${IMAGE_NAME}:${COMMIT_SHA}"
+              --tag "${image}:${release_tag}" \
+              "${image}:${COMMIT_SHA}"
           done
 
       - name: Publish GitHub release

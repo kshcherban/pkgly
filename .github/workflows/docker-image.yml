@@ -16,7 +16,7 @@ permissions:
   packages: write
 
 env:
-  IMAGE_NAME: ghcr.io/kshcherban/pkgly
+  IMAGE_NAME: ghcr.io/${{ github.repository }}
 
 jobs:
   build:
@@ -46,6 +46,9 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Normalize GHCR image name
+        run: printf 'IMAGE_NAME=%s\n' "${IMAGE_NAME,,}" >> "$GITHUB_ENV"
 
       - name: Build and push image
         uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
@@ -89,7 +92,7 @@ jobs:
       - name: Extract binary from image
         run: |
           set -euo pipefail
-          image="${IMAGE_NAME}:latest-${GITHUB_SHA}-${{ matrix.arch }}"
+          image="${IMAGE_NAME,,}:latest-${GITHUB_SHA}-${{ matrix.arch }}"
           binary="pkgly-linux-${{ matrix.arch }}-${GITHUB_SHA}"
           docker pull "$image"
           container_id="$(docker create "$image")"
@@ -171,8 +174,9 @@ jobs:
 
       - name: Create and push manifest
         run: |
+          image="${IMAGE_NAME,,}"
           docker buildx imagetools create \
-            --tag "${IMAGE_NAME}:${GITHUB_SHA}" \
-            --tag "${IMAGE_NAME}:latest" \
-            "${IMAGE_NAME}:latest-${GITHUB_SHA}-amd64" \
-            "${IMAGE_NAME}:latest-${GITHUB_SHA}-arm64"
+            --tag "${image}:${GITHUB_SHA}" \
+            --tag "${image}:latest" \
+            "${image}:latest-${GITHUB_SHA}-amd64" \
+            "${image}:latest-${GITHUB_SHA}-arm64"
