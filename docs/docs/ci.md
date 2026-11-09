@@ -16,6 +16,13 @@ cache mounts, including the final Rust compilation's target directories, are not
 persisted by this exporter. A cache hit on the dependency layer avoids rebuilding
 unchanged dependencies; it does not preserve all incremental compiler state.
 
+## Image publishing
+
+The main branch build and release workflows use `github.repository` to select the GHCR image name.
+They convert the name to lowercase. A fork publishes under its own repository name when Actions and package writes are enabled.
+Builds, build caches, binary extraction, and release tags use that same name.
+PR integration builds can still read the shared upstream cache.
+
 ## Test-runner image
 
 The runner uses `debian:trixie-slim`, matching the Pkgly runtime. Its initial
