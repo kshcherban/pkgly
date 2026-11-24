@@ -63,7 +63,7 @@ async fn npm_handler_spans_and_audit_events_exclude_request_contents() {
         ] {
             let ctx = AccessLogContext::default();
             let mut request = http::Request::builder().method(method.clone()).uri(format!("/repositories/npm-test/public/{path}"))
-                .header("npm-command", command).header("Authorization", "Bearer sensitive-credential")
+                .header("host", "registry.test").header("npm-command", command).header("Authorization", "Bearer sensitive-credential")
                 .body(Body::from(body)).unwrap();
             request.extensions_mut().insert(ctx.clone());
             let response = handle_repo_request_core(site.clone(), RepoRequestPath {storage:"npm-test".into(),repository:"public".into(),path:Some(StoragePath::from(path)),docker_scope:None},

@@ -218,6 +218,8 @@ The npm suite uses native npm and Yarn commands, plus direct HTTP requests for i
 
 `npm_registry_behavior.sh` and `npm_prerelease_lifecycle.sh` run as part of `test_npm.sh` and use its fixtures and result counters.
 The npm lifecycle suite covers successive beta publications, fresh and reused client caches, and tag removal from beta-only packages.
+It checks the advertised tarball URL in package, exact-version, and tag metadata and verifies that beta-only packages advertise `beta` without `latest`.
+Raw HTTP publish fixtures verify that Pkgly advertises its own origin when the upload supplies a different one.
 Rust HTTP tests also cover rejected publications without partial catalog changes and prerelease downloads through hosted, proxy, and virtual repositories.
 The retrieval fixture stops its controlled upstream before repeated downloads to check cache use.
 Rust HTTP tests also check tag cleanup after version deletion and tarball HEAD responses.

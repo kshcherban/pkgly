@@ -38,6 +38,17 @@ for LIFE_NAME in pkgly-beta-lifecycle @pkgly-test/beta-lifecycle; do
            api_get "$LIFE_TAGS" | jq -e --arg version "$LIFE_VERSION" '. == {"latest":"1.0.0","canary":"1.0.0","beta":$version}' > /dev/null; then
             pass
         else fail "Beta publication changed unrelated tags"; fi
+        print_test "Advertise the hosted tarball for ${LIFE_NAME}@${LIFE_VERSION} and @beta"
+        LIFE_TARBALL="${PKGLY_URL}${LIFE_PATH}/-/${LIFE_NAME##*/}-${LIFE_VERSION}.tgz"
+        if api_get "$LIFE_PATH" | jq -e --arg version "$LIFE_VERSION" --arg url "$LIFE_TARBALL" '
+            .["dist-tags"] == {"latest":"1.0.0","canary":"1.0.0","beta":$version}
+            and .versions[$version].dist.tarball == $url' > /dev/null &&
+           api_get "$LIFE_PATH/$LIFE_VERSION" | jq -e --arg url "$LIFE_TARBALL" '.dist.tarball == $url' > /dev/null &&
+           api_get "$LIFE_PATH/beta" | jq -e --arg url "$LIFE_TARBALL" '.dist.tarball == $url' > /dev/null; then
+            pass
+        else
+            fail "Package metadata, exact version, or beta advertised an unexpected tarball URL or tag map"
+        fi
         for LIFE_REGISTRY in "$NPM_HOSTED_REPO" "$NPM_VIRTUAL_REPO"; do
             for LIFE_CACHE in warm fresh; do
                 LIFE_CACHE_PATH="$WORKSPACE/lifecycle-cache-${LIFE_NAME##*/}-${LIFE_REGISTRY##*/}-${LIFE_CACHE}"
@@ -58,6 +69,7 @@ for LIFE_NAME in pkgly-beta-lifecycle @pkgly-test/beta-lifecycle; do
        api_get "$LIFE_TAGS" | jq -e '. == {"latest":"1.0.0"}' > /dev/null; then pass; else fail "Latest protection or tag removal failed"; fi
     print_test "Remove and republish the final beta tag without creating latest for ${LIFE_NAME}"
     LIFE_BETA_NAME="${LIFE_NAME}-only"
+    LIFE_BETA_PATH="/repositories/${NPM_HOSTED_REPO}/${LIFE_BETA_NAME}"
     LIFE_BETA_TAGS="/repositories/${NPM_HOSTED_REPO}/-/package/${LIFE_BETA_NAME}/dist-tags"
     jq --arg name "$LIFE_BETA_NAME" '.name=$name | .version="2.0.0-beta.3"' package.json > package.json.tmp
     mv package.json.tmp package.json
@@ -67,7 +79,12 @@ for LIFE_NAME in pkgly-beta-lifecycle @pkgly-test/beta-lifecycle; do
         jq '.version="2.0.0-beta.4"' package.json > package.json.tmp
         mv package.json.tmp package.json
         if run_cmd npm publish --tag beta &&
-           api_get "$LIFE_BETA_TAGS" | jq -e '. == {"beta":"2.0.0-beta.4"}' > /dev/null; then pass; else fail "Publication restored latest"; fi
+           api_get "$LIFE_BETA_TAGS" | jq -e '. == {"beta":"2.0.0-beta.4"}' > /dev/null &&
+           api_get "$LIFE_BETA_PATH" | jq -e '.["dist-tags"] == {"beta":"2.0.0-beta.4"}' > /dev/null; then
+            pass
+        else
+            fail "Beta-only publication did not advertise beta without latest"
+        fi
     else fail "Final beta tag removal failed"; fi
 
 done

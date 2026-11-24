@@ -67,6 +67,12 @@ pub enum NPMRegistryError {
         "Invalid GET request. The requested route is invalid to the NPM Registry. This could be a bug. AS the code is very sketchy"
     )]
     InvalidGetRequest,
+    #[error("Package metadata requires a Host header or a configured public URL")]
+    MissingTarballHost,
+    #[error("Could not build the tarball URL: {0}")]
+    InvalidTarballBase(&'static str),
+    #[error("Configured npm tarball app_url is invalid")]
+    InvalidTarballAppUrl,
     #[error("Package name, version or tarball does not match the publish request")]
     InvalidPublication,
     #[error("The latest distribution tag cannot be removed directly")]
@@ -151,6 +157,14 @@ impl IntoResponse for NPMRegistryError {
                 .status(StatusCode::NOT_FOUND)
                 .body("Invalid GET request".into())
                 .unwrap_or_default(),
+            NPMRegistryError::InvalidTarballAppUrl | NPMRegistryError::InvalidTarballBase(_) => {
+                let status = if matches!(self, NPMRegistryError::InvalidTarballAppUrl) {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                } else {
+                    StatusCode::BAD_REQUEST
+                };
+                (status, "Could not build the tarball URL").into_response()
+            }
             NPMRegistryError::ProxyUpstream { url, status } => Response::builder()
                 .status(StatusCode::BAD_GATEWAY)
                 .body(format!("Proxy upstream {url} returned status {status}").into())

@@ -464,7 +464,8 @@ for TAG_MODE in omitted empty latest beta-and-latest; do
             '.name = $name | .version = $version' package.json > package.json.tmp
         mv package.json.tmp package.json
         npm pack --json --pack-destination "$WORKSPACE" > "$WORKSPACE/pack.json"
-        node - "$WORKSPACE" "$TAG_MODE" "${PKGLY_URL}${RAW_PATH}" > "$WORKSPACE/publish.json" <<'NODE'
+        # The upload URL has the right route and a different origin from the registry.
+        node - "$WORKSPACE" "$TAG_MODE" "https://publisher.invalid${RAW_PATH}" > "$WORKSPACE/publish.json" <<'NODE'
 const fs = require('node:fs');
 const [workspace, mode, packageUrl] = process.argv.slice(2);
 const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -497,7 +498,8 @@ NODE
             RAW_METADATA=$(api_get "$RAW_PATH" || echo '{}')
             record_output "$RAW_METADATA"
             if jq -e --arg version "$RAW_VERSION" --arg mode "$TAG_MODE" --arg phase "$PHASE" \
-                '.["dist-tags"].latest == $version and (.versions | has($version))
+                --arg tarball "${PKGLY_URL}${RAW_PATH}/-/${RAW_NAME##*/}-${RAW_VERSION}.tgz" \
+                '.["dist-tags"].latest == $version and .versions[$version].dist.tarball == $tarball
                  and .readme == "# HTTP README" and .versions[$version].readme == "# HTTP README"
                  and (if $mode == "beta-and-latest" then .["dist-tags"].beta == $version else true end)
                  and (if $phase == "update" then .["dist-tags"].next == "1.0.0-beta.1" else true end)' \
@@ -505,7 +507,7 @@ NODE
                 clear_last_log
                 pass
             else
-                fail "HTTP publish did not preserve the expected tags and version"
+                fail "HTTP publish returned unexpected tags, version metadata, or tarball URL"
             fi
         else
             fail "HTTP prerelease publish failed"

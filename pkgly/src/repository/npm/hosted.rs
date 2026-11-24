@@ -17,6 +17,7 @@ use nr_core::{
 };
 use nr_storage::{DynStorage, FileContent, Storage};
 use tracing::{debug, info, instrument, warn};
+use url::Url;
 
 use super::{
     metadata::{deprecation_updates, normalize_readme, package_fields, save_deprecations},
@@ -120,6 +121,28 @@ impl NPMHostedRegistry {
 
         Ok(ResponseBuilder::no_content().empty().into())
     }
+    fn tarball_base(&self, request: &RepositoryRequest) -> Result<Url, NPMRegistryError> {
+        let mut base = {
+            let instance = self.site.inner.instance.lock();
+            public_base(&instance.app_url, instance.is_https, &request.parts)?
+        };
+        let request_path = request.parts.uri.path();
+        let decoded_path = percent_encoding::percent_decode_str(request_path)
+            .decode_utf8()
+            .map_err(|_| NPMRegistryError::InvalidGetRequest)?;
+        let path =
+            super::proxy::repository_base_path(&decoded_path, &request.path).unwrap_or_else(|| {
+                let storage = self.storage.storage_config();
+                format!(
+                    "/repositories/{}/{}",
+                    storage.storage_config.storage_name,
+                    self.name()
+                )
+            });
+        base.set_path(&format!("{}{}", base.path().trim_end_matches('/'), path));
+        Ok(base)
+    }
+
     #[instrument(skip(self), fields(repository_id = %self.id))]
     async fn resolve_tarball_path(
         &self,
@@ -400,6 +423,7 @@ impl Repository for NPMHostedRegistry {
                     "modified".to_owned(),
                     npm_time::format_date_time(&project.updated_at),
                 );
+                let base = self.tarball_base(&request)?;
                 let mut versions_map = HashMap::new();
                 let mut newest_version = None;
                 for version in versions {
@@ -409,7 +433,7 @@ impl Repository for NPMHostedRegistry {
                     );
                     debug!(version_id = %version.id, version = %version.version, "Loaded npm version");
                     if let Some(extra) = version.extra.0.extra {
-                        let extra: PublishVersion = match serde_json::from_value(extra) {
+                        let mut extra: PublishVersion = match serde_json::from_value(extra) {
                             Ok(ok) => ok,
                             Err(_err) => {
                                 warn!("Invalid NPM Project");
@@ -419,6 +443,8 @@ impl Repository for NPMHostedRegistry {
                         if newest_version.is_none() {
                             newest_version = Some(version.version.clone());
                         }
+                        extra.dist.tarball =
+                            tarball_url(base.clone(), &project.key, &version.version)?;
                         versions_map.insert(version.version.clone(), extra);
                     } else {
                         warn!(version_id = %version.id, "Invalid npm version metadata");
@@ -467,7 +493,18 @@ impl Repository for NPMHostedRegistry {
                         .into());
                 };
                 debug!(version_id = %version.id, version = %version.version, "Loaded npm version");
-                if let Some(extra) = version.extra.0.extra {
+                if let Some(mut extra) = version.extra.0.extra {
+                    if let Some(dist) = extra
+                        .get_mut("dist")
+                        .and_then(serde_json::Value::as_object_mut)
+                    {
+                        let url = tarball_url(
+                            self.tarball_base(&request)?,
+                            &project.key,
+                            &version.version,
+                        )?;
+                        dist.insert("tarball".into(), url.into());
+                    }
                     let as_string = serde_json::to_string(&extra)?;
                     Ok(Response::builder()
                         .status(StatusCode::OK)
@@ -571,3 +608,56 @@ impl Repository for NPMHostedRegistry {
         Err(NPMRegistryError::InvalidGetRequest)
     }
 }
+
+fn public_base(
+    app_url: &str,
+    is_https: bool,
+    request: &http::request::Parts,
+) -> Result<Url, NPMRegistryError> {
+    if !app_url.is_empty() {
+        return Url::parse(app_url).map_err(|_| NPMRegistryError::InvalidTarballAppUrl);
+    }
+
+    let header = |name| {
+        request
+            .headers
+            .get(name)
+            .and_then(|value| value.to_str().ok())
+    };
+    let host = request
+        .uri
+        .authority()
+        .map(http::uri::Authority::as_str)
+        .or_else(|| header("host"))
+        .ok_or(NPMRegistryError::MissingTarballHost)?
+        .parse::<http::uri::Authority>()
+        .map_err(|_| NPMRegistryError::InvalidTarballBase("request host is invalid"))?;
+    if host.as_str().contains('@') {
+        return Err(NPMRegistryError::InvalidTarballBase(
+            "request host contains user information",
+        ));
+    }
+    let scheme = header("x-forwarded-proto")
+        .filter(|value| matches!(*value, "http" | "https"))
+        .or_else(|| request.uri.scheme_str())
+        .unwrap_or(if is_https { "https" } else { "http" });
+    Url::parse(&format!("{scheme}://{host}")).map_err(|_| {
+        NPMRegistryError::InvalidTarballBase("request scheme and host form an invalid URL")
+    })
+}
+
+fn tarball_url(mut base: Url, package: &str, version: &str) -> Result<String, NPMRegistryError> {
+    let basename = package
+        .rsplit('/')
+        .next()
+        .ok_or(NPMRegistryError::InvalidGetRequest)?;
+    base.path_segments_mut()
+        .map_err(|_| NPMRegistryError::InvalidGetRequest)?
+        .extend(package.split('/'))
+        .push("-")
+        .push(&format!("{basename}-{version}.tgz"));
+    Ok(base.into())
+}
+
+#[cfg(test)]
+mod tests;
