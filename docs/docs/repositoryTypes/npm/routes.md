@@ -59,7 +59,11 @@ npm publish --registry="https://<host>/repositories/<storage>/<repository>/" --t
 The client sends `PUT <name>` with `Npm-Command: publish`.
 Its JSON body contains the package `name`, one entry in `versions`, and base64 tarball data in `_attachments`.
 Each version includes its manifest, `dist` hashes and tarball URL, `_id`, `_nodeVersion`, and `_npmVersion`.
-The tarball URL must point into the target storage and repository.
+The path in the publish payload's tarball URL must match the target storage and repository.
+Pkgly generates the tarball URL in hosted package and version metadata from its public repository URL.
+It prefers the configured `[site].app_url` and uses the request host and scheme when that setting is absent.
+Behind a TLS reverse proxy, the fallback uses `X-Forwarded-Proto` when present.
+Without a configured public URL or a request host, package metadata returns `400 Bad Request`.
 Metadata and archive upload form one publish request. Pkgly does not support a separate archive upload endpoint.
 
 A publication must contain exactly one SemVer version and one attachment.

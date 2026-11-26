@@ -225,3 +225,41 @@ async fn hosted_tarball_head_returns_metadata_and_no_body() {
         StatusCode::NOT_FOUND
     );
 }
+
+#[tokio::test]
+async fn hosted_npm_advertises_canonical_tarball_urls() {
+    let _guard = DB_LOCK.lock().await;
+    let db = fresh_db().await;
+    let root = tempfile::tempdir().unwrap();
+    let site = npm_site(&db, root.path()).await;
+    let auth = writer(&db).await;
+    let name = "@scope/canonical";
+    let version = "1.2.3-beta.1+Build";
+    let file = format!("canonical-{version}.tgz");
+    let mut body = publication("public", name, version, "beta", BYTES);
+    body["versions"][version]["dist"]["tarball"] = json!(format!(
+        "http://publisher.invalid/repositories/npm-test/public/{name}/-/{file}?publisher=value"
+    ));
+    let response = request(&site, &auth, "public", name, Method::PUT, body).await;
+    assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+    let record = json_get(&site, &auth, "public", &format!("{name}/{version}")).await;
+    assert_eq!(
+        record["dist"]["tarball"],
+        format!("http://registry.test/repositories/npm-test/public/{name}/-/{file}")
+    );
+
+    site.inner.instance.lock().app_url = "https://canonical.test/pkgly/".into();
+    let expected =
+        format!("https://canonical.test/pkgly/repositories/npm-test/public/{name}/-/{file}");
+    let doc = json_get(&site, &auth, "public", name).await;
+    assert_eq!(doc["dist-tags"], json!({"beta": version}));
+    assert_eq!(doc["versions"][version]["dist"]["tarball"], expected);
+    for selector in [version, "beta"] {
+        let record = json_get(&site, &auth, "public", &format!("{name}/{selector}")).await;
+        assert_eq!(record["version"], version);
+        assert_eq!(record["dist"]["tarball"], expected);
+        assert_eq!(record["dist"]["integrity"], "fixture");
+    }
+    assert_eq!(tarball(&site, &auth, "public", name, version).await, BYTES);
+}

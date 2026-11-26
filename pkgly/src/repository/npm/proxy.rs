@@ -922,7 +922,10 @@ fn rewrite_manifest_tarball(manifest: &mut Value, base: &Url) {
     }
 }
 
-fn repository_base_path(full_path: &str, requested_path: &StoragePath) -> Option<String> {
+pub(super) fn repository_base_path(
+    full_path: &str,
+    requested_path: &StoragePath,
+) -> Option<String> {
     let mut suffixes = vec![format!("/{requested_path}")];
     let components: Vec<String> = requested_path
         .clone()

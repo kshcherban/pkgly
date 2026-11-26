@@ -74,6 +74,9 @@ async fn check_retrieval(
         );
         let relative = url.path().strip_prefix("/repositories/npm-test/").unwrap();
         let (target, path) = relative.split_once('/').unwrap();
+        if repo == "virtual" {
+            assert_eq!(target, repo, "the tarball must stay on the virtual route");
+        }
         let response = request(site, auth, target, path, Method::GET, Value::Null).await;
         assert_eq!(
             response.status(),
