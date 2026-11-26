@@ -1,126 +1,75 @@
-# pkgly [![Documentation](https://img.shields.io/static/v1?label=docs.pkgly.dev&message=Here&style=for-the-badge&color=green)](https://docs.pkgly.dev/) [![Powered By Actix](https://img.shields.io/badge/Powered%20By-Actix-red?style=for-the-badge&logo=rust)](https://github.com/actix/actix-web)
+# pkgly
 
-Pkgly is an open source free artifact manager. Written with a Rust back end and a Vue front end.
+[![License: MIT](https://img.shields.io/github/license/kshcherban/pkgly)](LICENSE) [![Release](https://img.shields.io/github/v/release/kshcherban/pkgly)](https://github.com/kshcherban/pkgly/releases) [![Container build](https://github.com/kshcherban/pkgly/actions/workflows/docker-image.yml/badge.svg?branch=main)](https://github.com/kshcherban/pkgly/actions/workflows/docker-image.yml) [![Documentation](https://img.shields.io/badge/docs-pkgly.dev-blue)](https://docs.pkgly.dev/)
 
-### UI Preview
+**Host private packages and cache public registries on your own infrastructure.**
 
-<p align="center">
-  <img src="docs/images/main.png" alt="Pkgly Main View" width="960" />
-</p>
+Pkgly is an MIT-licensed package registry and artifact manager, built with Rust, Axum, PostgreSQL, and Vue. It provides hosted, proxy, and virtual repositories, local or S3 storage, SSO, scoped API tokens, repository permissions, and package search.
 
-More UI screenshots:
-- [Repository view](docs/images/repo-view.png)
-- [Search view](docs/images/search-view.png)
-- [Admin repository management](docs/images/admin-repo-mgmt.png)
-- [Admin repository packages](docs/images/admin-repo-packages.png)
-- [Admin user management](docs/images/admin-user-mgmt.png)
+![Browse repositories, search real integration-test packages, and view setup instructions in Pkgly](docs/images/demo.gif)
 
-### Overview
+[Website](https://pkgly.dev) · [Quickstart](https://docs.pkgly.dev/quickstart) · [Features](https://docs.pkgly.dev/features) · [CLI and MCP](https://docs.pkgly.dev/cli/mcp)
 
-After years of using Artifactory and then switching to Nexus it turned out that there're no good, feature rich open source artifacts repository managers. Please welcome Pkgly with S3 backend and SSO auth support.
+## Quickstart
 
-At the moment it supports virtual, proxied and hosted repositories of:
+Requires Docker Engine, Docker Compose v2, Bash, and curl on Linux or macOS (Docker Desktop works too). No Rust, Node.js, or source build is required.
 
-- debian
-- python
-- php (composer)
-- java maven
-- ruby (gems)
-- docker (oci, v2 and v1)
-- helm (oci and http)
-- go
-- npm
-- nuget (.NET / NuGet V3)
-- rust cargo (hosted only)
-
-### Technical Design
-
-- Backend or the heart of pkgly
-  - SQLX for Postgres
-  - Axum for HTTP Server
-- Frontend
-  - Vue
-  - Vite
-
-### Crates
-- crates/core
-  - Lays out some shared data types between different modules.
-- crates/macros
-  - Macros used by the other crates. To prevent writing so much code
-- crates/storages
-  - This layer provides different ways storing the artifacts that pkgly hosts
-
-### Development
-
-#### Prerequisites
-- Docker and Docker Compose
-- Rust (latest stable)
-- Node.js (for frontend development)
-
-#### Quick Start
-1. Clone the repository
-2. Run `./dev.sh` to build and start the development environment
-3. Access Pkgly at `http://localhost:8000`
-4. Access the API documentation at `http://localhost:8000/api/docs`
-
-#### Tracing & Observability
-
-The development environment includes distributed tracing with Jaeger to help diagnose performance issues:
-
-- **Jaeger UI**: Available at `http://localhost:16686`
-- **Tracing Configuration**: Automatically enabled in development via `docker-compose.dev.yml`
-- **Key Traced Operations**:
-  - HTTP requests (method, route, status code, timing)
-  - Docker Registry V2 operations (blob upload, chunk processing)
-  - Database operations and configuration loading
-  - Authentication and session management
-  - Background tasks and cleanup operations
-
-#### Environment Variables
-The development compose file automatically configures tracing with:
-- `OTEL_EXPORTER_OTLP_ENDPOINT=http://jaeger:4317`
-- `OTEL_SERVICE_NAME=pkgly`
-- `PKGLY_TRACING_ENABLED=true`
-
-#### Logging
-
-Logging is configured via TOML (not `RUST_LOG`). Global levels are set in `[log.levels]` (and `[log.levels.others]`), and each logger may optionally define its own `[...config.levels]`; per-logger levels inherit any missing targets from the global set.
-
-Recommended “Docker-friendly” console config:
-
-```toml
-[log.loggers.console]
-type = "Console"
-
-[log.loggers.console.config]
-format = "compact"
-ansi_color = true
-include_span_context = false
+```bash
+curl -fsSL https://pkgly.dev/install.sh | bash
 ```
 
-Exporting logs to OTLP (optional):
+Open **http://localhost:8000/admin/install**, create your administrator account, then create a storage and repository in the UI. The installer writes files into `./pkgly`, starts Pkgly and PostgreSQL, and waits for the HTTP health check. Data persists in Docker volumes. HTTP is bound to localhost; S3 and an SSO provider are optional.
 
-```toml
-[opentelemetry]
-enabled = true
-traces = true
-logs = true
+To inspect the deployment before starting it:
+
+```bash
+curl -fsSL https://pkgly.dev/install.sh -o install.sh
+bash install.sh --no-start
+cd pkgly
+# Review compose.yaml and config.toml, then:
+docker compose up --detach
 ```
 
-#### Instrumentation Guidelines
+Use `--dir PATH`, `--port PORT`, or `--version v0.1.2` to customize a fresh installation. Re-running the installer preserves existing settings. From a checkout, run `bash install.sh --dir ../pkgly-instance` to keep deployment files outside the source tree.
 
-- For Axum handlers, always `skip(...)` `State(site)`, `Authentication`, and request bodies (passwords/tokens/config JSON).
-- Prefer explicit `fields(...)` with small identifiers (e.g., `repository_id`, `user`), and avoid `?` debug on large structs.
-- Example:
+[Installation, upgrades, and manual Compose / Kubernetes setup](docs/docs/quickstart.md).
 
-```rust
-#[instrument(skip(site, auth, request), fields(repository_id = %repository_id, user = %auth.id))]
-```
+## Package formats
 
-#### Troubleshooting
-- If Docker upload operations are blocking the async runtime, check Jaeger traces for long-running spans
-- Use `docker-compose logs pkgly` to view application logs
-- Restart services with `./dev.sh` after making configuration changes
+| Format | Hosted | Proxy |
+| --- | --- | --- |
+| npm, Maven, Python, Composer, Go, RubyGems | Yes | Yes |
+| Docker / OCI, Debian, NuGet | Yes | Yes |
+| Cargo, Helm | Yes | No |
 
-### Credits
-Originally developed as [nitro-repo](https://github.com/wyatt-herkamp/nitro_repo) fork.
+Virtual repositories aggregate supported repositories behind one URL. Availability varies by format; see the [repository guides](https://docs.pkgly.dev/repositoryTypes/) for client configuration and supported modes.
+
+## Why Pkgly?
+
+Pkgly grew out of running Artifactory and Nexus and wanting a self-hosted registry with S3 and SSO available under an open-source license.
+
+- Store packages on local disk or S3-compatible object storage, with a local disk cache.
+- Use repository permissions, scoped tokens, SSO, and audit logging.
+- Configure package retention and outbound publish/delete webhooks.
+- Automate with `pkglyctl`, or connect an AI assistant through its stdio MCP server.
+
+| Capability | Pkgly | Artifactory | Nexus |
+| --- | --- | --- | --- |
+| License / editions | MIT | Free distributions and commercial editions | Free Community Edition and commercial editions |
+| Hosted, proxy, aggregated repositories | Supported; varies by format | Supported; varies by edition / format | Supported; varies by edition / format |
+| S3 storage and SSO | Included | Check edition availability | Pro and above |
+| Licensed component / request limits | None | Check edition terms | CE: 40,000 components, 100,000 requests/day |
+
+Vendor offerings checked November 2026: [JFrog](https://jfrog.com/pricing/), [Sonatype editions](https://help.sonatype.com/en/nexus-repository-tiers-and-feature-availability.html). This is a comparison of selected capabilities, not a claim of feature parity.
+
+## Project status
+
+Pkgly is an early-stage project. Cargo and Helm are hosted-only; validate the client operations you need before migrating a registry. The [feature matrix](https://docs.pkgly.dev/features) documents current capabilities. Please [report compatibility issues](https://github.com/kshcherban/pkgly/issues) with your client version and reproduction steps.
+
+## Development
+
+See the [development guide](docs/docs/development.md) for `./dev.sh`, tracing, logging, and instrumentation, and [CONTRIBUTING.md](CONTRIBUTING.md) for contribution guidelines.
+
+## Credits and license
+
+Originally developed as a fork of [nitro-repo](https://github.com/wyatt-herkamp/nitro_repo). Released under the [MIT license](LICENSE).

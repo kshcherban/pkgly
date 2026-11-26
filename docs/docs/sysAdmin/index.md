@@ -1,46 +1,29 @@
-# How to setup Pkgly
-## Pre Install Tasks
-1. Install MySQL.
-2. Create a database. For pkgly to use
-## Getting your build
-Please use one of the following options for your build
-1. Latest [Release](https://github.com/kshcherban/pkgly/releases) on Github
-2. Latest [Build](https://github.com/kshcherban/pkgly/actions/workflows/push.yml) on Github
-3. Build yourself. Instructions are [here](https://docs.pkgly.dev/compiling.html).  
-   **Linux build prerequisites:** install `pkg-config` and the OpenSSL development headers (`libssl-dev` on Debian/Ubuntu, `openssl-devel` on Fedora/RHEL) before running `cargo build`.
+# Operating Pkgly
 
-## Setup
-1. Decompress the build inside your install directory. I use `/opt/pkgly`. Using the command `tar -xf pkgly.tar.gz` Note: You might have to decompress the zip for Github Latest Builds
-2. Run `./pkgly --install` Follow the CLI for installation. 
-3. After completing the installation go ahead and run ./pkgly again. To ensure proper setup. Connect to it over the browser. Using your host and port set
-4. Edit other/pkgly.service to use the appropriate location of your installation. Then copy the pkgly.service to the service directory Command: `cp other/pkgly.service /etc/systemd/system/pkgly.service`
-5. Run `systemctl daemon-reload` and `systemctl start pkgly.service`
-### SSL
-After installation you can add SSL
+## Installation
 
-Edit cfg/pkgly.toml. A complete configuration example is available in the
-[example config.toml](https://github.com/kshcherban/pkgly/blob/main/examples/config.toml).
+Start with the [Quickstart](../quickstart.md). Pkgly requires **PostgreSQL**, and the installer provisions it alongside the application using Docker Compose. Create the first administrator through `/admin/install` in the web UI.
 
-Under the application section
+For a manual binary installation, download `pkgly-linux-amd64` or `pkgly-linux-arm64` and `checksums.txt` from [GitHub Releases](https://github.com/kshcherban/pkgly/releases). These are executable files, not archives. Verify the checksum, mark the binary executable, provision PostgreSQL, and use the [example configuration](https://github.com/kshcherban/pkgly/blob/main/examples/config.toml):
 
-Add
-
-```toml
-ssl_private_key=
-ssl_cert_key=
+```bash
+chmod +x pkgly-linux-amd64
+./pkgly-linux-amd64 start --config /absolute/path/to/config.toml
 ```
 
-Make sure to specify values
+The server listens on port `6742` by default; the generated Compose deployment maps it to `127.0.0.1:8000`. The binary does not install PostgreSQL or a systemd unit. For source builds, see [Development](../development.md). Linux builds require `pkg-config` and OpenSSL development headers (`libssl-dev` on Debian/Ubuntu, `openssl-devel` on Fedora/RHEL).
 
-#### For Lets Encrypt 
+## HTTPS
+
+For remote access, place Pkgly behind an HTTPS reverse proxy and set `[site].app_url` to the public URL and `is_https = true`. Keep PostgreSQL private. If you terminate TLS directly in Pkgly, configure:
 
 ```toml
-ssl_private_key='/etc/letsencrypt/live/{domain}/privkey.pem'
-ssl_cert_key='/etc/letsencrypt/live/{domain}/cert.pem'
+[web_server.tls]
+private_key = "/path/to/key.pem"
+certificate_chain = "/path/to/fullchain.pem"
 ```
-### 
 
-Finally Restart Pkgly
+Restart the application after editing its configuration. See [Maintenance](./maintenance.md) for operational tasks.
 
 ## Storage Backends
 
@@ -82,7 +65,7 @@ When `port` is omitted, the transport default is selected from `encryption`: `25
 `NONE` uses plaintext SMTP and should only be used on a trusted network.
 
 ## Enabling SSO Login
-Pkgly can delegate authentication to an upstream SSO provider (Cloudflare Access, Okta, Auth0, etc.) that issues signed JWT/ID tokens. Configure the security section in `cfg/pkgly.toml` to enable the feature:
+Pkgly can delegate authentication to an upstream SSO provider (Cloudflare Access, Okta, Auth0, etc.) that issues signed JWT/ID tokens. Configure the security section in `config.toml` to enable the feature:
 
 ```toml
 [security.sso]

@@ -58,6 +58,7 @@ function generalInfo() {
         { text: "Quickstart", link: "/quickstart" },
         { text: "Features", link: "/features" },
         { text: "Command Line Interface", link: "/cli/" },
+        { text: "Development", link: "/development" },
         { text: "Contributing", link: "/contributing" },
         { text: "CI Build Caching", link: "/ci" },
         { text: "Single Sign-On", link: "/sso/" },
@@ -83,7 +84,7 @@ function administrationBar() {
     {
       text: "Operating",
       items: [
-        { text: "Prepping your System", link: "/sysAdmin/" },
+        { text: "Installation and Configuration", link: "/sysAdmin/" },
         { text: "Quickstart", link: "/quickstart" },
         { text: "User Administration", link: "/sysAdmin/users" },
         { text: "Maintenance", link: "/sysAdmin/maintenance" },

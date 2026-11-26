@@ -2950,7 +2950,7 @@ dependencies = [
 
 [[package]]
 name = "nr-api"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bytes",
  "chrono",
@@ -2965,7 +2965,7 @@ dependencies = [
 
 [[package]]
 name = "nr-core"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -2997,7 +2997,7 @@ dependencies = [
 
 [[package]]
 name = "nr-macros"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3006,7 +3006,7 @@ dependencies = [
 
 [[package]]
 name = "nr-storage"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3526,7 +3526,7 @@ checksum = "7edddbd0b52d732b21ad9a5fab5c704c14cd949e5e9a1ec5929a24fded1b904c"
 
 [[package]]
 name = "pkgly"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "ahash",
  "anyhow",
@@ -3632,7 +3632,7 @@ dependencies = [
 
 [[package]]
 name = "pkgly-cli"
-version = "0.1.0"
+version = "0.1.2"
 dependencies = [
  "bytes",
  "clap",

@@ -1,13 +1,53 @@
 # Quickstart
 
-This page covers the two fastest ways to get Pkgly running from this repository:
-
-- `docker compose` for a local single-node setup
-- the bundled Helm chart for Kubernetes
+This page covers the recommended installer, manual Docker Compose setup, and the bundled Helm chart for Kubernetes.
 
 Both flows start Pkgly with PostgreSQL and then send you to the web installer to create the first admin user.
 
-## Option 1: Docker Compose
+## Installer (recommended)
+
+Requires Bash, curl, Docker Engine, and Docker Compose v2 on Linux or macOS. Docker Desktop is supported. Run from the directory where you want to keep the installation:
+
+```bash
+curl -fsSL https://pkgly.dev/install.sh | bash
+```
+
+The installer writes `compose.yaml`, `config.toml`, and `.env` into `./pkgly`, generates a random database password, starts the release image from GHCR with PostgreSQL 17, and waits for `/health`. It does not require a source checkout, Rust, Node.js, S3, or sudo. The default image tag is `v0.1.2`; Linux amd64 and arm64 images are available.
+
+Open `http://localhost:8000/admin/install` and create the first administrator. Sign in, create a **Local** storage using `/data/storages`, and create a repository for your package format. Follow its setup instructions to publish or download your first package. The installer never creates a default administrator or seeds test data.
+
+### Inspect or customize
+
+```bash
+curl -fsSL https://pkgly.dev/install.sh -o install.sh
+bash install.sh --dir ./my-registry --port 8080 --version v0.1.2 --no-start
+cd my-registry
+# Review compose.yaml and config.toml before starting:
+docker compose up --detach
+```
+
+From a source checkout, `bash install.sh --dir ../pkgly-instance` runs the same installer outside the source tree. Re-running it preserves all existing configuration, including the saved image tag and port. An incomplete installation or a nonempty unrelated directory causes an error rather than overwriting operator files. Use `--help` for options.
+
+### Manage the installation
+
+Run these commands from the installation directory:
+
+```bash
+cd pkgly
+docker compose ps
+docker compose logs -f pkgly
+docker compose stop
+docker compose up --detach
+```
+
+Package files and sessions persist in `pkgly_data`; PostgreSQL records persist in `postgres_data`. `docker compose down` preserves these volumes. **`docker compose down --volumes` deletes the installation's data.** Keep the generated `.env`, which identifies the Compose project and its volumes.
+
+For an upgrade, back up the database and artifact storage, choose a [release](https://github.com/kshcherban/pkgly/releases), change the Pkgly image tag in `compose.yaml`, then run `docker compose pull && docker compose up --detach`. Re-running the installer does not perform upgrades. See [Maintenance](./sysAdmin/maintenance.md).
+
+The HTTP port binds to `127.0.0.1`; PostgreSQL has no published port. For remote access, configure an HTTPS reverse proxy and the canonical URL as described in [Administration](./sysAdmin/index.md). If startup fails, inspect `docker compose logs` in the installation directory; files and data remain available for diagnosis and retry.
+
+## Option 1: Manual Docker Compose
+
 
 Use this when you want the quickest local setup on one machine.
 

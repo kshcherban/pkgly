@@ -4,6 +4,10 @@
 
 For AI clients, [`pkglyctl mcp serve`](./mcp) exposes these actions through the Model Context Protocol over stdio, using the configured token and its repository scopes.
 
+## Install
+
+Download the binary matching your platform from [GitHub Releases](https://github.com/kshcherban/pkgly/releases). See [MCP installation](./mcp.md#install-and-connect) for automatic platform detection and installation commands.
+
 ## Build
 
 From the repository root:
