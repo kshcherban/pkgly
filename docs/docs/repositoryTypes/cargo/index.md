@@ -11,7 +11,7 @@ metadata so that they surface consistently in the packages tab.
 - **Authentication**: All write operations require Pkgly permissions (`Write` action). Reads
   respect repository visibility and the optional repository auth toggle.
 - **Index**: Sparse index files are stored under `index/<prefix>/<crate>` following the path
-  segmentation rules described in the Cargo book.citeturn1view0
+  segmentation rules described in the Cargo book.
 
 ## Client Set-up
 

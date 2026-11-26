@@ -2,21 +2,36 @@
 
 `pkglyctl mcp serve` exposes all 38 CLI actions as individual Model Context Protocol tools over stdio. Your MCP client starts the process, discovers its tools, and invokes them using typed JSON arguments.
 
-## Build and connect
+## Install and connect
 
-Build the CLI from the repository root:
+The simplest installation is the prebuilt **pkglyctl** binary from [GitHub Releases](https://github.com/kshcherban/pkgly/releases). No Rust toolchain or server installation is needed on the MCP client machine.
+
+| Platform | Release asset |
+| --- | --- |
+| Linux x86-64 | `pkglyctl-linux-amd64` |
+| Linux ARM64 | `pkglyctl-linux-arm64` |
+| macOS Apple Silicon | `pkglyctl-macos-arm64` |
+
+Download the latest release for your OS and architecture:
 
 ```bash
-cargo build -p pkgly-cli
+os=linux
+[ "$(uname -s)" = Darwin ] && os=macos
+arch=$(uname -m | sed 's/x86_64/amd64/;s/aarch64/arm64/')
+mkdir -p "$HOME/.local/bin"
+curl -fL "https://github.com/kshcherban/pkgly/releases/latest/download/pkglyctl-$os-$arch" \
+  -o "$HOME/.local/bin/pkglyctl" && chmod +x "$HOME/.local/bin/pkglyctl"
 ```
 
-Configure a client that supports stdio MCP servers, using an absolute binary path:
+Release assets are executable binaries, not archives. Windows and Intel macOS binaries are not currently published; use a supported platform or [build from source](./index.md#build).
+
+Configure a client that supports stdio MCP servers, using the absolute path to the installed binary. Replace the example path below with your own (`/home/yourname/.local/bin/pkglyctl` on Linux); do not use `~` or `$HOME` in the JSON command:
 
 ```json
 {
   "mcpServers": {
     "pkgly": {
-      "command": "/absolute/path/to/pkgly/target/debug/pkglyctl",
+      "command": "/Users/yourname/.local/bin/pkglyctl",
       "args": ["mcp", "serve"],
       "env": {
         "PKGLY_URL": "https://packages.example.com",

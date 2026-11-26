@@ -83,7 +83,7 @@ function administrationBar() {
     {
       text: "Operating",
       items: [
-        { text: "Prepping your System", link: "/sysAdmin/" },
+        { text: "Installation and Configuration", link: "/sysAdmin/" },
         { text: "Quickstart", link: "/quickstart" },
         { text: "User Administration", link: "/sysAdmin/users" },
         { text: "Maintenance", link: "/sysAdmin/maintenance" },
