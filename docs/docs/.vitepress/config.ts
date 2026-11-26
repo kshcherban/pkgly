@@ -58,6 +58,7 @@ function generalInfo() {
         { text: "Quickstart", link: "/quickstart" },
         { text: "Features", link: "/features" },
         { text: "Command Line Interface", link: "/cli/" },
+        { text: "Development", link: "/development" },
         { text: "Contributing", link: "/contributing" },
         { text: "CI Build Caching", link: "/ci" },
         { text: "Single Sign-On", link: "/sso/" },
