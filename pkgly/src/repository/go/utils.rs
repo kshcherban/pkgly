@@ -43,7 +43,7 @@ impl GoModuleRequest {
 
         // Handle special endpoints
         if let Some(module_part) = path.strip_suffix("/@latest") {
-            let module_path = GoModulePath::new(module_part)?;
+            let module_path = GoModulePath::new(decode_case_encoding(module_part)?)?;
             return Ok(GoModuleRequest {
                 module_path,
                 version: None,
@@ -53,7 +53,7 @@ impl GoModuleRequest {
         }
 
         if let Some(module_part) = path.strip_suffix("/@v/list") {
-            let module_path = GoModulePath::new(module_part)?;
+            let module_path = GoModulePath::new(decode_case_encoding(module_part)?)?;
             return Ok(GoModuleRequest {
                 module_path,
                 version: None,
@@ -63,7 +63,7 @@ impl GoModuleRequest {
         }
 
         if let Some((module_part, file_part)) = path.split_once("/@v/") {
-            let module_path = GoModulePath::new(module_part)?;
+            let module_path = GoModulePath::new(decode_case_encoding(module_part)?)?;
 
             if let Some(version_str) = file_part.strip_suffix(".info") {
                 let version = GoVersion::new(version_str)?;
@@ -98,7 +98,7 @@ impl GoModuleRequest {
 
         // Handle deprecated go.mod without version
         if let Some(module_part) = path.strip_suffix("/go.mod") {
-            let module_path = GoModulePath::new(module_part)?;
+            let module_path = GoModulePath::new(decode_case_encoding(module_part)?)?;
             return Ok(GoModuleRequest {
                 module_path,
                 version: None,
@@ -299,4 +299,95 @@ pub fn generate_go_module_info(
 /// Generate a basic go.mod file content
 pub fn generate_go_mod(module_path: &str) -> String {
     format!("module {}\n\ngo 1.21\n", module_path)
+}
+
+/// Decode the GOPROXY case encoding: the protocol sends every uppercase letter
+/// of a module path as `!` followed by its lowercase form
+/// (https://go.dev/ref/mod#goproxy-protocol). Storage keys use the decoded
+/// canonical path, matching what uploads declare in `module_name`.
+fn decode_case_encoding(encoded: &str) -> Result<String, GoModuleError> {
+    if !encoded.contains('!') {
+        return Ok(encoded.to_string());
+    }
+    let mut decoded = String::with_capacity(encoded.len());
+    let mut chars = encoded.chars();
+    while let Some(c) = chars.next() {
+        if c != '!' {
+            decoded.push(c);
+            continue;
+        }
+        let lower = chars
+            .next()
+            .filter(char::is_ascii_lowercase)
+            .ok_or_else(|| GoModuleError::InvalidModulePath(encoded.to_string()))?;
+        decoded.push(lower.to_ascii_uppercase());
+    }
+    Ok(decoded)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn decodes_goproxy_case_encoding() {
+        let req = GoModuleRequest::from_path(
+            "github.com/!jacubeit!u!g/infra/packages/go-heimdall/@v/v0.0.0-20261126041326-35f5a7ef321f.zip",
+        )
+        .expect("zip request");
+        assert_eq!(
+            req.module_path.as_str(),
+            "github.com/JacubeitUG/infra/packages/go-heimdall"
+        );
+        assert_eq!(req.request_type, GoRequestType::ModuleZip);
+        assert_eq!(
+            req.version.expect("version").as_str(),
+            "v0.0.0-20261126041326-35f5a7ef321f"
+        );
+    }
+
+    #[test]
+    fn decodes_case_encoding_for_every_endpoint() {
+        for (path, kind) in [
+            (
+                "github.com/!acme/!widget/@v/v1.2.3.info",
+                GoRequestType::VersionInfo,
+            ),
+            (
+                "github.com/!acme/!widget/@v/v1.2.3.mod",
+                GoRequestType::GoMod,
+            ),
+            (
+                "github.com/!acme/!widget/@v/list",
+                GoRequestType::ListVersions,
+            ),
+            ("github.com/!acme/!widget/@latest", GoRequestType::Latest),
+            (
+                "github.com/!acme/!widget/go.mod",
+                GoRequestType::GoModWithoutVersion,
+            ),
+        ] {
+            let req = GoModuleRequest::from_path(path).expect(path);
+            assert_eq!(req.module_path.as_str(), "github.com/Acme/Widget");
+            assert_eq!(req.request_type, kind);
+        }
+    }
+
+    #[test]
+    fn lowercase_paths_are_unchanged() {
+        let req =
+            GoModuleRequest::from_path("github.com/example/module/@v/v1.0.0.zip").expect("zip");
+        assert_eq!(req.module_path.as_str(), "github.com/example/module");
+    }
+
+    #[test]
+    fn rejects_malformed_case_encoding() {
+        for path in [
+            "github.com/!acme/!widget!/@v/v1.0.0.zip",
+            "github.com/!acme/!!widget/@v/v1.0.0.zip",
+            "github.com/!acme/!Widget/@v/v1.0.0.zip",
+        ] {
+            assert!(GoModuleRequest::from_path(path).is_err(), "{path}");
+        }
+    }
 }
